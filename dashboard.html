@@ -615,8 +615,167 @@ function toggleBalances() {
   }
 }
 
-// Initial render
-render();
+// Load real scraper data if available
+async function initializeDashboard() {
+  try {
+    // Try to load real scraper results
+    const response = await fetch('./results.json');
+    if (response.ok) {
+      const scraperData = await response.json();
+      console.log('Loading real scraper data:', scraperData);
+      
+      // Convert and merge real data with estimates
+      const realFlights = convertScraperDataToDashboard(scraperData);
+      
+      // Add real data to the beginning of each category (higher priority)
+      if (realFlights) {
+        flights.economy.award = realFlights.economy.award.concat(flights.economy.award);
+        flights.business.award = realFlights.business.award.concat(flights.business.award);
+      }
+      
+      // Update UI to show data sources
+      updateDataSourceIndicator(scraperData);
+    } else {
+      console.log('No scraper results found, using estimated data');
+      updateDataSourceIndicator(null);
+    }
+  } catch (error) {
+    console.log('Error loading scraper data:', error);
+    updateDataSourceIndicator(null);
+  }
+  
+  // Initial render
+  render();
+}
+
+function convertScraperDataToDashboard(scraperData) {
+  const dashboardData = {
+    economy: { cash: [], award: [] },
+    business: { cash: [], award: [] }
+  };
+  
+  // Process each scraper result
+  scraperData.scraperResults.forEach(result => {
+    if (result.status === 'success' && result.flights.length > 0) {
+      result.flights.forEach(flight => {
+        // Convert each flight to dashboard format
+        flight.fares.forEach(fare => {
+          const dashboardFlight = {
+            program: result.scraper.charAt(0).toUpperCase() + result.scraper.slice(1),
+            airline: getAirlineFromFlightNo(flight.flightNo),
+            miles: `${Math.round(fare.miles / 1000)}K`,
+            taxes: fare.cash || 0,
+            flyOn: `${getAirlineFromFlightNo(flight.flightNo)} ${getRouteDescription(flight)}`,
+            cpp: calculateCpp(fare.miles, fare.cash, getEstimatedCashPrice(flight)),
+            status: 'green', // Real scraped data is always available
+            statusText: `🔴 REAL: scraped from ${result.scraper}.com`,
+            type: 'award',
+            durationMin: flight.duration || 0,
+            source: 'scraped', // Mark as real scraped data
+            scraper: result.scraper,
+            legs: [{
+              dir: 'OUT',
+              from: flight.origin,
+              to: flight.destination,
+              via: null, // TODO: Parse connections
+              flights: flight.flightNo,
+              depart: formatTime(flight.departureDateTime),
+              arrive: formatTime(flight.arrivalDateTime),  
+              duration: formatDuration(flight.duration),
+              cost: `${Math.round(fare.miles / 1000)}K ${result.scraper === 'united' ? 'miles' : 'points'} + $${fare.cash}`
+            }]
+          };
+          
+          // Add to appropriate cabin category
+          const cabin = fare.cabin === 'business' || fare.cabin === 'first' ? 'business' : 'economy';
+          dashboardData[cabin].award.push(dashboardFlight);
+        });
+      });
+    }
+  });
+  
+  return dashboardData;
+}
+
+function getAirlineFromFlightNo(flightNo) {
+  const code = flightNo.split(' ')[0];
+  const airlines = {
+    'UA': 'United',
+    'AS': 'Alaska', 
+    'AC': 'Air Canada',
+    'AF': 'Air France',
+    'BA': 'British Airways',
+    'QR': 'Qatar',
+    'EK': 'Emirates'
+  };
+  return airlines[code] || code;
+}
+
+function getRouteDescription(flight) {
+  // TODO: Parse connections for "via XXX" format
+  return flight.origin === flight.destination ? 'Nonstop' : `${flight.origin} → ${flight.destination}`;
+}
+
+function calculateCpp(miles, taxes, estimatedCash) {
+  if (!estimatedCash || miles === 0) return 0;
+  return ((estimatedCash - taxes) / (miles / 100)).toFixed(1);
+}
+
+function getEstimatedCashPrice(flight) {
+  // Rough estimates for CPP calculation
+  const estimates = {
+    'economy': 800,   // Estimated LAX-DXB economy RT
+    'business': 3500, // Estimated LAX-DXB business RT
+    'first': 8000     // Estimated LAX-DXB first RT
+  };
+  return estimates['economy']; // Default to economy for now
+}
+
+function formatTime(datetime) {
+  if (!datetime) return '';
+  const date = new Date(datetime);
+  return date.toLocaleDateString('en-US', { 
+    month: 'short', 
+    day: 'numeric', 
+    hour: 'numeric', 
+    minute: '2-digit',
+    hour12: true 
+  });
+}
+
+function formatDuration(minutes) {
+  if (!minutes) return '';
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return `${hours}h ${mins}m`;
+}
+
+function updateDataSourceIndicator(scraperData) {
+  // Add data source indicator to the header
+  const header = document.querySelector('h1');
+  if (scraperData && scraperData.scraperResults.some(r => r.flights.length > 0)) {
+    const workingScrapers = scraperData.scraperResults.filter(r => r.flights.length > 0);
+    const scraperNames = workingScrapers.map(r => r.scraper).join(', ');
+    header.innerHTML += `<div class="text-sm font-normal text-emerald mt-2">🔴 LIVE DATA from ${scraperNames}</div>`;
+  } else {
+    header.innerHTML += `<div class="text-sm font-normal text-yellow-400 mt-2">⚠️ Using estimated data (no live scrapers)</div>`;
+  }
+}
+
+// Update status text for estimated data to show source
+flights.economy.award.forEach(f => {
+  if (!f.source) {
+    f.statusText = f.statusText + ' (estimated)';
+  }
+});
+flights.business.award.forEach(f => {
+  if (!f.source) {
+    f.statusText = f.statusText + ' (estimated)';
+  }
+});
+
+// Initialize dashboard with real data loading
+initializeDashboard();
 </script>
 </body>
 </html>

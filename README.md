@@ -2,6 +2,8 @@
 
 > Find the cheapest flights using 8 parallel search strategies — including award flights with miles/points, hidden city ticketing, and geo-pricing arbitrage.
 
+**🆕 Now integrated with AwardWiz 2.0** — Advanced anti-detection airline scrapers with Arkalis engine for real-time award flight search.
+
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![OpenClaw Skill](https://img.shields.io/badge/OpenClaw-Skill-purple.svg)](https://openclaw.ai)
@@ -56,6 +58,49 @@ export SERP_API_KEY="your_serpapi_key_here"   # Enables real-time Google Flights
 ```
 
 Without `SERP_API_KEY`, the scripts gracefully degrade to estimated pricing modes.
+
+## AwardWiz 2.0 Integration
+
+This project now includes **AwardWiz 2.0**, an advanced airline scraper system with anti-detection capabilities for real-time award flight searches.
+
+### AwardWiz CLI Usage
+
+```bash
+# Search award flights with AwardWiz scrapers
+npx tsx cli.ts search -f LAX -t DXB -d 2026-04-28
+
+# Search specific airline programs
+npx tsx cli.ts search -f JFK -t LHR -d 2026-06-15 -p united,britishairways
+
+# Include balance information with transfer calculations
+npx tsx cli.ts search -f SFO -t NRT -d 2026-08-20 --balances
+
+# List available scrapers
+npx tsx cli.ts list
+```
+
+### AwardWiz Features
+
+- **🤖 Arkalis Anti-Detection Engine**: Advanced browser automation that evades bot detection
+- **⚡ Parallel Scraping**: Search multiple airlines simultaneously  
+- **💳 AwardWallet Integration**: Automatic balance fetching and transfer calculations
+- **🔄 Transfer Partner Logic**: Calculate accessible miles through credit card transfers
+- **🛡️ Error Resilient**: Robust retry logic and graceful failure handling
+
+### Available Airline Scrapers
+
+**✅ Working**: United Airlines (MileagePlus)  
+**🔴 Needs Fix**: Alaska Airlines, Air Canada Aeroplan  
+**🚧 Research Needed**: Air France, British Airways, Qatar Airways, Emirates  
+
+See `SCRAPER_RESEARCH_NEEDED.md` for detailed implementation tasks.
+
+### Dashboard Integration
+
+The HTML dashboard now loads real scraper results when available:
+- Real data marked with 🔴 REAL indicators
+- Estimated data clearly labeled as "estimated"
+- Data source shown per result
 
 ---
 
