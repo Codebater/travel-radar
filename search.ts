@@ -188,12 +188,51 @@ async function searchRoameSource(config: SearchConfig): Promise<{ flights: Unifi
   return { flights: allFlights, completion: totalCompletion / classes.length }
 }
 
+// ─── SerpAPI Usage Limiter ─────────────────────────────────────────────────
+const USAGE_FILE = path.join(ROOT, "serpapi-usage.json")
+const MONTHLY_LIMIT = 95  // hard cap (5 buffer under 100 free tier)
+const WARN_AT = 80
+
+function checkSerpApiUsage(): { allowed: boolean; used: number } {
+  let usage = { month: "", searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: "" }
+  try { usage = JSON.parse(fs.readFileSync(USAGE_FILE, "utf-8")) } catch {}
+  
+  const currentMonth = new Date().toISOString().slice(0, 7)
+  if (usage.month !== currentMonth) {
+    usage = { month: currentMonth, searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: new Date().toISOString().slice(0, 10) }
+    fs.writeFileSync(USAGE_FILE, JSON.stringify(usage, null, 2))
+  }
+  
+  if (usage.searches >= MONTHLY_LIMIT) {
+    console.warn(`🛑 SerpAPI monthly limit reached (${usage.searches}/${MONTHLY_LIMIT}). Skipping to stay on free tier.`)
+    return { allowed: false, used: usage.searches }
+  }
+  if (usage.searches >= WARN_AT) {
+    console.warn(`⚠️ SerpAPI usage warning: ${usage.searches}/${MONTHLY_LIMIT} searches used this month`)
+  }
+  return { allowed: true, used: usage.searches }
+}
+
+function incrementSerpApiUsage(): void {
+  let usage = { month: "", searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: "" }
+  try { usage = JSON.parse(fs.readFileSync(USAGE_FILE, "utf-8")) } catch {}
+  const currentMonth = new Date().toISOString().slice(0, 7)
+  if (usage.month !== currentMonth) {
+    usage = { month: currentMonth, searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: new Date().toISOString().slice(0, 10) }
+  }
+  usage.searches++
+  fs.writeFileSync(USAGE_FILE, JSON.stringify(usage, null, 2))
+}
+
 async function searchSerpApiGoogle(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
   const apiKey = process.env.SERP_API_KEY
   if (!apiKey) {
     console.warn("⚠️ SERP_API_KEY not set — get one at https://serpapi.com/manage-api-key (100 free/mo)")
     return { flights: [], completion: 0 }
   }
+
+  const { allowed, used } = checkSerpApiUsage()
+  if (!allowed) return { flights: [], completion: 0 }
 
   const cabinMap: Record<string, number> = { ECON: 1, PREM: 2, both: 1 }
   const cabinNames: Record<number, string> = { 1: "economy", 2: "business" }
@@ -215,6 +254,7 @@ async function searchSerpApiGoogle(config: SearchConfig): Promise<{ flights: Uni
       })
       if (config.returnDate) params.set("return_date", config.returnDate)
 
+      incrementSerpApiUsage()
       const resp = await fetch(`https://serpapi.com/search?${params}`)
       if (!resp.ok) {
         const body = await resp.text()
