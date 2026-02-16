@@ -329,25 +329,30 @@ async function searchHiddenCity(config: SearchConfig): Promise<{ flights: Unifie
   }
 
   try {
-    const cmd = `python3 "${scriptPath}" ${config.origin} ${config.destination} ${config.departureDate} --max-searches 5 --min-savings 30`
+    // Use max-beyond 5 to conserve SerpAPI budget (1 direct + 5 beyond = 6 calls max)
+    const cmd = `python3 "${scriptPath}" ${config.origin} ${config.destination} ${config.departureDate} --max-beyond 5 --min-savings 30`
     const output = execSync(cmd, {
-      timeout: 60000,
+      timeout: 120000,
       env: { ...process.env },
       encoding: "utf-8",
     })
 
-    const results = JSON.parse(output.trim()) as any[]
+    // Parse only the last line (JSON output) — stderr goes to console
+    const lines = output.trim().split("\n")
+    const jsonLine = lines[lines.length - 1]!
+    const results = JSON.parse(jsonLine) as any[]
+    
     const flights: UnifiedFlightResult[] = results.map((r, i) => ({
       id: `hidden-city-${i}`,
-      source: "estimate" as const,
+      source: "hidden-city" as const,
       type: "cash" as const,
       origin: r.origin,
       destination: r.real_destination,
       airline: r.airline || "Various",
-      operatingAirlines: [r.airline || "Various"],
-      flightNumbers: [r.flight_number || ""],
-      stops: 1,
-      durationMinutes: 0,
+      operatingAirlines: (r.airline || "Various").split(" / "),
+      flightNumbers: r.flight_numbers || [],
+      stops: r.stops || 1,
+      durationMinutes: r.total_duration_min || 0,
       departureTime: r.departure_time || "",
       arrivalTime: r.arrival_at_layover || "",
       airports: [r.origin, r.real_destination, r.ticketed_destination],
@@ -362,10 +367,10 @@ async function searchHiddenCity(config: SearchConfig): Promise<{ flights: Unifie
       roameScore: null,
       availableSeats: null,
       bookingUrl: r.booking_url || `https://www.google.com/travel/flights`,
-      fareClass: `hidden-city:${r.ticketed_destination}|saves:$${Math.round(r.savings)}|risk:${r.risk_score}|conf:${r.confidence}`,
+      fareClass: `hidden-city:${r.ticketed_destination}|saves:$${Math.round(r.savings)}(${r.savings_percent}%)|risk:${r.risk_score}|direct:$${r.direct_price}`,
     }))
 
-    return { flights, completion: 100 }
+    return { flights, completion: results.length > 0 ? 100 : 0 }
   } catch (err) {
     console.warn("⚠️ Hidden city search failed:", (err as Error).message?.slice(0, 200))
     return { flights: [], completion: 0 }

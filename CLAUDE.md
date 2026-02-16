@@ -14,7 +14,7 @@ search.ts (Orchestrator)
 └── results.json → dashboard.html
 ```
 
-## What's Working (as of Feb 15, 2026)
+## What's Working (as of Feb 16, 2026)
 
 ### ✅ Roame Scraper (`roame-scraper.ts`)
 - GraphQL API at `roame.travel/api/graphql`
@@ -67,34 +67,38 @@ search.ts (Orchestrator)
 - ~40 seconds for all gateways
 
 ### ✅ Hidden City Engine (`scripts/search-hidden-city.py`)
-- Searches for hidden city ticketing opportunities
-- Hub connections database with 20+ hubs
+- **Real SerpAPI data** — no mock/estimated prices, all Google Flights live data
+- Algorithm: get direct price (1 SerpAPI call), search beyond-hub cities (N calls), check layovers
+- Hub connections database with 30 hubs (domestic + international)
 - Risk scoring (airline enforcement, airport size, route factors)
-- 3-tier data: SerpAPI → scraping → distance estimates
-- Integrated into orchestrator as a source
+- SerpAPI budget tracking: reads/writes `serpapi-usage.json`, hard cap at 95/month
+- Integrated into search.ts orchestrator as `hidden-city` source
+- Output: `confidence: "high"`, `data_source: "serpapi"` for all results
+- Tested: LAX→DEN, JFK→ORD with real data (20 API calls used as of Feb 16)
 
 ## Needs Work
 
-### 🔧 Google Flights (SerpAPI)
+### ✅ Google Flights (SerpAPI)
 - Code is complete and integrated in search.ts
 - Improved parser handles multi-leg itineraries, business class, booking tokens
-- **Needs SERP_API_KEY** — get one at https://serpapi.com/manage-api-key (100 free/mo)
-- Set in `.env` file or environment variable
+- SERP_API_KEY configured in `.env` — 100 free/mo, budget tracked in `serpapi-usage.json`
 - Hidden city engine also uses it for real price data
+- **Tested**: 28 economy fares for LAX→JFK in single API call
 
 ### 🔴 Individual Airline Scrapers (via Arkalis)
 These use Arkalis (headless Chrome CDP engine) and need the APIs to be reverse-engineered.
 Roame replaces them for award search. They're only needed for cash prices and fare class detail.
 
-- **United** (`united.ts`): Rewritten with evaluate(fetch()) pattern. Auth flow changed — they now require an anonymous token via `/api/svc/token/anonymous`. The page no longer auto-triggers search from URL params. Needs browser DevTools research to discover current auth flow.
-- **Alaska** (`alaska.ts`): Migrated to SvelteKit frontend. Old `/searchbff/V3/search` returns HTML. New API appears to be at `apis.alaskaair.com` but exact endpoint unknown. Needs browser DevTools research.
-- **Delta** (`delta.ts`): Uses form-fill + anti-bot detection. Commented out pre-fill interceptor. Heavy anti-scraping measures. Needs significant rework.
-- **Aeroplan** (`aeroplan.ts`): CDP capture issue. Old endpoint at `aircanada.com/loyalty/dapidynamic/*/v2/search/air-bounds`. Could apply evaluate(fetch()) fix but endpoint may have changed.
+- **United** (`united.ts`): BROKEN. Auth flow changed — `/api/auth/anonymous-token` returns a hash that `FetchFlights` rejects with 403 "AuthenticationSkipped". Research (Feb 16): GitHub wiki shows token is a long base64 string from cookie-based auth, not the anonymous endpoint. United blocks all non-browser requests. The correct token endpoint may be `/api/svc/token/anonymous` or require login. Needs real browser DevTools to capture current auth flow.
+- **Alaska** (`alaska.ts`): BROKEN. Old `/searchbff/V3/search` returns HTML (SvelteKit app shell). Research (Feb 16): Alaska migrated to SvelteKit (search page) + Next.js (shopping page). `apis.alaskaair.com` exists but returns 404 for all guessed paths. The search is fully client-rendered. SvelteKit `__data.json` endpoint returns layout data but not search results. Needs browser Network tab to discover actual API calls.
+- **Delta** (`delta.ts`): BROKEN. Uses form-fill + anti-bot detection. Gets blocked after 3rd attempt. Never had evaluate(fetch()) pattern applied.
+- **Aeroplan** (`aeroplan.ts`): BROKEN. CDP capture issue. Old endpoint likely changed.
 - **Air France, BA, Qatar, Emirates**: Skeleton files only, no real API research done
 
 **Why these are hard**: Each airline's internal API requires browser DevTools (Network tab) to discover
-the actual endpoints, request format, and auth requirements. This cannot be done via web scraping or 
-web search — it requires interactive browser inspection of the live site during a search.
+the actual endpoints, request format, and auth requirements. Without Playwright/browser automation 
+available in the agent environment, this requires manual browser inspection.
+**Workaround**: Roame covers all these airlines' award programs in a single API call.
 
 ## Key Technical Decisions
 
