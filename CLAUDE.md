@@ -7,13 +7,14 @@ Project memory and context for the flight-search skill.
 ```
 search.ts (Orchestrator)
 ├── roame-scraper.ts → Roame GraphQL API (award flights, ALL programs)
-├── SerpAPI → Google Flights (cash prices)
+├── SerpAPI → Google Flights (cash prices, needs SERP_API_KEY)
+├── hidden city engine → Python script (savings opportunities)
 ├── awardwiz-scrapers/scrapers/aa.ts → AA direct (detailed data, backup)
 ├── AwardWallet API → Points balances
 └── results.json → dashboard.html
 ```
 
-## What's Working (as of Feb 2026)
+## What's Working (as of Feb 15, 2026)
 
 ### ✅ Roame Scraper (`roame-scraper.ts`)
 - GraphQL API at `roame.travel/api/graphql`
@@ -23,13 +24,16 @@ search.ts (Orchestrator)
 - Session expires Feb 23, 2026
 - Programs found: United, Alaska, American, Qantas, Flying Blue, JetBlue, Virgin Australia
 - Returns: points, taxes, cabin class, seat availability, Roame score, flight numbers, equipment
+- **Tested**: 87-103 flights in ~28-60s depending on economy/both
 
 ### ✅ Search Orchestrator (`search.ts`)
-- Runs Roame + Google Flights (SerpAPI) in parallel
-- Loads real balances from AwardWallet API
+- Loads .env file for credentials
+- Runs Roame + Google Flights + Hidden City in parallel
+- Loads real balances from AwardWallet API (34 programs, live)
 - Generates recommendations (best value, best product, cheapest cash)
 - Generates warnings (UR→Emirates dead, VA doesn't book EK, low Alaska balance)
 - Outputs unified `results.json` for dashboard
+- Sources: `roame`, `google`, `hidden-city` (configurable via --sources)
 
 ### ✅ Dashboard (`dashboard.html`)
 - Dynamic: loads from results.json, accepts any route
@@ -44,6 +48,7 @@ search.ts (Orchestrator)
 ### ✅ AA Direct Scraper (via Arkalis)
 - `evaluate(fetch())` pattern bypasses CORS
 - Returns detailed fare class data, saver fare detection
+- 37 real flights in 3 seconds
 - Used by gateway scanner
 
 ### ✅ AwardWallet Integration
@@ -53,25 +58,43 @@ search.ts (Orchestrator)
 
 ### ✅ HTTP Server (`serve.ts`)
 - Serves dashboard at port 8888
-- `/api/search` endpoint triggers live search
+- `/api/search` endpoint triggers live search with configurable sources
 - Static file serving for results.json
 
-## Broken / Not Implemented
+### ✅ Gateway Scanner (`gateway-scanner.ts`)
+- Scans 15 US airports through AA scraper
+- Finds positioning flight + cheaper business class combos
+- ~40 seconds for all gateways
 
-### 🔴 Individual Airline Scrapers (via Arkalis)
-- **United**: Auth flow changed, 403 on API calls
-- **Alaska**: BFF endpoint returns HTML not JSON
-- **Delta**: Needs full rebuild
-- **Aeroplan**: Timeout, endpoint changed
-- **Air France, BA, Qatar, Emirates**: Skeleton only
+### ✅ Hidden City Engine (`scripts/search-hidden-city.py`)
+- Searches for hidden city ticketing opportunities
+- Hub connections database with 20+ hubs
+- Risk scoring (airline enforcement, airport size, route factors)
+- 3-tier data: SerpAPI → scraping → distance estimates
+- Integrated into orchestrator as a source
 
-**NOTE**: Roame effectively replaces all individual airline scrapers for award search.
-Individual scrapers are only needed for: (1) cash prices, (2) detailed fare class data,
-(3) backup if Roame is down.
+## Needs Work
 
 ### 🔧 Google Flights (SerpAPI)
-- Implemented in search.ts but needs SERP_API_KEY env var
-- 100 free searches/month
+- Code is complete and integrated in search.ts
+- Improved parser handles multi-leg itineraries, business class, booking tokens
+- **Needs SERP_API_KEY** — get one at https://serpapi.com/manage-api-key (100 free/mo)
+- Set in `.env` file or environment variable
+- Hidden city engine also uses it for real price data
+
+### 🔴 Individual Airline Scrapers (via Arkalis)
+These use Arkalis (headless Chrome CDP engine) and need the APIs to be reverse-engineered.
+Roame replaces them for award search. They're only needed for cash prices and fare class detail.
+
+- **United** (`united.ts`): Rewritten with evaluate(fetch()) pattern. Auth flow changed — they now require an anonymous token via `/api/svc/token/anonymous`. The page no longer auto-triggers search from URL params. Needs browser DevTools research to discover current auth flow.
+- **Alaska** (`alaska.ts`): Migrated to SvelteKit frontend. Old `/searchbff/V3/search` returns HTML. New API appears to be at `apis.alaskaair.com` but exact endpoint unknown. Needs browser DevTools research.
+- **Delta** (`delta.ts`): Uses form-fill + anti-bot detection. Commented out pre-fill interceptor. Heavy anti-scraping measures. Needs significant rework.
+- **Aeroplan** (`aeroplan.ts`): CDP capture issue. Old endpoint at `aircanada.com/loyalty/dapidynamic/*/v2/search/air-bounds`. Could apply evaluate(fetch()) fix but endpoint may have changed.
+- **Air France, BA, Qatar, Emirates**: Skeleton files only, no real API research done
+
+**Why these are hard**: Each airline's internal API requires browser DevTools (Network tab) to discover
+the actual endpoints, request format, and auth requirements. This cannot be done via web scraping or 
+web search — it requires interactive browser inspection of the live site during a search.
 
 ## Key Technical Decisions
 
@@ -79,14 +102,21 @@ Individual scrapers are only needed for: (1) cash prices, (2) detailed fare clas
 - **evaluate(fetch()) pattern**: For airline direct scrapers, this bypasses CDP interception issues
 - **Unified results format**: All sources output to same `UnifiedFlightResult` interface
 - **Dashboard is static HTML**: No build step, loads data from results.json
+- **.env file**: For local credential storage (SerpAPI key, etc.)
 
 ## Running
 
 ```bash
-# Search (CLI)
+# Search (CLI) — all sources
 npx tsx search.ts --from LAX --to DXB --date 2026-04-28 --class both
 
 # Roame only
+npx tsx search.ts --from LAX --to DXB --date 2026-04-28 --sources roame
+
+# With Google Flights (needs SERP_API_KEY in .env)
+SERP_API_KEY=xxx npx tsx search.ts --from LAX --to DXB --date 2026-04-28
+
+# Roame standalone
 npx tsx roame-scraper.ts --from LAX --to DXB --date 2026-04-28 --class PREM
 
 # Dashboard
@@ -95,17 +125,22 @@ npx tsx serve.ts --port 8888
 
 # Balances
 npx tsx cli.ts balances
+
+# Gateway scanner
+npx tsx gateway-scanner.ts --from LAX --to DXB --date 2026-04-28
 ```
 
 ## File Layout
 
 ```
 roame-scraper.ts     # Roame GraphQL client + CLI
-search.ts            # Unified orchestrator
+search.ts            # Unified orchestrator (Roame + Google + Hidden City)
 serve.ts             # HTTP server for dashboard
 dashboard.html       # Dynamic flight comparison UI
 cli.ts               # Legacy CLI (Arkalis-based scrapers)
+gateway-scanner.ts   # Gateway positioning flight scanner
 results.json         # Latest search results (auto-generated)
+.env                 # Environment variables (SERP_API_KEY, etc.)
 arkalis/             # Headless Chrome engine (from AwardWiz)
 awardwiz-scrapers/   # Individual airline scrapers + integrations
 scripts/             # Python search scripts (Google, hidden city, etc.)
@@ -114,7 +149,6 @@ data/                # Static data (airport alternates, hub connections)
 
 ## Credentials
 
-All at `~/.openclaw/credentials/`:
-- `roame.json` — Roame session cookie (expires Feb 23, 2026)
-- `awardwallet.json` — AwardWallet API key + user ID
-- SerpAPI key in env: `SERP_API_KEY`
+- `~/.openclaw/credentials/roame.json` — Roame session cookie (expires Feb 23, 2026)
+- `~/.openclaw/credentials/awardwallet.json` — AwardWallet API key + user ID
+- `.env` file — `SERP_API_KEY` for Google Flights via SerpAPI

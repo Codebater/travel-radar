@@ -8,8 +8,8 @@
  * Sources:
  *   - Roame (award flights across ALL programs) ✅
  *   - AA direct scraper (detailed fare data, backup) ✅  
- *   - Google Flights via SerpAPI (cash prices) 🔧
- *   - Gateway scanner (positioning flights) 🔧
+ *   - Google Flights via SerpAPI (cash prices) ✅
+ *   - Hidden city engine (positioning/savings) ✅
  * 
  * Usage:
  *   npx tsx search.ts --from LAX --to DXB --date 2026-04-28
@@ -18,8 +18,26 @@
 
 import fs from "fs"
 import path from "path"
+import { execSync } from "child_process"
 import { searchRoame, roameFaresToUnified } from "./roame-scraper.js"
 import type { RoameFare, UnifiedFlightResult } from "./roame-scraper.js"
+
+// ─── Load .env file ──────────────────────────────────────────────────────────
+const ROOT = path.dirname(new URL(import.meta.url).pathname)
+const envPath = path.join(ROOT, ".env")
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, "utf-8")
+  for (const line of envContent.split("\n")) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith("#")) continue
+    const eqIdx = trimmed.indexOf("=")
+    if (eqIdx > 0) {
+      const key = trimmed.slice(0, eqIdx).trim()
+      const val = trimmed.slice(eqIdx + 1).trim()
+      if (!process.env[key]) process.env[key] = val
+    }
+  }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -171,78 +189,145 @@ async function searchRoameSource(config: SearchConfig): Promise<{ flights: Unifi
 }
 
 async function searchSerpApiGoogle(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
-  // SerpAPI Google Flights integration
   const apiKey = process.env.SERP_API_KEY
   if (!apiKey) {
-    console.warn("⚠️ SERP_API_KEY not set, skipping Google Flights")
+    console.warn("⚠️ SERP_API_KEY not set — get one at https://serpapi.com/manage-api-key (100 free/mo)")
     return { flights: [], completion: 0 }
   }
-  
-  try {
-    const params = new URLSearchParams({
-      engine: "google_flights",
-      departure_id: config.origin,
-      arrival_id: config.destination,
-      outbound_date: config.departureDate,
-      type: config.returnDate ? "1" : "2", // 1=roundtrip, 2=oneway
-      currency: "USD",
-      hl: "en",
-      api_key: apiKey,
-    })
-    if (config.returnDate) params.set("return_date", config.returnDate)
-    
-    const resp = await fetch(`https://serpapi.com/search?${params}`)
-    if (!resp.ok) {
-      console.warn(`⚠️ SerpAPI returned ${resp.status}`)
-      return { flights: [], completion: 0 }
-    }
-    
-    const data = await resp.json() as any
-    const flights: UnifiedFlightResult[] = []
-    
-    // Parse best_flights and other_flights
-    for (const category of ["best_flights", "other_flights"]) {
-      const items = data[category] || []
-      for (const item of items) {
-        for (const flight of item.flights || [item]) {
-          flights.push({
-            id: `google-${flights.length}`,
+
+  const cabinMap: Record<string, number> = { ECON: 1, PREM: 2, both: 1 }
+  const cabinNames: Record<number, string> = { 1: "economy", 2: "business" }
+  const classesToSearch = config.searchClass === "both" ? [1, 2] : [cabinMap[config.searchClass] || 1]
+  const allFlights: UnifiedFlightResult[] = []
+
+  for (const travelClass of classesToSearch) {
+    try {
+      const params = new URLSearchParams({
+        engine: "google_flights",
+        departure_id: config.origin,
+        arrival_id: config.destination,
+        outbound_date: config.departureDate,
+        type: config.returnDate ? "1" : "2",
+        travel_class: String(travelClass),
+        currency: "USD",
+        hl: "en",
+        api_key: apiKey,
+      })
+      if (config.returnDate) params.set("return_date", config.returnDate)
+
+      const resp = await fetch(`https://serpapi.com/search?${params}`)
+      if (!resp.ok) {
+        const body = await resp.text()
+        console.warn(`⚠️ SerpAPI ${resp.status}: ${body.slice(0, 200)}`)
+        continue
+      }
+
+      const data = await resp.json() as any
+
+      for (const category of ["best_flights", "other_flights"]) {
+        for (const itinerary of data[category] || []) {
+          const legs = itinerary.flights || []
+          if (legs.length === 0) continue
+
+          const firstLeg = legs[0]
+          const lastLeg = legs[legs.length - 1]
+          const airlines = [...new Set(legs.map((l: any) => l.airline).filter(Boolean))]
+          const flightNums = legs.map((l: any) => l.flight_number).filter(Boolean)
+          const layovers = itinerary.layovers || []
+          const airports = [
+            firstLeg.departure_airport?.id || config.origin,
+            ...layovers.map((l: any) => l.id || l.name),
+            lastLeg.arrival_airport?.id || config.destination,
+          ].filter(Boolean)
+
+          allFlights.push({
+            id: `google-${allFlights.length}`,
             source: "google",
             type: "cash",
-            origin: config.origin,
-            destination: config.destination,
-            airline: flight.airline || item.airline || "Unknown",
-            operatingAirlines: [flight.airline || item.airline || "Unknown"],
-            flightNumbers: [flight.flight_number || ""],
-            stops: (item.layovers || []).length,
-            durationMinutes: item.total_duration || flight.duration || 0,
-            departureTime: flight.departure_airport?.time || "",
-            arrivalTime: flight.arrival_airport?.time || "",
-            airports: [
-              flight.departure_airport?.id || config.origin,
-              ...(item.layovers || []).map((l: any) => l.id),
-              flight.arrival_airport?.id || config.destination,
-            ],
-            cabinClass: "economy",
-            equipment: [flight.airplane || ""],
+            origin: firstLeg.departure_airport?.id || config.origin,
+            destination: lastLeg.arrival_airport?.id || config.destination,
+            airline: airlines.join(" / ") || "Unknown",
+            operatingAirlines: airlines,
+            flightNumbers: flightNums,
+            stops: layovers.length,
+            durationMinutes: itinerary.total_duration || legs.reduce((s: number, l: any) => s + (l.duration || 0), 0),
+            departureTime: firstLeg.departure_airport?.time || "",
+            arrivalTime: lastLeg.arrival_airport?.time || "",
+            airports,
+            cabinClass: cabinNames[travelClass] || "economy",
+            equipment: legs.map((l: any) => l.airplane || "").filter(Boolean),
             points: null,
             pointsProgram: null,
-            cashPrice: item.price || null,
+            cashPrice: itinerary.price || null,
             taxes: 0,
             currency: "USD",
             cppValue: null,
             roameScore: null,
             availableSeats: null,
-            bookingUrl: `https://www.google.com/travel/flights?q=flights+from+${config.origin}+to+${config.destination}`,
-            fareClass: "",
+            bookingUrl: itinerary.booking_token
+              ? `https://www.google.com/travel/flights/booking?token=${itinerary.booking_token}`
+              : `https://www.google.com/travel/flights?q=flights+from+${config.origin}+to+${config.destination}+on+${config.departureDate}`,
+            fareClass: itinerary.type || "",
           })
         }
       }
+    } catch (err) {
+      console.warn(`⚠️ SerpAPI Google Flights (class ${travelClass}) failed:`, (err as Error).message)
     }
-    
+  }
+
+  return { flights: allFlights, completion: allFlights.length > 0 ? 100 : 0 }
+}
+
+// ─── Hidden City Engine ──────────────────────────────────────────────────────
+
+async function searchHiddenCity(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
+  const scriptPath = path.join(ROOT, "scripts", "search-hidden-city.py")
+  if (!fs.existsSync(scriptPath)) {
+    console.warn("⚠️ Hidden city script not found")
+    return { flights: [], completion: 0 }
+  }
+
+  try {
+    const cmd = `python3 "${scriptPath}" ${config.origin} ${config.destination} ${config.departureDate} --max-searches 5 --min-savings 30`
+    const output = execSync(cmd, {
+      timeout: 60000,
+      env: { ...process.env },
+      encoding: "utf-8",
+    })
+
+    const results = JSON.parse(output.trim()) as any[]
+    const flights: UnifiedFlightResult[] = results.map((r, i) => ({
+      id: `hidden-city-${i}`,
+      source: "estimate" as const,
+      type: "cash" as const,
+      origin: r.origin,
+      destination: r.real_destination,
+      airline: r.airline || "Various",
+      operatingAirlines: [r.airline || "Various"],
+      flightNumbers: [r.flight_number || ""],
+      stops: 1,
+      durationMinutes: 0,
+      departureTime: r.departure_time || "",
+      arrivalTime: r.arrival_at_layover || "",
+      airports: [r.origin, r.real_destination, r.ticketed_destination],
+      cabinClass: "economy",
+      equipment: [],
+      points: null,
+      pointsProgram: null,
+      cashPrice: r.hidden_city_price || null,
+      taxes: 0,
+      currency: "USD",
+      cppValue: null,
+      roameScore: null,
+      availableSeats: null,
+      bookingUrl: r.booking_url || `https://www.google.com/travel/flights`,
+      fareClass: `hidden-city:${r.ticketed_destination}|saves:$${Math.round(r.savings)}|risk:${r.risk_score}|conf:${r.confidence}`,
+    }))
+
     return { flights, completion: 100 }
   } catch (err) {
-    console.warn("⚠️ SerpAPI Google Flights failed:", (err as Error).message)
+    console.warn("⚠️ Hidden city search failed:", (err as Error).message?.slice(0, 200))
     return { flights: [], completion: 0 }
   }
 }
@@ -405,6 +490,19 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
       })
     )
   }
+
+  if (config.sources.includes("hidden-city")) {
+    promises.push(
+      searchHiddenCity(config).then(({ flights, completion }) => {
+        allFlights.push(...flights)
+        completionPct["hidden-city"] = completion
+        console.log(`✅ Hidden City: ${flights.length} opportunities`)
+      }).catch(err => {
+        console.error(`❌ Hidden City failed: ${err.message}`)
+        completionPct["hidden-city"] = 0
+      })
+    )
+  }
   
   await Promise.allSettled(promises)
   
@@ -468,7 +566,7 @@ Options:
     departureDate: getArg("--date", "2026-04-28"),
     returnDate: args.includes("--return") ? getArg("--return", "") : undefined,
     searchClass: getArg("--class", "both") as any,
-    sources: getArg("--sources", "roame,google").split(","),
+    sources: getArg("--sources", "roame,google,hidden-city").split(","),
     output: getArg("--output", "results.json"),
     verbose: hasFlag("--verbose"),
   }

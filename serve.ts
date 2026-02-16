@@ -48,7 +48,8 @@ const server = http.createServer(async (req, res) => {
     
     try {
       const retFlag = ret ? `--return ${ret}` : ""
-      const cmd = `cd ${ROOT} && npx tsx search.ts --from ${from} --to ${to} --date ${date} ${retFlag} --class ${cls} --sources roame --output results.json 2>&1`
+      const sources = url.searchParams.get("sources") || "roame,google,hidden-city"
+      const cmd = `cd ${ROOT} && npx tsx search.ts --from ${from} --to ${to} --date ${date} ${retFlag} --class ${cls} --sources ${sources} --output results.json 2>&1`
       execSync(cmd, { timeout: 180000 })
       
       // Return results
