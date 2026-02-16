@@ -21,6 +21,9 @@ import path from "path"
 import { execSync } from "child_process"
 import { searchRoame, roameFaresToUnified } from "./roame-scraper.js"
 import type { RoameFare, UnifiedFlightResult } from "./roame-scraper.js"
+import { scoreFlights, type ValueScoredFlight, type ValueInsight } from "./value-engine.ts"
+import { getSweetSpotsForRoute } from "./sweet-spots.ts"
+import { findFundingPaths } from "./transfer-partners.ts"
 
 // ─── Load .env file ──────────────────────────────────────────────────────────
 const ROOT = path.dirname(new URL(import.meta.url).pathname)
@@ -71,8 +74,10 @@ interface DashboardResults {
     completionPct: Record<string, number>
   }
   balances: PointsBalance[]
-  flights: UnifiedFlightResult[]
+  flights: ValueScoredFlight[]
   recommendations: Recommendation[]
+  insights: ValueInsight[]
+  routeSweetSpots: { program: string; cabin: string; maxPoints: number; description: string }[]
   warnings: string[]
 }
 
@@ -380,88 +385,93 @@ async function searchHiddenCity(config: SearchConfig): Promise<{ flights: Unifie
 // ─── Recommendation Engine ───────────────────────────────────────────────────
 
 function generateRecommendations(
-  flights: UnifiedFlightResult[],
+  flights: ValueScoredFlight[],
   balances: PointsBalance[],
   config: SearchConfig
 ): Recommendation[] {
   const recommendations: Recommendation[] = []
   
-  // Find balance for a program
-  const getBalance = (programKey: string) => {
-    const b = balances.find(b => b.programKey === programKey)
-    return b?.balance || 0
-  }
+  // #1: Best value award (highest real CPP that's affordable)
+  const bestValueAwards = flights
+    .filter(f => f.type === "award" && f.realCpp !== null && f.realCpp > 0 && f.canAfford)
+    .sort((a, b) => (b.realCpp || 0) - (a.realCpp || 0))
   
-  // Best CPP award
-  const awardFlights = flights
-    .filter(f => f.type === "award" && f.cppValue && f.cppValue > 0)
-    .sort((a, b) => (b.cppValue || 0) - (a.cppValue || 0))
-  
-  if (awardFlights.length > 0) {
-    const best = awardFlights[0]!
-    const bal = getBalance(best.pointsProgram || "")
-    const hasEnough = bal >= (best.points || 0)
+  if (bestValueAwards.length > 0) {
+    const best = bestValueAwards[0]!
+    const cppLabel = best.cashSource === "exact-match" ? "(vs actual cash)" : 
+                     best.cashSource === "same-cabin" ? "(vs avg cash)" : "(est.)"
+    const sweetSpotTag = best.sweetSpotMatch ? " 🎯 SWEET SPOT" : ""
     
     recommendations.push({
       rank: 1,
-      title: `${best.pointsProgram} → ${best.airline}`,
+      title: `${best.pointsProgram} → ${best.airline}${sweetSpotTag}`,
       subtitle: `${best.cabinClass} class via ${best.airports.join("→")}`,
       details: [
         `✈️ ${best.flightNumbers.join(" / ")}`,
         `⏱ ${Math.floor(best.durationMinutes / 60)}h${best.durationMinutes % 60}m, ${best.stops} stop${best.stops !== 1 ? "s" : ""}`,
-        hasEnough ? `✅ You have ${formatBalance(bal)} ${best.pointsProgram} miles` : `⚠️ Need ${formatBalance((best.points || 0) - bal)} more miles`,
+        `💰 Cash comparable: $${best.cashComparable?.toLocaleString()} ${cppLabel}`,
+        `✅ ${best.affordDetails}`,
+        ...(best.sweetSpotMatch ? [`🎯 ${best.sweetSpotMatch.spot.description.slice(0, 80)}`] : []),
       ],
       totalCost: `${formatBalance(best.points || 0)} pts + $${best.taxes}`,
-      cppValue: `${best.cppValue}¢/mi`,
+      cppValue: `${best.realCpp}¢/pt`,
       bookingUrl: best.bookingUrl,
       badgeText: "#1 BEST VALUE",
       badgeColor: "emerald",
     })
   }
   
-  // Best product (business/first with best score)
+  // #2: Best product (business/first with best combo of roame score + value)
   const premiumFlights = flights
-    .filter(f => f.type === "award" && (f.cabinClass === "business" || f.cabinClass === "first"))
-    .sort((a, b) => (b.roameScore || 0) - (a.roameScore || 0))
+    .filter(f => f.type === "award" && (f.cabinClass === "business" || f.cabinClass === "first") && f.canAfford)
+    .sort((a, b) => b.valueScore - a.valueScore)
   
-  if (premiumFlights.length > 0 && premiumFlights[0] !== awardFlights[0]) {
-    const best = premiumFlights[0]!
+  const alreadyUsed = bestValueAwards[0]?.id
+  const bestPremium = premiumFlights.find(f => f.id !== alreadyUsed)
+  
+  if (bestPremium) {
     recommendations.push({
       rank: 2,
-      title: `${best.pointsProgram} → ${best.airline}`,
-      subtitle: `${best.cabinClass} class • ${best.airports.join("→")}`,
+      title: `${bestPremium.pointsProgram} → ${bestPremium.airline}`,
+      subtitle: `${bestPremium.cabinClass} class • ${bestPremium.airports.join("→")}`,
       details: [
-        `✈️ ${best.flightNumbers.join(" / ")}`,
-        `🏆 Roame Score: ${best.roameScore || "N/A"}`,
-        `⏱ ${Math.floor(best.durationMinutes / 60)}h${best.durationMinutes % 60}m`,
-      ],
-      totalCost: `${formatBalance(best.points || 0)} pts + $${best.taxes}`,
-      cppValue: best.cppValue ? `${best.cppValue}¢/mi` : null,
-      bookingUrl: best.bookingUrl,
+        `✈️ ${bestPremium.flightNumbers.join(" / ")}`,
+        `🏆 Value Score: ${bestPremium.valueScore}/100`,
+        bestPremium.realCpp ? `📊 ${bestPremium.realCpp}¢/pt vs $${bestPremium.cashComparable?.toLocaleString()} cash` : "",
+        `⏱ ${Math.floor(bestPremium.durationMinutes / 60)}h${bestPremium.durationMinutes % 60}m`,
+      ].filter(Boolean),
+      totalCost: `${formatBalance(bestPremium.points || 0)} pts + $${bestPremium.taxes}`,
+      cppValue: bestPremium.realCpp ? `${bestPremium.realCpp}¢/pt` : null,
+      bookingUrl: bestPremium.bookingUrl,
       badgeText: "#2 BEST PRODUCT",
       badgeColor: "accent",
     })
   }
   
-  // Cheapest cash option
+  // #3: Cash option (with context on whether it beats points)
   const cashFlights = flights
     .filter(f => f.type === "cash" && f.cashPrice && f.cashPrice > 0)
     .sort((a, b) => (a.cashPrice || Infinity) - (b.cashPrice || Infinity))
   
   if (cashFlights.length > 0) {
     const best = cashFlights[0]!
+    const bestAwardCpp = bestValueAwards[0]?.realCpp || 0
+    const cashWins = bestAwardCpp < 1.5  // If best award is under 1.5cpp, cash is probably better
+    
     recommendations.push({
       rank: 3,
       title: `Cash ${best.cabinClass} at $${best.cashPrice?.toLocaleString()}`,
       subtitle: `${best.airline} • ${best.stops === 0 ? "Nonstop" : `${best.stops} stop`}`,
       details: [
         `✈️ ${best.flightNumbers.join(" / ")}`,
-        `💡 Save points for higher-value redemptions`,
+        cashWins 
+          ? `🏆 Cash wins — best award is only ${bestAwardCpp}¢/pt, save points for a better route`
+          : `💡 Points get ${bestAwardCpp}¢/pt value here — use them`,
       ],
       totalCost: `$${best.cashPrice?.toLocaleString()}`,
       cppValue: null,
       bookingUrl: best.bookingUrl,
-      badgeText: "#3 SAVE POINTS",
+      badgeText: cashWins ? "#3 CASH WINS" : "#3 SAVE POINTS",
       badgeColor: "gold",
     })
   }
@@ -554,9 +564,28 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
   console.log(`\n📊 Search complete: ${allFlights.length} flights in ${elapsed}s`)
   
-  // Generate recommendations and warnings
-  const recommendations = generateRecommendations(allFlights, balances, config)
+  // Run value engine — cross-reference award vs cash, score everything
+  console.log("🧠 Running value engine...")
+  const { scored, insights } = scoreFlights(allFlights, balances, config.origin, config.destination)
+  console.log(`   ${scored.filter(f => f.realCpp !== null).length} award flights scored against real cash prices`)
+  console.log(`   ${scored.filter(f => f.sweetSpotMatch).length} sweet spot matches found`)
+  console.log(`   ${insights.length} insights generated`)
+  
+  // Sort scored flights by value score (highest first)
+  scored.sort((a, b) => b.valueScore - a.valueScore)
+  
+  // Generate recommendations from value-scored results
+  const recommendations = generateRecommendations(scored, balances, config)
   const warnings = generateWarnings(balances)
+  
+  // Get route sweet spots for context
+  const routeSpots = getSweetSpotsForRoute(config.origin, config.destination)
+  const routeSweetSpots = routeSpots.map(s => ({
+    program: s.programName,
+    cabin: s.cabin,
+    maxPoints: s.maxPoints,
+    description: s.description,
+  }))
   
   return {
     meta: {
@@ -569,8 +598,10 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
       completionPct,
     },
     balances,
-    flights: allFlights,
+    flights: scored,
     recommendations,
+    insights,
+    routeSweetSpots,
     warnings,
   }
 }
@@ -627,6 +658,26 @@ Options:
   for (const rec of results.recommendations) {
     console.log(`  ${rec.badgeText}: ${rec.title}`)
     console.log(`    ${rec.totalCost} ${rec.cppValue ? `(${rec.cppValue})` : ""}`)
+    for (const d of rec.details) {
+      console.log(`    ${d}`)
+    }
+    console.log()
+  }
+  
+  if (results.insights.length > 0) {
+    console.log(`\n💡 Insights:`)
+    for (const insight of results.insights) {
+      const icon = insight.priority === "high" ? "🔴" : insight.priority === "medium" ? "🟡" : "🔵"
+      console.log(`  ${icon} ${insight.title}`)
+      console.log(`    ${insight.detail}`)
+    }
+  }
+  
+  if (results.routeSweetSpots.length > 0) {
+    console.log(`\n🎯 Sweet Spots for ${config.origin}→${config.destination}:`)
+    for (const spot of results.routeSweetSpots) {
+      console.log(`  ${spot.program} ${spot.cabin}: ≤${spot.maxPoints.toLocaleString()} pts — ${spot.description.slice(0, 70)}`)
+    }
   }
   
   if (results.warnings.length > 0) {
