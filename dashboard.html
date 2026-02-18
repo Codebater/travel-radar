@@ -55,6 +55,13 @@ tailwind.config = {
   @keyframes spin { to { transform: rotate(360deg); } }
   input[type="text"], input[type="date"] { background: #0f172a; border: 1px solid #334155; color: white; }
   input:focus { border-color: #38bdf8; outline: none; box-shadow: 0 0 0 2px rgba(56,189,248,0.2); }
+  .rt-step-banner { background: linear-gradient(90deg, rgba(56,189,248,0.1) 0%, rgba(168,85,247,0.1) 100%); }
+  .selected-flight-summary { background: linear-gradient(135deg, rgba(52,211,153,0.1) 0%, rgba(56,189,248,0.1) 100%); border: 1px solid rgba(52,211,153,0.3); }
+  .flight-card-selectable { cursor: pointer; }
+  .flight-card-selectable:hover { border-color: #38bdf8 !important; }
+  .date-badge { background: rgba(168,85,247,0.15); color: #c084fc; border: 1px solid rgba(168,85,247,0.3); font-size: 11px; }
+  .flex-toggle-active { background: #38bdf8; color: #0f172a; }
+  .flex-toggle-inactive { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
 </style>
 </head>
 <body class="bg-surface text-gray-100 min-h-screen">
@@ -98,9 +105,7 @@ tailwind.config = {
 <div id="balancesPanel" class="slide-down max-h-0 opacity-0 border-b border-gray-800 bg-card/50">
   <div class="max-w-7xl mx-auto px-4 py-6">
     <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Points & Miles Balances</h3>
-    <div id="balancesGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-      <!-- Populated by JS -->
-    </div>
+    <div id="balancesGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3"></div>
   </div>
 </div>
 
@@ -111,7 +116,7 @@ tailwind.config = {
   <section id="searchForm" class="mb-8 fade-in">
     <div class="bg-card rounded-xl p-6 border border-gray-700/50">
       <h2 class="text-lg font-bold mb-4 flex items-center gap-2">🔍 Search Flights</h2>
-      <form onsubmit="handleSearch(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-4">
+      <form onsubmit="handleSearch(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
         <div>
           <label class="block text-xs text-gray-400 mb-1">From</label>
           <input type="text" id="inputFrom" value="LAX" placeholder="LAX" maxlength="3"
@@ -140,6 +145,14 @@ tailwind.config = {
             <option value="PREM">Business/First</option>
           </select>
         </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Flexible Dates</label>
+          <div class="flex gap-1 h-[42px]">
+            <button type="button" onclick="setFlex(0)" id="flex-0" class="flex-1 rounded-lg text-xs font-bold flex-toggle-active">Exact</button>
+            <button type="button" onclick="setFlex(1)" id="flex-1" class="flex-1 rounded-lg text-xs font-bold flex-toggle-inactive">±1d</button>
+            <button type="button" onclick="setFlex(2)" id="flex-2" class="flex-1 rounded-lg text-xs font-bold flex-toggle-inactive">±2d</button>
+          </div>
+        </div>
         <div class="flex items-end">
           <button type="submit" id="searchBtn"
             class="w-full bg-accent hover:bg-accentDim text-surface font-bold py-2.5 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
@@ -162,6 +175,35 @@ tailwind.config = {
 
   <!-- Results Section (hidden until data loads) -->
   <div id="resultsSection" class="hidden">
+
+    <!-- RT Step Banner -->
+    <div id="rtBanner" class="hidden rt-step-banner rounded-xl p-4 mb-6 border border-accent/20 fade-in">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <div id="rtStepIndicator" class="flex items-center gap-2">
+            <span id="rtStep1Dot" class="w-8 h-8 rounded-full bg-accent text-surface flex items-center justify-center text-sm font-bold">1</span>
+            <span class="text-gray-500 mx-1">→</span>
+            <span id="rtStep2Dot" class="w-8 h-8 rounded-full bg-gray-700 text-gray-400 flex items-center justify-center text-sm font-bold">2</span>
+          </div>
+          <div>
+            <p id="rtStepTitle" class="font-bold text-white"></p>
+            <p id="rtStepSubtitle" class="text-xs text-gray-400"></p>
+          </div>
+        </div>
+        <button id="rtBackBtn" onclick="rtGoBack()" class="hidden text-sm text-accent hover:text-white transition-colors">← Change outbound</button>
+      </div>
+    </div>
+
+    <!-- Selected Outbound Summary (shown during return selection) -->
+    <div id="selectedOutboundSummary" class="hidden selected-flight-summary rounded-xl p-4 mb-4 fade-in">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-xs text-emerald font-semibold uppercase tracking-wider mb-1">✓ Selected Outbound</p>
+          <p id="selectedOutboundText" class="text-sm text-white font-medium"></p>
+        </div>
+        <div id="selectedOutboundPrice" class="text-right"></div>
+      </div>
+    </div>
 
     <!-- TOP RECOMMENDATIONS -->
     <section id="recsSection" class="mb-10 fade-in hidden">
@@ -191,6 +233,7 @@ tailwind.config = {
           <option value="points">Sort: Points ↑</option>
           <option value="cpp">Sort: cpp ↓</option>
           <option value="duration">Sort: Duration ↑</option>
+          <option value="date">Sort: Date</option>
         </select>
 
         <span id="resultCount" class="text-xs text-gray-500"></span>
@@ -199,6 +242,12 @@ tailwind.config = {
 
     <!-- Flight Cards Container -->
     <div id="flightsContainer" class="grid md:grid-cols-2 gap-4 mb-10"></div>
+
+    <!-- Combined RT Price Summary (shown after both selected) -->
+    <div id="rtPriceSummary" class="hidden bg-card rounded-xl p-6 border border-emerald/30 mb-10 fade-in">
+      <h3 class="text-lg font-bold text-emerald mb-3">🎫 Round Trip Summary</h3>
+      <div id="rtSummaryContent"></div>
+    </div>
 
     <!-- No Results -->
     <div id="noResults" class="hidden text-center py-16">
@@ -218,11 +267,16 @@ tailwind.config = {
 <script>
 // ─── State ───────────────────────────────────────────────────────────────────
 
-let dashboardData = null; // loaded from results.json
+let dashboardData = null;
 let currentClass = 'all';
 let currentFilter = 'all';
 let currentSort = 'value';
-let expandedCards = {};
+let flexDays = 0;
+
+// RT pairing state
+let rtMode = false;          // true if searching round trip
+let rtStep = null;           // 'outbound' | 'return' | null
+let selectedOutbound = null; // the selected outbound flight object
 
 // ─── Airline Helpers ─────────────────────────────────────────────────────────
 
@@ -284,12 +338,9 @@ const programDisplayNames = {
 };
 
 function getAirlineLogo(airline) {
-  // Try exact match first
   if (airlineLogos[airline]) return airlineLogos[airline];
-  // Try first word
   const first = airline.split(/[\/\s]/)[0];
   if (airlineLogos[first]) return airlineLogos[first];
-  // Try IATA code extraction
   const code = airline.match(/^([A-Z]{2})\b/)?.[1];
   if (code && airlineLogos[code]) return airlineLogos[code];
   return '';
@@ -313,6 +364,29 @@ function getCppClass(cpp) {
   return 'cpp-low';
 }
 
+function formatTravelDate(dateStr) {
+  if (!dateStr) return '';
+  try {
+    const d = new Date(dateStr + 'T12:00:00');
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    return `${days[d.getDay()]} ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+  } catch { return dateStr; }
+}
+
+function getTravelDate(flight) {
+  // Try travelDate field first, then extract from departureTime, then from leg field
+  if (flight.travelDate) return flight.travelDate;
+  if (flight.departureTime) {
+    const m = flight.departureTime.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
+  if (flight.leg) {
+    const m = flight.leg.match(/\(([A-Z][a-z]+ \d+)\)/);
+    if (m) return m[1];
+  }
+  return '';
+}
+
 // ─── Balance Rendering ───────────────────────────────────────────────────────
 
 const programIcons = {
@@ -331,9 +405,7 @@ function renderBalances(balances) {
     const iconHtml = icon 
       ? `<span class="text-xs">${icon}</span>` 
       : (logo ? `<img src="${logo}" class="w-4 h-4 rounded" onerror="this.style.display='none'">` : '');
-    
     const colorClass = b.balance > 500000 ? 'text-accent' : b.balance > 100000 ? 'text-emerald' : b.balance > 50000 ? 'text-gold' : '';
-    
     return `
       <div class="bg-surface rounded-lg p-3 border border-gray-700/50">
         <div class="flex items-center gap-2 mb-1">${iconHtml}<span class="text-xs text-gray-400">${b.program}</span></div>
@@ -357,12 +429,9 @@ function renderWarnings(warnings) {
 
 function renderRecommendations(recs) {
   if (!recs || recs.length === 0) return;
-  
   const section = document.getElementById('recsSection');
   const container = document.getElementById('recsContainer');
-  
   const colorMap = { emerald: 'emerald', accent: 'accent', gold: 'gold' };
-  
   container.innerHTML = recs.map((rec, i) => {
     const c = colorMap[rec.badgeColor] || 'accent';
     return `
@@ -383,7 +452,6 @@ function renderRecommendations(recs) {
       </div>
     `;
   }).join('');
-  
   section.classList.remove('hidden');
 }
 
@@ -392,17 +460,21 @@ function renderRecommendations(recs) {
 function renderFlightCard(flight, idx) {
   const isAward = flight.type === 'award';
   const logo = getAirlineLogo(flight.airline);
-  const cardId = `flight-${idx}`;
-  
   const stopsLabel = flight.stops === 0 
     ? '<span class="text-emerald font-medium">Nonstop</span>' 
     : `${flight.stops} stop${flight.stops > 1 ? 's' : ''}`;
-  
   const routeStr = flight.airports ? flight.airports.join(' → ') : `${flight.origin} → ${flight.destination}`;
   const duration = formatDuration(flight.durationMinutes);
   const cabinBadge = flight.cabinClass === 'business' ? 'badge-purple' 
     : flight.cabinClass === 'first' ? 'badge-red' : 'badge-blue';
   const cabinLabel = flight.cabinClass.charAt(0).toUpperCase() + flight.cabinClass.slice(1);
+  
+  // Travel date badge
+  const travelDate = getTravelDate(flight);
+  const travelDateDisplay = formatTravelDate(travelDate);
+  const dateBadgeHtml = travelDateDisplay 
+    ? `<span class="date-badge px-2 py-0.5 rounded-full font-medium">📅 ${travelDateDisplay}</span>` 
+    : '';
   
   // Source badge
   const sourceBadge = flight.source === 'roame' 
@@ -413,12 +485,36 @@ function renderFlightCard(flight, idx) {
     ? '<span class="badge-yellow text-[10px] px-1.5 py-0.5 rounded-full">AA Direct</span>'
     : '<span class="badge-yellow text-[10px] px-1.5 py-0.5 rounded-full">Est.</span>';
   
+  // RT mode: make card selectable
+  const isSelectable = rtMode && (rtStep === 'outbound' || rtStep === 'return');
+  const selectableClass = isSelectable ? 'flight-card-selectable' : '';
+  const selectHandler = isSelectable ? `onclick="selectFlight(${idx})"` : '';
+  
+  // RT mode: show combined price hint if selecting return
+  let combinedPriceHtml = '';
+  if (rtStep === 'return' && selectedOutbound) {
+    if (isAward && selectedOutbound.type === 'award') {
+      const totalPts = (selectedOutbound.points || 0) + (flight.points || 0);
+      const totalTax = (selectedOutbound.taxes || 0) + (flight.taxes || 0);
+      combinedPriceHtml = `<div class="mt-2 pt-2 border-t border-gray-700/50 text-xs text-gray-400">RT total: <span class="text-accent font-bold">${formatPoints(totalPts)} pts</span> + $${totalTax.toFixed(0)} taxes</div>`;
+    } else if (!isAward && selectedOutbound.type === 'cash') {
+      const totalCash = (selectedOutbound.cashPrice || 0) + (flight.cashPrice || 0);
+      combinedPriceHtml = totalCash > 0
+        ? `<div class="mt-2 pt-2 border-t border-gray-700/50 text-xs text-gray-400">RT total: <span class="text-accent font-bold">$${totalCash.toLocaleString()}</span></div>`
+        : '';
+    } else {
+      // Mixed: show both
+      const outLabel = selectedOutbound.type === 'award' ? `${formatPoints(selectedOutbound.points)} pts` : `$${selectedOutbound.cashPrice?.toLocaleString()}`;
+      const retLabel = isAward ? `${formatPoints(flight.points)} pts` : `$${flight.cashPrice?.toLocaleString()}`;
+      combinedPriceHtml = `<div class="mt-2 pt-2 border-t border-gray-700/50 text-xs text-gray-400">RT: ${outLabel} + ${retLabel}</div>`;
+    }
+  }
+  
   if (isAward) {
     const programName = programDisplayNames[flight.pointsProgram] || flight.pointsProgram;
     const cppClass = flight.cppValue ? getCppClass(flight.cppValue) : 'cpp-low';
     const seats = flight.availableSeats ? `${flight.availableSeats} seat${flight.availableSeats > 1 ? 's' : ''}` : '';
     
-    // Check if user has enough points
     let statusBadge = '';
     if (dashboardData?.balances && flight.pointsProgram) {
       const bal = dashboardData.balances.find(b => b.programKey === flight.pointsProgram);
@@ -433,7 +529,7 @@ function renderFlightCard(flight, idx) {
     }
     
     return `
-      <div class="bg-card rounded-xl p-5 border border-gray-700/50 card-enter hover:border-gray-600 fade-in">
+      <div class="bg-card rounded-xl p-5 border border-gray-700/50 card-enter hover:border-gray-600 fade-in ${selectableClass}" ${selectHandler}>
         <div class="flex items-start justify-between mb-3">
           <div class="flex items-center gap-3">
             ${logo ? `<img src="${logo}" class="logo-img" onerror="this.style.display='none'" alt="">` : ''}
@@ -444,13 +540,14 @@ function renderFlightCard(flight, idx) {
           </div>
           <div class="text-right">
             <p class="text-2xl font-bold text-white">${formatPoints(flight.points)}</p>
-            <div class="flex items-center gap-1 justify-end">
+            <div class="flex items-center gap-1 justify-end flex-wrap">
               <span class="${cabinBadge} text-xs px-2 py-0.5 rounded-full">${cabinLabel}</span>
               ${sourceBadge}
             </div>
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2 mb-3">
+          ${dateBadgeHtml}
           ${statusBadge}
           ${flight.cppValue ? `<span class="${cppClass} text-sm font-bold">${flight.cppValue}¢/mi</span>` : ''}
           ${seats ? `<span class="text-xs text-gray-500">${seats}</span>` : ''}
@@ -463,14 +560,18 @@ function renderFlightCard(flight, idx) {
         </div>
         <div class="flex items-center justify-between text-sm">
           <span class="text-gray-400">+ $${(flight.taxes || 0).toFixed(0)} taxes</span>
-          <a href="${flight.bookingUrl}" target="_blank" class="text-accent hover:text-white font-medium transition-colors">Book →</a>
+          ${isSelectable 
+            ? `<span class="text-accent font-medium">Select ${rtStep === 'outbound' ? 'outbound' : 'return'} →</span>`
+            : `<a href="${flight.bookingUrl}" target="_blank" class="text-accent hover:text-white font-medium transition-colors">Book →</a>`
+          }
         </div>
+        ${combinedPriceHtml}
       </div>
     `;
   } else {
     // Cash flight
     return `
-      <div class="bg-card rounded-xl p-5 border border-gray-700/50 card-enter hover:border-gray-600 fade-in">
+      <div class="bg-card rounded-xl p-5 border border-gray-700/50 card-enter hover:border-gray-600 fade-in ${selectableClass}" ${selectHandler}>
         <div class="flex items-start justify-between mb-3">
           <div class="flex items-center gap-3">
             ${logo ? `<img src="${logo}" class="logo-img" onerror="this.style.display='none'" alt="">` : ''}
@@ -480,24 +581,195 @@ function renderFlightCard(flight, idx) {
             </div>
           </div>
           <div class="text-right">
-            <p class="text-2xl font-bold text-white">$${(flight.cashPrice || 0).toLocaleString()}</p>
-            <div class="flex items-center gap-1 justify-end">
+            <p class="text-2xl font-bold text-white">${flight.cashPrice ? '$' + flight.cashPrice.toLocaleString() : '<span class="text-gray-500 text-base">Price N/A</span>'}</p>
+            <div class="flex items-center gap-1 justify-end flex-wrap">
               <span class="badge-blue text-xs px-2 py-0.5 rounded-full">Cash</span>
               ${sourceBadge}
             </div>
           </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+          ${dateBadgeHtml}
+          <span class="${cabinBadge} text-xs px-2 py-0.5 rounded-full">${cabinLabel}</span>
         </div>
         <div class="text-xs text-gray-400 mb-2 space-y-0.5">
           <p>📍 ${routeStr}</p>
           <p>✈️ ${flight.flightNumbers?.join(' / ') || ''} · ⏱ ${duration}</p>
         </div>
         <div class="flex items-center justify-between text-sm">
-          <span class="${cabinBadge} text-xs px-2 py-0.5 rounded-full">${cabinLabel}</span>
-          <a href="${flight.bookingUrl}" target="_blank" class="text-accent hover:text-white font-medium transition-colors">Book →</a>
+          <span></span>
+          ${isSelectable 
+            ? `<span class="text-accent font-medium">Select ${rtStep === 'outbound' ? 'outbound' : 'return'} →</span>`
+            : `<a href="${flight.bookingUrl}" target="_blank" class="text-accent hover:text-white font-medium transition-colors">Book →</a>`
+          }
         </div>
+        ${combinedPriceHtml}
       </div>
     `;
   }
+}
+
+// ─── RT Pairing Flow ─────────────────────────────────────────────────────────
+
+function initRtFlow() {
+  const hasReturn = dashboardData?.meta?.returnDate;
+  const hasReturnFlights = dashboardData?.flights?.some(f => f.direction === 'return');
+  
+  rtMode = !!(hasReturn && hasReturnFlights);
+  
+  if (rtMode) {
+    rtStep = 'outbound';
+    selectedOutbound = null;
+    updateRtBanner();
+  } else {
+    rtStep = null;
+    selectedOutbound = null;
+    document.getElementById('rtBanner').classList.add('hidden');
+    document.getElementById('selectedOutboundSummary').classList.add('hidden');
+    document.getElementById('rtPriceSummary').classList.add('hidden');
+  }
+}
+
+function updateRtBanner() {
+  const banner = document.getElementById('rtBanner');
+  const step1Dot = document.getElementById('rtStep1Dot');
+  const step2Dot = document.getElementById('rtStep2Dot');
+  const title = document.getElementById('rtStepTitle');
+  const subtitle = document.getElementById('rtStepSubtitle');
+  const backBtn = document.getElementById('rtBackBtn');
+  
+  if (!rtMode) {
+    banner.classList.add('hidden');
+    return;
+  }
+  
+  banner.classList.remove('hidden');
+  
+  const m = dashboardData.meta;
+  
+  if (rtStep === 'outbound') {
+    step1Dot.className = 'w-8 h-8 rounded-full bg-accent text-surface flex items-center justify-center text-sm font-bold';
+    step2Dot.className = 'w-8 h-8 rounded-full bg-gray-700 text-gray-400 flex items-center justify-center text-sm font-bold';
+    title.textContent = `Step 1: Select your outbound flight`;
+    subtitle.textContent = `${m.origin} → ${m.destination} · ${formatTravelDate(m.departureDate)}`;
+    backBtn.classList.add('hidden');
+    document.getElementById('selectedOutboundSummary').classList.add('hidden');
+    document.getElementById('rtPriceSummary').classList.add('hidden');
+  } else if (rtStep === 'return') {
+    step1Dot.className = 'w-8 h-8 rounded-full bg-emerald text-surface flex items-center justify-center text-sm font-bold';
+    step1Dot.textContent = '✓';
+    step2Dot.className = 'w-8 h-8 rounded-full bg-accent text-surface flex items-center justify-center text-sm font-bold';
+    title.textContent = `Step 2: Select your return flight`;
+    subtitle.textContent = `${m.destination} → ${m.origin} · ${formatTravelDate(m.returnDate)}`;
+    backBtn.classList.remove('hidden');
+    
+    // Show selected outbound summary
+    showSelectedOutbound();
+  }
+}
+
+function showSelectedOutbound() {
+  if (!selectedOutbound) return;
+  const el = document.getElementById('selectedOutboundSummary');
+  const textEl = document.getElementById('selectedOutboundText');
+  const priceEl = document.getElementById('selectedOutboundPrice');
+  
+  const f = selectedOutbound;
+  const dateDisplay = formatTravelDate(getTravelDate(f));
+  textEl.textContent = `${f.airline} · ${f.origin}→${f.destination} · ${dateDisplay} · ${f.cabinClass}`;
+  
+  if (f.type === 'award') {
+    priceEl.innerHTML = `<span class="text-white font-bold">${formatPoints(f.points)} pts</span><br><span class="text-xs text-gray-400">+ $${(f.taxes||0).toFixed(0)}</span>`;
+  } else {
+    priceEl.innerHTML = `<span class="text-white font-bold">${f.cashPrice ? '$' + f.cashPrice.toLocaleString() : '<span class="text-gray-500">Price N/A</span>'}</span>`;
+  }
+  
+  el.classList.remove('hidden');
+}
+
+function selectFlight(idx) {
+  const flights = getFilteredFlights();
+  const flight = flights[idx];
+  if (!flight) return;
+  
+  if (rtStep === 'outbound') {
+    selectedOutbound = flight;
+    rtStep = 'return';
+    updateRtBanner();
+    render();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } else if (rtStep === 'return') {
+    // Show combined RT summary
+    showRtSummary(selectedOutbound, flight);
+  }
+}
+
+function rtGoBack() {
+  if (rtStep === 'return') {
+    rtStep = 'outbound';
+    selectedOutbound = null;
+    updateRtBanner();
+    render();
+  }
+}
+
+function showRtSummary(outbound, returnFlight) {
+  const summaryEl = document.getElementById('rtPriceSummary');
+  const contentEl = document.getElementById('rtSummaryContent');
+  
+  const outDate = formatTravelDate(getTravelDate(outbound));
+  const retDate = formatTravelDate(getTravelDate(returnFlight));
+  
+  let totalHtml = '';
+  
+  // Calculate combined costs
+  if (outbound.type === 'award' && returnFlight.type === 'award') {
+    const totalPts = (outbound.points || 0) + (returnFlight.points || 0);
+    const totalTax = (outbound.taxes || 0) + (returnFlight.taxes || 0);
+    const sameProgram = outbound.pointsProgram === returnFlight.pointsProgram;
+    totalHtml = `
+      <div class="text-2xl font-bold text-emerald">${formatPoints(totalPts)} pts + $${totalTax.toFixed(0)}</div>
+      ${sameProgram ? `<p class="text-sm text-gray-400 mt-1">Both via ${programDisplayNames[outbound.pointsProgram] || outbound.pointsProgram}</p>` : 
+        `<p class="text-sm text-gray-400 mt-1">Out: ${programDisplayNames[outbound.pointsProgram] || outbound.pointsProgram} · Ret: ${programDisplayNames[returnFlight.pointsProgram] || returnFlight.pointsProgram}</p>`}
+    `;
+  } else if (outbound.type === 'cash' && returnFlight.type === 'cash') {
+    const outCash = outbound.cashPrice || 0;
+    const retCash = returnFlight.cashPrice || 0;
+    const total = outCash + retCash;
+    totalHtml = total > 0 
+      ? `<div class="text-2xl font-bold text-emerald">$${total.toLocaleString()} total</div>`
+      : `<div class="text-xl font-bold text-gray-500">Price unavailable</div>`;
+  } else {
+    const outLabel = outbound.type === 'award' ? `${formatPoints(outbound.points)} pts + $${(outbound.taxes||0).toFixed(0)}` : (outbound.cashPrice ? `$${outbound.cashPrice.toLocaleString()}` : 'Price N/A');
+    const retLabel = returnFlight.type === 'award' ? `${formatPoints(returnFlight.points)} pts + $${(returnFlight.taxes||0).toFixed(0)}` : (returnFlight.cashPrice ? `$${returnFlight.cashPrice.toLocaleString()}` : 'Price N/A');
+    totalHtml = `<div class="text-xl font-bold text-emerald">Out: ${outLabel} + Ret: ${retLabel}</div>`;
+  }
+  
+  contentEl.innerHTML = `
+    <div class="grid md:grid-cols-2 gap-4 mb-4">
+      <div class="bg-surface/50 rounded-lg p-3">
+        <p class="text-xs text-emerald font-semibold mb-1">OUTBOUND · ${outDate}</p>
+        <p class="text-white font-medium">${outbound.airline} · ${outbound.origin}→${outbound.destination}</p>
+        <p class="text-xs text-gray-400">${outbound.cabinClass} · ${outbound.type === 'award' ? formatPoints(outbound.points) + ' pts' : (outbound.cashPrice ? '$' + outbound.cashPrice.toLocaleString() : 'Price N/A')}</p>
+      </div>
+      <div class="bg-surface/50 rounded-lg p-3">
+        <p class="text-xs text-accent font-semibold mb-1">RETURN · ${retDate}</p>
+        <p class="text-white font-medium">${returnFlight.airline} · ${returnFlight.origin}→${returnFlight.destination}</p>
+        <p class="text-xs text-gray-400">${returnFlight.cabinClass} · ${returnFlight.type === 'award' ? formatPoints(returnFlight.points) + ' pts' : (returnFlight.cashPrice ? '$' + returnFlight.cashPrice.toLocaleString() : 'Price N/A')}</p>
+      </div>
+    </div>
+    <div class="flex items-center justify-between">
+      ${totalHtml}
+      <div class="flex gap-2">
+        <a href="${outbound.bookingUrl}" target="_blank" class="bg-emerald/20 hover:bg-emerald/30 text-emerald font-semibold px-4 py-2 rounded-lg text-sm transition-colors">Book Outbound →</a>
+        <a href="${returnFlight.bookingUrl}" target="_blank" class="bg-accent/20 hover:bg-accent/30 text-accent font-semibold px-4 py-2 rounded-lg text-sm transition-colors">Book Return →</a>
+      </div>
+    </div>
+    <button onclick="rtGoBack()" class="mt-3 text-sm text-gray-400 hover:text-white transition-colors">← Start over</button>
+  `;
+  
+  summaryEl.classList.remove('hidden');
+  summaryEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ─── Filtering & Sorting ─────────────────────────────────────────────────────
@@ -506,6 +778,15 @@ function getFilteredFlights() {
   if (!dashboardData?.flights) return [];
   
   let flights = [...dashboardData.flights];
+  
+  // RT direction filter
+  if (rtMode) {
+    if (rtStep === 'outbound') {
+      flights = flights.filter(f => f.direction === 'outbound' || !f.direction);
+    } else if (rtStep === 'return') {
+      flights = flights.filter(f => f.direction === 'return');
+    }
+  }
   
   // Class filter
   if (currentClass !== 'all') {
@@ -523,10 +804,9 @@ function getFilteredFlights() {
   flights.sort((a, b) => {
     switch (currentSort) {
       case 'value':
-        // Award by cpp desc, cash by price asc
         if (a.type === 'award' && b.type === 'award') return (b.cppValue || 0) - (a.cppValue || 0);
         if (a.type === 'cash' && b.type === 'cash') return (a.cashPrice || Infinity) - (b.cashPrice || Infinity);
-        if (a.type === 'award') return -1; // awards first for "value" sort
+        if (a.type === 'award') return -1;
         return 1;
       case 'price':
         const pa = a.type === 'cash' ? (a.cashPrice || Infinity) : (a.taxes || 0);
@@ -538,6 +818,10 @@ function getFilteredFlights() {
         return (b.cppValue || 0) - (a.cppValue || 0);
       case 'duration':
         return (a.durationMinutes || Infinity) - (b.durationMinutes || Infinity);
+      case 'date':
+        const da = getTravelDate(a) || '9999';
+        const db = getTravelDate(b) || '9999';
+        return da.localeCompare(db);
       default: return 0;
     }
   });
@@ -559,7 +843,9 @@ function render() {
   }
   
   noResults.classList.add('hidden');
-  countEl.textContent = `${flights.length} result${flights.length !== 1 ? 's' : ''}`;
+  
+  const dirLabel = rtMode ? (rtStep === 'outbound' ? ' outbound' : ' return') : '';
+  countEl.textContent = `${flights.length}${dirLabel} result${flights.length !== 1 ? 's' : ''}`;
   container.innerHTML = flights.map((f, i) => renderFlightCard(f, i)).join('');
 }
 
@@ -589,6 +875,16 @@ function setFilter(f) {
 function setSort(s) {
   currentSort = s;
   render();
+}
+
+function setFlex(n) {
+  flexDays = n;
+  [0, 1, 2].forEach(v => {
+    const el = document.getElementById('flex-' + v);
+    el.className = v === n
+      ? 'flex-1 rounded-lg text-xs font-bold flex-toggle-active'
+      : 'flex-1 rounded-lg text-xs font-bold flex-toggle-inactive';
+  });
 }
 
 function toggleBalances() {
@@ -625,12 +921,12 @@ async function handleSearch(event) {
   document.getElementById('searchSpinner').classList.remove('hidden');
   document.getElementById('loadingSection').classList.remove('hidden');
   document.getElementById('resultsSection').classList.add('hidden');
-  document.getElementById('loadingText').textContent = `Searching ${from} → ${to} across all programs...`;
+  
+  const flexLabel = flexDays > 0 ? ` (±${flexDays} day${flexDays > 1 ? 's' : ''})` : '';
+  document.getElementById('loadingText').textContent = `Searching ${from} → ${to}${flexLabel} across all programs...`;
   
   try {
-    // Call the search API (when running via local server with search endpoint)
-    // For now, try loading results.json after triggering search
-    const searchUrl = `./api/search?from=${from}&to=${to}&date=${date}&return=${ret}&class=${cls}`;
+    const searchUrl = `./api/search?from=${from}&to=${to}&date=${date}&return=${ret}&class=${cls}&flex=${flexDays}`;
     
     try {
       const resp = await fetch(searchUrl);
@@ -640,7 +936,6 @@ async function handleSearch(event) {
         return;
       }
     } catch (e) {
-      // API not available, try loading results.json directly
       console.log('Search API not available, loading results.json');
     }
     
@@ -691,7 +986,16 @@ function displayResults() {
   // Render components
   if (dashboardData.balances) renderBalances(dashboardData.balances);
   if (dashboardData.warnings) renderWarnings(dashboardData.warnings);
-  if (dashboardData.recommendations) renderRecommendations(dashboardData.recommendations);
+  
+  // Initialize RT flow (before rendering recommendations/flights)
+  initRtFlow();
+  
+  // Only show recommendations in non-RT mode or flat view
+  if (!rtMode && dashboardData.recommendations) {
+    renderRecommendations(dashboardData.recommendations);
+  } else {
+    document.getElementById('recsSection').classList.add('hidden');
+  }
   
   // Footer
   document.getElementById('footerTimestamp').textContent = 
@@ -707,13 +1011,11 @@ function displayResults() {
 // ─── Initialize ──────────────────────────────────────────────────────────────
 
 async function init() {
-  // Try to auto-load results.json on page load
   try {
     const resp = await fetch('./results.json');
     if (resp.ok) {
       dashboardData = await resp.json();
       
-      // Pre-fill search form from loaded data
       if (dashboardData.meta) {
         document.getElementById('inputFrom').value = dashboardData.meta.origin || 'LAX';
         document.getElementById('inputTo').value = dashboardData.meta.destination || 'DXB';
