@@ -1,175 +1,172 @@
 #!/usr/bin/env python3
 """
-Google Flights search script via web scraping.
-Searches Google Flights for flight prices and returns JSON results.
+Google Flights search via fast_flights (AWeirdDev/flights).
+Primary cash price source — replaces SerpAPI as first pass.
+
+Usage:
+  python3 scripts/search-google-flights.py LAX LHR 2026-03-15 [--class economy|business|first] [--return 2026-03-22]
+
+Outputs JSON array to stdout. All logging goes to stderr.
 """
 
-import json
 import sys
+import json
 import argparse
-import urllib.request
-import urllib.parse
-from datetime import datetime, timedelta
-import time
+import re
+from datetime import datetime
 
-def build_google_flights_url(origin, destination, depart_date, return_date=None, passengers=1):
-    """Build Google Flights search URL"""
-    base_url = "https://www.google.com/travel/flights"
+# Ensure the venv is used
+import os
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
+VENV_SITE = os.path.join(ROOT_DIR, ".venv", "lib")
+# Find the python version dir dynamically
+if os.path.exists(VENV_SITE):
+    for d in os.listdir(VENV_SITE):
+        sp = os.path.join(VENV_SITE, d, "site-packages")
+        if os.path.exists(sp) and sp not in sys.path:
+            sys.path.insert(0, sp)
+
+from fast_flights import FlightData, Passengers, create_filter, get_flights_from_filter
+
+
+def parse_price(price_str: str) -> float | None:
+    """Extract numeric price from '$399' or 'US$1,234'"""
+    if not price_str:
+        return None
+    match = re.search(r'[\d,]+', price_str.replace(',', ''))
+    if match:
+        try:
+            return float(match.group().replace(',', ''))
+        except ValueError:
+            return None
+    return None
+
+
+def parse_duration_minutes(dur_str: str) -> int:
+    """Parse '10 hr 20 min' or '2 hr' to minutes"""
+    if not dur_str:
+        return 0
+    hours = 0
+    minutes = 0
+    h_match = re.search(r'(\d+)\s*hr', dur_str)
+    m_match = re.search(r'(\d+)\s*min', dur_str)
+    if h_match:
+        hours = int(h_match.group(1))
+    if m_match:
+        minutes = int(m_match.group(1))
+    return hours * 60 + minutes
+
+
+def parse_time(time_str: str, search_date: str) -> str:
+    """Parse '5:35 PM on Sun, Mar 15' into ISO-ish format"""
+    if not time_str:
+        return ""
+    # Try to extract just the time portion
+    match = re.search(r'(\d{1,2}:\d{2}\s*[AP]M)', time_str)
+    if match:
+        time_part = match.group(1).strip()
+        # Extract date if present
+        date_match = re.search(r'(\w+),\s*(\w+)\s+(\d+)', time_str)
+        if date_match:
+            month_str = date_match.group(2)
+            day = int(date_match.group(3))
+            year = int(search_date[:4])
+            try:
+                month_num = datetime.strptime(month_str, '%b').month
+                dt = datetime.strptime(f"{year}-{month_num:02d}-{day:02d} {time_part}", "%Y-%m-%d %I:%M %p")
+                return dt.strftime("%Y-%m-%dT%H:%M")
+            except ValueError:
+                pass
+        return time_part
+    return time_str
+
+
+def search(origin: str, dest: str, date: str, cabin: str = "economy", return_date: str | None = None) -> list[dict]:
+    """Search Google Flights and return unified results."""
+    seat_map = {
+        "economy": "economy",
+        "business": "business",
+        "first": "first",
+    }
+    seat = seat_map.get(cabin, "economy")
     
-    # Build the search path
+    flight_data = [FlightData(date=date, from_airport=origin, to_airport=dest)]
+    
+    trip_type = "round-trip" if return_date else "one-way"
     if return_date:
-        # Round trip
-        path = f"/search?tfs=CBwQAhoeEgoyMDI2LTAzLTE1agcIARIDTEFYcgcIARIDSkZLGh4SCjIwMjYtMDMtMjJqBwgBEgNKRktyCwgBEgNMQVi4AQ&tfu=EgsKCS9tLzA5Zjc4Gg%3D%3D&hl=en"
-    else:
-        # One way
-        path = f"/search?tfs=CBwQAhoeEgoyMDI2LTAzLTE1agcIARIDTEFYcgcIARIDSkZL&tfu=EgsKCS9tLzA5Zjc4Gg%3D%3D&hl=en"
+        flight_data.append(FlightData(date=return_date, from_airport=dest, to_airport=origin))
     
-    # For now, return a basic URL - real implementation would need to construct proper encoded parameters
-    return base_url + path
-
-def search_google_flights(origin, destination, depart_date, return_date=None, passengers=1):
-    """Search Google Flights and return results"""
-    try:
-        url = build_google_flights_url(origin, destination, depart_date, return_date, passengers)
-        
-        # Create request with headers to look like a browser
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.5',
-            'Accept-Encoding': 'gzip, deflate',
-            'Connection': 'keep-alive',
-        }
-        
-        req = urllib.request.Request(url, headers=headers)
-        
-        # For demonstration, return mock data since Google Flights requires complex scraping
-        # In a real implementation, this would parse the HTML response
-        return generate_mock_flights(origin, destination, depart_date, return_date)
-        
-    except Exception as e:
-        print(f"Error searching Google Flights: {e}", file=sys.stderr)
-        return []
-
-def generate_mock_flights(origin, destination, depart_date, return_date=None):
-    """Generate realistic mock flight data for demonstration"""
-    import random
+    filter_obj = create_filter(
+        flight_data=flight_data,
+        trip=trip_type,
+        passengers=Passengers(adults=1),
+        seat=seat,
+    )
     
-    airlines = ["United", "American", "Delta", "JetBlue", "Southwest", "Alaska"]
+    print(f"Searching Google Flights: {origin}→{dest} on {date} ({cabin})", file=sys.stderr)
+    result = get_flights_from_filter(filter_obj)
     
     flights = []
-    base_price = random.randint(200, 800)
-    
-    for i in range(5):
-        airline = random.choice(airlines)
-        price = base_price + random.randint(-100, 200)
-        stops = random.choice([0, 1, 2])
-        duration_hours = 6 + stops * 2 + random.randint(-2, 3)
+    for i, flight in enumerate(result.flights or []):
+        price = parse_price(flight.price)
+        duration = parse_duration_minutes(flight.duration)
+        dep_time = parse_time(flight.departure, date)
+        arr_time = parse_time(flight.arrival, date)
         
-        departure_time = f"{random.randint(6, 23):02d}:{random.choice(['00', '15', '30', '45'])}"
-        arrival_time = f"{(random.randint(6, 23) + duration_hours) % 24:02d}:{random.choice(['00', '15', '30', '45'])}"
-        
-        flight = {
-            "price": price,
-            "currency": "USD",
-            "airline": airline,
-            "flight_number": f"{airline[:2].upper()}{random.randint(100, 9999)}",
-            "origin": origin,
-            "destination": destination,
-            "stops": stops,
-            "departure_date": depart_date,
-            "departure_time": departure_time,
-            "arrival_time": arrival_time,
-            "duration": f"{duration_hours}h {random.randint(0, 59)}m",
-            "aircraft": random.choice(["Boeing 737", "Airbus A320", "Boeing 777", "Airbus A330"]),
-            "strategy": "google-flights",
-            "booking_url": f"https://www.google.com/travel/flights/booking?{urllib.parse.urlencode({'origin': origin, 'destination': destination})}",
-            "confidence": "high"
-        }
-        
-        if return_date:
-            flight["return_date"] = return_date
-            flight["trip_type"] = "round_trip"
-            flight["price"] = int(flight["price"] * 1.8)  # Round trip premium
-        else:
-            flight["trip_type"] = "one_way"
-            
-        flights.append(flight)
-    
-    return sorted(flights, key=lambda x: x["price"])
+        # Extract date from departure for travelDate
+        travel_date = date
+        dep_date_match = re.search(r'(\w+),\s*(\w+)\s+(\d+)', flight.departure or "")
+        if dep_date_match:
+            try:
+                month_num = datetime.strptime(dep_date_match.group(2), '%b').month
+                day = int(dep_date_match.group(3))
+                year = int(date[:4])
+                travel_date = f"{year}-{month_num:02d}-{day:02d}"
+            except ValueError:
+                pass
 
-def search_flexible_dates(origin, destination, depart_date, flex_days=3, return_date=None):
-    """Search across flexible date range"""
-    base_date = datetime.strptime(depart_date, '%Y-%m-%d')
-    all_flights = []
+        flights.append({
+            "id": f"fast-flights-{i}",
+            "source": "google",
+            "type": "cash",
+            "origin": origin,
+            "destination": dest,
+            "airline": flight.name or "Unknown",
+            "stops": flight.stops if isinstance(flight.stops, int) else 0,
+            "durationMinutes": duration,
+            "departureTime": dep_time,
+            "arrivalTime": arr_time,
+            "cabinClass": cabin,
+            "cashPrice": price,
+            "currency": "USD",
+            "isBest": flight.is_best or False,
+            "delay": flight.delay,
+            "travelDate": travel_date,
+        })
     
-    # Search dates in the flexible range
-    for i in range(-flex_days, flex_days + 1):
-        search_date = base_date + timedelta(days=i)
-        search_date_str = search_date.strftime('%Y-%m-%d')
-        
-        # For return flights, also vary return date
-        if return_date:
-            return_base = datetime.strptime(return_date, '%Y-%m-%d')
-            for j in range(-flex_days, flex_days + 1):
-                return_search_date = return_base + timedelta(days=j)
-                return_search_str = return_search_date.strftime('%Y-%m-%d')
-                
-                flights = search_google_flights(origin, destination, search_date_str, return_search_str)
-                for flight in flights:
-                    flight["search_date"] = search_date_str
-                    flight["search_return_date"] = return_search_str
-                    flight["date_flexibility"] = f"{i:+d} days departure, {j:+d} days return"
-                all_flights.extend(flights)
-                time.sleep(0.1)  # Rate limiting
-        else:
-            flights = search_google_flights(origin, destination, search_date_str)
-            for flight in flights:
-                flight["search_date"] = search_date_str
-                flight["date_flexibility"] = f"{i:+d} days from {depart_date}"
-            all_flights.extend(flights)
-            time.sleep(0.1)  # Rate limiting
-    
-    return sorted(all_flights, key=lambda x: x["price"])
+    print(f"Found {len(flights)} flights via fast_flights", file=sys.stderr)
+    return flights
+
 
 def main():
-    parser = argparse.ArgumentParser(description='Search Google Flights for flight prices')
-    parser.add_argument('origin', help='Origin airport code (e.g., LAX)')
-    parser.add_argument('destination', help='Destination airport code (e.g., JFK)')
-    parser.add_argument('depart_date', help='Departure date (YYYY-MM-DD)')
-    parser.add_argument('--return', dest='return_date', help='Return date for round trip (YYYY-MM-DD)')
-    parser.add_argument('--passengers', type=int, default=1, help='Number of passengers (default: 1)')
-    parser.add_argument('--flex', type=int, default=0, help='Flexible date range (+/- days)')
-    parser.add_argument('--pretty', action='store_true', help='Pretty print JSON output')
+    parser = argparse.ArgumentParser(description="Search Google Flights via fast_flights")
+    parser.add_argument("origin", help="Origin airport code")
+    parser.add_argument("destination", help="Destination airport code")
+    parser.add_argument("date", help="Departure date (YYYY-MM-DD)")
+    parser.add_argument("--class", dest="cabin", default="economy", choices=["economy", "business", "first"])
+    parser.add_argument("--return", dest="return_date", default=None, help="Return date (YYYY-MM-DD)")
     
     args = parser.parse_args()
     
     try:
-        if args.flex > 0:
-            results = search_flexible_dates(
-                args.origin, 
-                args.destination, 
-                args.depart_date, 
-                args.flex,
-                args.return_date
-            )
-        else:
-            results = search_google_flights(
-                args.origin, 
-                args.destination, 
-                args.depart_date, 
-                args.return_date,
-                args.passengers
-            )
-        
-        if args.pretty:
-            print(json.dumps(results, indent=2, sort_keys=True))
-        else:
-            print(json.dumps(results))
-            
+        results = search(args.origin, args.destination, args.date, args.cabin, args.return_date)
+        print(json.dumps(results))
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
+        print(json.dumps([]))
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

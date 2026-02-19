@@ -8,7 +8,7 @@
  * Sources:
  *   - Roame (award flights across ALL programs) ✅
  *   - AA direct scraper (detailed fare data, backup) ✅  
- *   - Google Flights via SerpAPI (cash prices) ✅
+ *   - Google Flights via fast_flights (primary, no API key) ✅ → SerpAPI fallback
  *   - Hidden city engine (positioning/savings) ✅
  * 
  * Usage:
@@ -53,6 +53,7 @@ interface SearchConfig {
   sources: string[]
   output: string
   verbose: boolean
+  flexDays?: number   // 0, 1, or 2 — passed to Roame's daysAround
 }
 
 interface PointsBalance {
@@ -179,7 +180,7 @@ async function searchRoameSource(config: SearchConfig): Promise<{ flights: Unifi
     try {
       const result = await searchRoame(
         config.origin, config.destination, config.departureDate,
-        cls, ["ALL"], config.verbose
+        cls, ["ALL"], config.verbose, config.flexDays || 0
       )
       
       const unified = roameFaresToUnified(result.fares, cls)
@@ -191,6 +192,79 @@ async function searchRoameSource(config: SearchConfig): Promise<{ flights: Unifi
   }
   
   return { flights: allFlights, completion: totalCompletion / classes.length }
+}
+
+// ─── fast_flights (Primary Google Flights Source) ─────────────────────────
+
+async function searchFastFlights(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
+  const scriptPath = path.join(ROOT, "scripts", "search-google-flights.py")
+  const venvPython = path.join(ROOT, ".venv", "bin", "python3")
+  const pythonBin = fs.existsSync(venvPython) ? venvPython : "python3"
+  
+  if (!fs.existsSync(scriptPath)) {
+    console.warn("⚠️ fast_flights script not found, falling back to SerpAPI")
+    return { flights: [], completion: 0 }
+  }
+
+  const cabinMap: Record<string, string> = { ECON: "economy", PREM: "business", both: "economy" }
+  const classesToSearch = config.searchClass === "both" ? ["economy", "business"] : [cabinMap[config.searchClass] || "economy"]
+  const allFlights: UnifiedFlightResult[] = []
+
+  for (const cabin of classesToSearch) {
+    try {
+      let cmd = `"${pythonBin}" "${scriptPath}" ${config.origin} ${config.destination} ${config.departureDate} --class ${cabin}`
+      if (config.returnDate) cmd += ` --return ${config.returnDate}`
+      
+      const output = execSync(cmd, {
+        timeout: 45000,
+        env: { ...process.env },
+        encoding: "utf-8",
+      })
+
+      // Parse only the last line (JSON output) — stderr goes to console
+      const lines = output.trim().split("\n")
+      const jsonLine = lines[lines.length - 1]!
+      const results = JSON.parse(jsonLine) as any[]
+
+      for (const r of results) {
+        const depTimeStr = r.departureTime || ""
+        const extractedDate = depTimeStr && /^\d{4}-\d{2}-\d{2}/.test(depTimeStr) ? depTimeStr.slice(0, 10) : config.departureDate
+
+        allFlights.push({
+          id: `google-${allFlights.length}`,
+          source: "google",
+          type: "cash",
+          origin: r.origin || config.origin,
+          destination: r.destination || config.destination,
+          airline: r.airline || "Unknown",
+          operatingAirlines: (r.airline || "Unknown").split(", "),
+          flightNumbers: [],
+          stops: r.stops || 0,
+          durationMinutes: r.durationMinutes || 0,
+          departureTime: r.departureTime || "",
+          arrivalTime: r.arrivalTime || "",
+          airports: [r.origin || config.origin, r.destination || config.destination],
+          cabinClass: r.cabinClass || cabin,
+          equipment: [],
+          points: null,
+          pointsProgram: null,
+          cashPrice: r.cashPrice || null,
+          taxes: 0,
+          currency: "USD",
+          cppValue: null,
+          roameScore: null,
+          availableSeats: null,
+          bookingUrl: `https://www.google.com/travel/flights?q=flights+from+${config.origin}+to+${config.destination}+on+${config.departureDate}`,
+          fareClass: r.isBest ? "best" : "",
+          travelDate: extractedDate,
+        })
+      }
+    } catch (err) {
+      console.warn(`⚠️ fast_flights (${cabin}) failed:`, (err as Error).message?.slice(0, 200))
+    }
+  }
+
+  return { flights: allFlights, completion: allFlights.length > 0 ? 100 : 0 }
 }
 
 // ─── SerpAPI Usage Limiter ─────────────────────────────────────────────────
@@ -285,6 +359,11 @@ async function searchSerpApiGoogle(config: SearchConfig): Promise<{ flights: Uni
             lastLeg.arrival_airport?.id || config.destination,
           ].filter(Boolean)
 
+          // Extract travel date from departure time or fall back to search date
+          const depTimeStr = firstLeg.departure_airport?.time || ""
+          const extractedDate = depTimeStr ? depTimeStr.split("T")[0] || depTimeStr.split(" ")[0] || config.departureDate : config.departureDate
+          const flightTravelDate = extractedDate && /^\d{4}-\d{2}-\d{2}/.test(extractedDate) ? extractedDate.slice(0, 10) : config.departureDate
+
           allFlights.push({
             id: `google-${allFlights.length}`,
             source: "google",
@@ -310,9 +389,10 @@ async function searchSerpApiGoogle(config: SearchConfig): Promise<{ flights: Uni
             roameScore: null,
             availableSeats: null,
             bookingUrl: itinerary.booking_token
-              ? `https://www.google.com/travel/flights/booking?token=${itinerary.booking_token}`
+              ? `https://www.google.com/travel/flights/booking?token=${encodeURIComponent(itinerary.booking_token)}`
               : `https://www.google.com/travel/flights?q=flights+from+${config.origin}+to+${config.destination}+on+${config.departureDate}`,
             fareClass: itinerary.type || "",
+            travelDate: flightTravelDate,
           })
         }
       }
@@ -373,6 +453,7 @@ async function searchHiddenCity(config: SearchConfig): Promise<{ flights: Unifie
       availableSeats: null,
       bookingUrl: r.booking_url || `https://www.google.com/travel/flights`,
       fareClass: `hidden-city:${r.ticketed_destination}|saves:$${Math.round(r.savings)}(${r.savings_percent}%)|risk:${r.risk_score}|direct:$${r.direct_price}`,
+      travelDate: config.departureDate,
     }))
 
     return { flights, completion: results.length > 0 ? 100 : 0 }
@@ -535,11 +616,28 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   
   if (config.sources.includes("google")) {
     promises.push(
-      searchSerpApiGoogle(config).then(({ flights, completion }) => {
-        allFlights.push(...flights)
-        completionPct["google"] = completion
-        console.log(`✅ Google Flights: ${flights.length} cash fares`)
-      }).catch(err => {
+      (async () => {
+        // Try fast_flights first (no API key needed, no rate limits)
+        console.log("🔍 Trying fast_flights (primary)...")
+        const fastResult = await searchFastFlights(config).catch(err => {
+          console.warn(`⚠️ fast_flights failed: ${err.message?.slice(0, 100)}`)
+          return { flights: [] as UnifiedFlightResult[], completion: 0 }
+        })
+        
+        if (fastResult.flights.length > 0) {
+          allFlights.push(...fastResult.flights)
+          completionPct["google"] = fastResult.completion
+          console.log(`✅ Google Flights (fast_flights): ${fastResult.flights.length} cash fares`)
+          return
+        }
+        
+        // Fallback to SerpAPI if fast_flights returned nothing
+        console.log("🔄 fast_flights returned 0 results, falling back to SerpAPI...")
+        const serpResult = await searchSerpApiGoogle(config)
+        allFlights.push(...serpResult.flights)
+        completionPct["google"] = serpResult.completion
+        console.log(`✅ Google Flights (SerpAPI fallback): ${serpResult.flights.length} cash fares`)
+      })().catch(err => {
         console.error(`❌ Google Flights failed: ${err.message}`)
         completionPct["google"] = 0
       })
@@ -631,6 +729,7 @@ Options:
   --class <ECON|PREM|both>  Search class (default: both)
   --sources <list>       Comma-separated: roame,google,aa (default: roame,google)
   --output <file>        Output file (default: results.json)
+  --flex <0|1|2>         Flexible dates: search ±N days via Roame (default: 0)
   --verbose              Show detailed progress
 `)
     process.exit(0)
@@ -644,6 +743,7 @@ Options:
     searchClass: getArg("--class", "both") as any,
     sources: getArg("--sources", "roame,google,hidden-city").split(","),
     output: getArg("--output", "results.json"),
+    flexDays: parseInt(getArg("--flex", "0")),
     verbose: hasFlag("--verbose"),
   }
   
