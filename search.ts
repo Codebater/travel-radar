@@ -21,6 +21,7 @@ import path from "path"
 import { execSync } from "child_process"
 import { searchRoame, roameFaresToUnified } from "./roame-scraper.js"
 import type { RoameFare, UnifiedFlightResult } from "./roame-scraper.js"
+import { searchATF, atfToUnified, ATF_AIRLINE_META } from "./atf-scraper.js"
 import { scoreFlights, type ValueScoredFlight, type ValueInsight } from "./value-engine.ts"
 import { getSweetSpotsForRoute } from "./sweet-spots.ts"
 import { findFundingPaths } from "./transfer-partners.ts"
@@ -192,6 +193,93 @@ async function searchRoameSource(config: SearchConfig): Promise<{ flights: Unifi
   }
   
   return { flights: allFlights, completion: totalCompletion / classes.length }
+}
+
+// ─── ATF Source ──────────────────────────────────────────────────────────────
+
+async function searchATFSource(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
+  try {
+    const results = await searchATF(config.origin, config.destination, config.departureDate)
+    const flights = atfToUnified(results)
+    return { flights, completion: flights.length > 0 ? 100 : 50 }
+  } catch (err) {
+    console.error(`❌ ATF failed: ${(err as Error).message}`)
+    return { flights: [], completion: 0 }
+  }
+}
+
+// ─── ATF × Roame Cross-Reference ─────────────────────────────────────────────
+
+/**
+ * Cross-reference ATF and Roame award results.
+ *
+ * Matching key: pointsProgram + cabinClass + travelDate
+ *   - Both sources agree  → "cross-verified" (keep Roame data — richer; pull ATF seat count if Roame lacks it)
+ *   - ATF found, Roame missed → "ATF-exclusive" (ATF result kept as-is)
+ *   - Roame found, ATF doesn't cover → unchanged (ATF only covers 5 airlines)
+ *
+ * ATF covers: british_airways, qatar_airways, cathay_pacific, virgin_atlantic, iberia.
+ * Everything else Roame finds is out of ATF scope and stays untagged.
+ */
+function crossReferenceATFAndRoame(
+  roameFlights: UnifiedFlightResult[],
+  atfFlights: UnifiedFlightResult[],
+): UnifiedFlightResult[] {
+  if (atfFlights.length === 0) return roameFlights
+
+  // Build ATF result lookup: key → ATFUnifiedResult
+  const atfByKey = new Map<string, UnifiedFlightResult>()
+  for (const f of atfFlights) {
+    if (!f.pointsProgram || !f.cabinClass || !f.travelDate) continue
+    const key = `${f.pointsProgram}:${f.cabinClass}:${f.travelDate}`
+    atfByKey.set(key, f)
+  }
+
+  // ATF-covered program keys (to know when a Roame miss is meaningful)
+  const atfProgramKeys = new Set(
+    Object.values(ATF_AIRLINE_META).map(m => m.programKey)
+  )
+
+  const merged: UnifiedFlightResult[] = []
+  const matchedATFKeys = new Set<string>()
+
+  for (const roameFlight of roameFlights) {
+    if (roameFlight.type !== "award" || !roameFlight.pointsProgram) {
+      merged.push(roameFlight)
+      continue
+    }
+
+    const key = `${roameFlight.pointsProgram}:${roameFlight.cabinClass}:${roameFlight.travelDate}`
+    const atfMatch = atfByKey.get(key)
+
+    if (atfMatch) {
+      matchedATFKeys.add(key)
+      // Keep Roame data (has duration, stops, flight numbers, roameScore)
+      // Enrich with ATF seat count if Roame doesn't have it
+      merged.push({
+        ...roameFlight,
+        availableSeats: roameFlight.availableSeats ?? atfMatch.availableSeats,
+        tags: [...(roameFlight.tags || []), "cross-verified"],
+      })
+    } else {
+      // Not in ATF — only note the absence if ATF covers this program
+      // (Roame might show flights ATF doesn't cover, like QR on Flying Blue)
+      merged.push(roameFlight)
+    }
+  }
+
+  // Add ATF-exclusive results (availability ATF found that Roame missed)
+  for (const [key, atfFlight] of atfByKey.entries()) {
+    if (!matchedATFKeys.has(key)) {
+      console.log(`  🔵 ATF-exclusive: ${atfFlight.airline} ${atfFlight.cabinClass} (${atfFlight.pointsProgram})`)
+      merged.push({
+        ...atfFlight,
+        tags: [...(atfFlight.tags || []), "ATF-exclusive"],
+      })
+    }
+  }
+
+  return merged
 }
 
 // ─── fast_flights (Primary Google Flights Source) ─────────────────────────
@@ -597,19 +685,36 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   
   // Run search sources in parallel
   const completionPct: Record<string, number> = {}
-  const allFlights: UnifiedFlightResult[] = []
-  
+  // Non-award flights (cash, hidden-city) go directly here
+  const otherFlights: UnifiedFlightResult[] = []
+  // Award sources kept separate for cross-referencing
+  let roameFlights: UnifiedFlightResult[] = []
+  let atfFlights: UnifiedFlightResult[] = []
+
   const promises: Promise<void>[] = []
   
   if (config.sources.includes("roame")) {
     promises.push(
       searchRoameSource(config).then(({ flights, completion }) => {
-        allFlights.push(...flights)
+        roameFlights = flights
         completionPct["roame"] = completion
         console.log(`✅ Roame: ${flights.length} award fares`)
       }).catch(err => {
         console.error(`❌ Roame failed: ${err.message}`)
         completionPct["roame"] = 0
+      })
+    )
+  }
+
+  if (config.sources.includes("atf")) {
+    promises.push(
+      searchATFSource(config).then(({ flights, completion }) => {
+        atfFlights = flights
+        completionPct["atf"] = completion
+        console.log(`✅ ATF: ${flights.length} award fares across ${new Set(flights.map(f => f.pointsProgram)).size} programs`)
+      }).catch(err => {
+        console.error(`❌ ATF failed: ${err.message}`)
+        completionPct["atf"] = 0
       })
     )
   }
@@ -625,7 +730,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
         })
         
         if (fastResult.flights.length > 0) {
-          allFlights.push(...fastResult.flights)
+          otherFlights.push(...fastResult.flights)
           completionPct["google"] = fastResult.completion
           console.log(`✅ Google Flights (fast_flights): ${fastResult.flights.length} cash fares`)
           return
@@ -634,7 +739,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
         // Fallback to SerpAPI if fast_flights returned nothing
         console.log("🔄 fast_flights returned 0 results, falling back to SerpAPI...")
         const serpResult = await searchSerpApiGoogle(config)
-        allFlights.push(...serpResult.flights)
+        otherFlights.push(...serpResult.flights)
         completionPct["google"] = serpResult.completion
         console.log(`✅ Google Flights (SerpAPI fallback): ${serpResult.flights.length} cash fares`)
       })().catch(err => {
@@ -647,7 +752,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   if (config.sources.includes("hidden-city")) {
     promises.push(
       searchHiddenCity(config).then(({ flights, completion }) => {
-        allFlights.push(...flights)
+        otherFlights.push(...flights)
         completionPct["hidden-city"] = completion
         console.log(`✅ Hidden City: ${flights.length} opportunities`)
       }).catch(err => {
@@ -658,6 +763,19 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   }
   
   await Promise.allSettled(promises)
+
+  // ── Cross-reference ATF vs Roame ──────────────────────────────────────────
+  // Merge award sources: cross-verified flights get richer data + tags;
+  // ATF-exclusive finds are flagged for the value engine and dashboard.
+  const awardFlights = crossReferenceATFAndRoame(roameFlights, atfFlights)
+  const crossVerified = awardFlights.filter(f => f.tags?.includes("cross-verified")).length
+  const atfExclusive = awardFlights.filter(f => f.tags?.includes("ATF-exclusive")).length
+  if (roameFlights.length > 0 || atfFlights.length > 0) {
+    console.log(`  🔗 Cross-reference: ${crossVerified} verified, ${atfExclusive} ATF-exclusive`)
+  }
+
+  // Combine all flights
+  const allFlights = [...awardFlights, ...otherFlights]
   
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
   console.log(`\n📊 Search complete: ${allFlights.length} flights in ${elapsed}s`)
@@ -727,7 +845,7 @@ Options:
   --date <YYYY-MM-DD>    Departure date (default: 2026-04-28)
   --return <YYYY-MM-DD>  Return date (omit for one-way)
   --class <ECON|PREM|both>  Search class (default: both)
-  --sources <list>       Comma-separated: roame,google,aa (default: roame,google)
+  --sources <list>       Comma-separated: roame,atf,google,hidden-city (default: roame,atf,google,hidden-city)
   --output <file>        Output file (default: results.json)
   --flex <0|1|2>         Flexible dates: search ±N days via Roame (default: 0)
   --verbose              Show detailed progress
@@ -741,7 +859,7 @@ Options:
     departureDate: getArg("--date", "2026-04-28"),
     returnDate: args.includes("--return") ? getArg("--return", "") : undefined,
     searchClass: getArg("--class", "both") as any,
-    sources: getArg("--sources", "roame,google,hidden-city").split(","),
+    sources: getArg("--sources", "roame,atf,google,hidden-city").split(","),
     output: getArg("--output", "results.json"),
     flexDays: parseInt(getArg("--flex", "0")),
     verbose: hasFlag("--verbose"),

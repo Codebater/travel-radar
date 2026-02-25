@@ -37,7 +37,7 @@ export interface ValueScoredFlight extends UnifiedFlightResult {
 }
 
 export interface ValueInsight {
-  type: "sweet-spot-available" | "transfer-bonus" | "cash-wins" | "book-now" | "route-tip"
+  type: "sweet-spot-available" | "transfer-bonus" | "cash-wins" | "book-now" | "route-tip" | "atf-exclusive" | "cross-verified"
   priority: "high" | "medium" | "low"
   title: string
   detail: string
@@ -187,6 +187,11 @@ function calculateValueScore(
     }
     score += cppScores[cppRating] || 8
   }
+
+  // Cross-reference bonus: two independent sources confirmed availability (+5)
+  // ATF-exclusive gets a smaller bonus (+2) — real but unverified by Roame
+  if (flight.tags?.includes("cross-verified")) score += 5
+  else if (flight.tags?.includes("ATF-exclusive")) score += 2
   
   // Sweet spot (0-20 points)
   if (sweetSpot) {
@@ -366,6 +371,30 @@ export function scoreFlights(
     })
   }
   
+  // 5. ATF-exclusive finds (availability ATF caught that Roame missed)
+  const atfExclusives = scored.filter(f => f.tags?.includes("ATF-exclusive") && f.canAfford)
+  if (atfExclusives.length > 0) {
+    const best = atfExclusives.sort((a, b) => b.valueScore - a.valueScore)[0]!
+    insights.push({
+      type: "atf-exclusive",
+      priority: "medium",
+      title: `🔵 ATF-Exclusive: ${best.airline} ${best.cabinClass}`,
+      detail: `Found ${atfExclusives.length} award(s) via Award Travel Finder that Roame didn't surface. Best: ${best.points?.toLocaleString()} pts (${best.pointsProgram}). Book directly at airline site.`,
+      actionUrl: best.bookingUrl,
+    })
+  }
+
+  // 6. Cross-verified count as a confidence signal
+  const crossVerified = scored.filter(f => f.tags?.includes("cross-verified"))
+  if (crossVerified.length > 0) {
+    insights.push({
+      type: "cross-verified",
+      priority: "low",
+      title: `✅ ${crossVerified.length} award${crossVerified.length !== 1 ? "s" : ""} cross-verified by ATF`,
+      detail: `Both Roame and Award Travel Finder confirmed availability for ${crossVerified.length} fare${crossVerified.length !== 1 ? "s" : ""}. Higher confidence these seats exist.`,
+    })
+  }
+
   // Sort insights by priority
   const priorityOrder = { high: 0, medium: 1, low: 2 }
   insights.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority])

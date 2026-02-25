@@ -60,8 +60,10 @@ export interface RoameSearchResult {
 
 export interface UnifiedFlightResult {
   id: string
-  source: "roame" | "aa-direct" | "google" | "estimate"
+  source: "roame" | "aa-direct" | "google" | "estimate" | "atf" | "hidden-city"
   type: "award" | "cash"
+  /** Cross-reference tags set by the orchestrator: "cross-verified" | "ATF-exclusive" */
+  tags?: string[]
   // Route info
   origin: string
   destination: string
@@ -88,6 +90,8 @@ export interface UnifiedFlightResult {
   // Booking
   bookingUrl: string
   fareClass: string
+  travelDate?: string       // YYYY-MM-DD
+  direction?: "outbound" | "return"
 }
 
 // ─── Credentials ─────────────────────────────────────────────────────────────
@@ -153,7 +157,8 @@ export async function initiateSearch(
   date: string,
   searchClass: string = "PREM",
   mileagePrograms: string[] = ["ALL"],
-  creds?: RoameCredentials
+  creds?: RoameCredentials,
+  daysAround: number = 0,
 ): Promise<string> {
   const result = await graphql(
     `mutation initiateFlightSearchMutation($flightSearchInput: FlightSearchInput!) {
@@ -168,7 +173,7 @@ export async function initiateSearch(
         searchClass,
         mileagePrograms,
         preSearch: false,
-        daysAround: 0,
+        daysAround,
         tripLength: 0,
       }
     },
@@ -244,14 +249,15 @@ export async function searchRoame(
   searchClass: string = "PREM",
   programs: string[] = ["ALL"],
   verbose: boolean = false,
+  daysAround: number = 0,
 ): Promise<RoameSearchResult> {
   const creds = loadCredentials()
   
   if (verbose) {
-    process.stdout.write(`🔍 Roame: ${origin}→${destination} ${date} (${searchClass})\n`)
+    process.stdout.write(`🔍 Roame: ${origin}→${destination} ${date} (${searchClass})${daysAround ? ` ±${daysAround}d` : ''}\n`)
   }
   
-  const jobUUID = await initiateSearch(origin, destination, date, searchClass, programs, creds)
+  const jobUUID = await initiateSearch(origin, destination, date, searchClass, programs, creds, daysAround)
   if (verbose) process.stdout.write(`  Job: ${jobUUID}\n`)
   
   const { fares, percentCompleted } = await pollResults(
@@ -319,6 +325,60 @@ const PROGRAM_DISPLAY_NAMES: Record<string, string> = {
   JAL: "JAL Mileage Bank",
 }
 
+/**
+ * Build deep booking URLs with origin/dest/date pre-filled for each loyalty program.
+ * Much better than generic homepages — gets the user as close to the fare as possible.
+ */
+export function buildProgramBookingUrl(
+  program: string,
+  origin: string,
+  destination: string,
+  date: string,
+  cabin: string = "economy",
+): string {
+  const [year, month, day] = date.split("-")
+  const cabinCode = cabin === "first" ? "F" : cabin === "business" ? "J" : "Y"
+
+  switch (program) {
+    case "ALASKA":
+      return `https://www.alaskaair.com/booking/choose-flights?prior=award&prior=award&orig=${origin}&dest=${destination}&prior=award&date=${year}${month}${day}&ADT=1`
+    case "UNITED":
+      return `https://www.united.com/ual/en/us/flight-search/book-a-flight/results/awd?f=${origin}&t=${destination}&d=${date}&tt=1&at=1&sc=7&px=1&taxng=1&newHP=True&clm=7&st=bestmatches&tqp=A`
+    case "AMERICAN":
+      return `https://www.aa.com/booking/search?locale=en_US&pax=1&adult=1&type=OneWay&searchType=Award&origin=${origin}&destination=${destination}&departureDate=${date}`
+    case "DELTA":
+      return `https://www.delta.com/flight-search/search?cacheKeySuffix=a&action=findFlights&tripType=ONE_WAY&priceSchedule=MILES&origin=${origin}&destination=${destination}&departureDate=${date}&paxCount=1`
+    case "AEROPLAN":
+      return `https://www.aircanada.com/aeroplan/redeem/availability/outbound?org0=${origin}&dest0=${destination}&departureDate0=${date}&ADT=1&YTH=0&CHD=0&INF=0&INS=0&lang=en-CA&tripType=O`
+    case "FLYING_BLUE":
+      return `https://wwws.airfrance.us/search/offers?pax=1:0:0:0:0:0:0:0&cabinClass=ECONOMY&activeConnection=0&connections=${origin}-A>${destination}-A:${date}`
+    case "BRITISH_AIRWAYS":
+      return `https://www.britishairways.com/travel/redeem/execclub/_gf/en_us?eId=111095&from=${origin}&to=${destination}&depDate=${date}&cabin=${cabinCode === "F" ? "F" : cabinCode === "J" ? "C" : "M"}&ad=1&ch=0&inf=0&yf=0`
+    case "EMIRATES":
+      return `https://www.emirates.com/us/english/book/?origin=${origin}&destination=${destination}&departDate=${date}&pax=1&class=${cabin}&award=true`
+    case "QATAR":
+      return `https://booking.qatarairways.com/nsp/views/showBooking.action?widget=QR&searchType=F&bookingClass=${cabinCode === "F" ? "F" : cabinCode === "J" ? "C" : "E"}&tripType=O&from=${origin}&to=${destination}&departing=${date}&adult=1&child=0&infant=0&bookAward=true`
+    case "SINGAPORE":
+      return `https://www.singaporeair.com/en_UK/ppsclub-krisflyer/redeem/redemption-booking/?originStation=${origin}&destinationStation=${destination}&departDate=${day}${month}${year}&cabinClass=${cabinCode}&adult=1`
+    case "VIRGIN_ATLANTIC":
+      return `https://www.virginatlantic.com/flight-search/select-flights?origin=${origin}&destination=${destination}&awardSearch=true&departureDate=${date}&adult=1`
+    case "AVIANCA":
+      return `https://www.lifemiles.com/flights/search?origin=${origin}&destination=${destination}&departDate=${date}&tripType=OW&adult=1&cabin=${cabinCode}`
+    case "CATHAY":
+      return `https://www.cathaypacific.com/cx/en_HK/book-a-trip/redeem-flights/redeem-flight-awards.html?origin=${origin}&destination=${destination}&departDate=${date}`
+    case "ETIHAD":
+      return `https://www.etihad.com/en-us/fly-etihad/book-a-flight?departFrom=${origin}&arriveAt=${destination}&departDate=${date}&numAdults=1&tripType=one-way&guestMiles=true`
+    case "ANA":
+      return `https://www.ana.co.jp/en/us/amc/reference/tyo/award/`
+    case "JAL":
+      return `https://www.jal.co.jp/en/jmb/award/`
+    case "QANTAS":
+      return `https://www.qantas.com/au/en/book-a-trip/flights.html?from=${origin}&to=${destination}&departure=${date}&adults=1&children=0&infants=0&isUsingRewardPoints=true`
+    default:
+      return PROGRAM_BOOKING_URLS[program] || "https://roame.travel"
+  }
+}
+
 // Estimated cash prices for CPP calculation (per cabin per direction)
 const CABIN_CASH_ESTIMATES: Record<string, number> = {
   economy: 800,
@@ -342,6 +402,9 @@ export function roameFaresToUnified(fares: RoameFare[], searchClass: string): Un
     const cppValue = fare.awardPoints > 0 
       ? ((estimatedCash - fare.surcharge) / (fare.awardPoints / 100))
       : null
+    
+    // Extract clean travel date from departureDateStr (YYYY-MM-DD)
+    const travelDate = fare.departureDateStr || fare.departureDate || ""
     
     return {
       id: `roame-${fare.mileageProgram}-${idx}`,
@@ -367,8 +430,15 @@ export function roameFaresToUnified(fares: RoameFare[], searchClass: string): Un
       cppValue: cppValue ? Math.round(cppValue * 10) / 10 : null,
       roameScore: fare.roameScore,
       availableSeats: fare.availableSeats,
-      bookingUrl: PROGRAM_BOOKING_URLS[fare.mileageProgram] || `https://roame.travel`,
+      bookingUrl: buildProgramBookingUrl(
+        fare.mileageProgram,
+        fare.originIata,
+        fare.destinationIata,
+        travelDate,
+        cabin,
+      ),
       fareClass: fare.fareClass,
+      travelDate,
     }
   })
 }

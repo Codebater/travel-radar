@@ -13,6 +13,7 @@ You search a route. It tells you:
 
 ### Search Sources
 - **🔍 Roame** — One GraphQL API searches 19+ mileage programs (United, Alaska, AA, Delta, Flying Blue, Qantas, BA, Emirates, Qatar, Singapore, etc.)
+- **🔵 Award Travel Finder (ATF)** — REST API covering 5 airlines' own award programs (BA Avios, Qatar Privilege Club, Asia Miles, Virgin Points, Iberia Plus). Cross-referenced against Roame for confidence scoring. 150 calls/month; each full search = 5 calls.
 - **💰 SerpAPI** — Google Flights cash prices (hard cap at 95/mo to stay on free tier)
 - **🏙️ Hidden City Engine** — Finds cheaper fares by booking beyond your destination
 - **💳 AwardWallet** — Real balances from 34 loyalty accounts
@@ -49,6 +50,7 @@ npx tsx serve.ts --port 8888
 ```
 search.ts (Orchestrator)
 ├── roame-scraper.ts    → Roame GraphQL API (19+ award programs)
+├── atf-scraper.ts      → Award Travel Finder REST API (5 airlines, 150 calls/mo)
 ├── SerpAPI             → Google Flights (cash prices)
 ├── hidden city engine  → Beyond-hub savings detection
 ├── AwardWallet API     → 34 loyalty account balances
@@ -57,20 +59,39 @@ search.ts (Orchestrator)
     └── transfer-partners.ts → 40 bank→airline transfer paths
 ```
 
+### ATF Cross-Reference Logic
+
+After Roame and ATF complete in parallel, results are merged:
+
+| Scenario | Tag | Behavior |
+|----------|-----|----------|
+| Same program + cabin + date in both | `cross-verified` | Roame data kept (richer); ATF seat count fills any gaps |
+| ATF found, Roame missed | `ATF-exclusive` | ATF result added; flagged in insights |
+| Roame found, outside ATF scope | *(none)* | Kept as-is (ATF covers only 5 airlines) |
+
+The value engine gives `cross-verified` fares +5 score points (two sources confirmed seats exist), and `ATF-exclusive` fares +2 points.
+
 ### How It Works
 
-1. **Search** — Roame + SerpAPI + hidden city run in parallel (~45-65s)
-2. **Score** — Value engine cross-references every award fare against real cash prices
-3. **Match** — Sweet spot database flags known high-value redemptions
-4. **Fund** — Transfer partner graph shows how to get miles you need
-5. **Rank** — Composite value score (0-100) sorts everything
-6. **Recommend** — Top 3 picks with full context
+1. **Search** — Roame + ATF + SerpAPI + hidden city run in parallel (~45-65s)
+2. **Cross-reference** — ATF and Roame award results are merged; cross-verified fares get +5 confidence boost
+3. **Score** — Value engine cross-references every award fare against real cash prices
+4. **Match** — Sweet spot database flags known high-value redemptions
+5. **Fund** — Transfer partner graph shows how to get miles you need
+6. **Rank** — Composite value score (0-100) sorts everything
+7. **Recommend** — Top 3 picks with full context
 
 ## CLI Usage
 
 ```bash
-# Full search with all sources
+# Full search with all sources (default — includes ATF cross-reference)
+npx tsx search.ts --from LAX --to LHR --date 2026-03-15 --class both
+
+# Save ATF calls — skip ATF when searching non-ATF airlines (e.g. Dubai)
 npx tsx search.ts --from LAX --to DXB --date 2026-04-28 --class both --sources roame,google,hidden-city
+
+# ATF only — check one route across all 5 airlines (5 calls)
+npx tsx atf-scraper.ts --from LAX --to LHR --date 2026-03-15 --unified
 
 # Roame only for award availability
 npx tsx roame-scraper.ts --from LAX --to DXB --date 2026-04-28 --class PREM
@@ -90,6 +111,20 @@ npx tsx serve.ts --port 8888
   "csrfSecret": "...",
   "sessionExpiresAt": 1771829264892
 }
+```
+
+### Award Travel Finder / ATF (Optional, enhances Roame with cross-reference)
+```bash
+# Option 1: .env file (preferred)
+ATF_API_KEY=your-key-here
+
+# Option 2: credentials file
+# Save to ~/.openclaw/credentials/awardtravelfinder.json:
+{ "apiKey": "your-key-here" }
+
+# Budget: 150 calls/month. Each full search = 5 calls (one per airline).
+# = ~30 full searches/month. Code warns at <20 remaining calls.
+# Airlines covered: BA Avios, Qatar Privilege Club, Asia Miles, Virgin Points, Iberia Plus
 ```
 
 ### SerpAPI (Required for cash prices)
