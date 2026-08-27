@@ -228,6 +228,11 @@ export class ATFAwardProvider implements AwardFlightProvider {
 
   private normalise(results: ATFResult[], query: AwardFlightQuery): NormalizedAwardFlight[] {
     const out: NormalizedAwardFlight[] = []
+    // One clock reading for the whole search. A per-row timestamp makes rows
+    // from a single fetch milliseconds apart, and anything that treats
+    // fetched_at as the identity of a fetch — the anomaly baseline does —
+    // then reads the earlier rows as prior history for the later ones.
+    const fetchedAt = new Date().toISOString()
 
     for (const result of results) {
       if (result.error || !result.response?.success || !result.response.data) continue
@@ -253,8 +258,13 @@ export class ATFAwardProvider implements AwardFlightProvider {
         // and returns no CPP rather than a plausible wrong one. Losing CPP on
         // a GBP-priced award until a real FX layer exists is the correct
         // trade: a missing number beats a fabricated one.
-        const taxesAmount = cabin.taxes ?? null
-        const taxesCurrency = cabin.taxes_currency || "USD"
+        // If ATF reports an amount but no currency we record NO surcharge
+        // rather than guessing one. A number labelled with the wrong currency
+        // is worse than a missing number: the scorer treats a missing
+        // surcharge as "not reported" and drops the component, while a wrong
+        // label silently feeds a baseline and a CPP subtraction.
+        const taxesCurrency = cabin.taxes_currency || null
+        const taxesAmount = taxesCurrency ? (cabin.taxes ?? null) : null
 
         out.push({
           // ATF has no times or flight numbers, so this identity is
@@ -286,12 +296,14 @@ export class ATFAwardProvider implements AwardFlightProvider {
           loyaltyProgram: meta.programKey,
           loyaltyProgramName: meta.programName,
           points: cabin.points,
-          taxes: taxesAmount !== null ? { amount: taxesAmount, currency: taxesCurrency } : null,
+          taxes: taxesAmount !== null && taxesCurrency !== null
+            ? { amount: taxesAmount, currency: taxesCurrency }
+            : null,
           availableSeats: cabin.seats ?? null,
           transferOptions: transferOptionsFor(meta.programKey),
           bookingUrl: buildATFBookingUrl(result.airline, query.origin, query.destination, query.departureDate, cabinKey),
           provider: this.name,
-          fetchedAt: new Date().toISOString(),
+          fetchedAt,
           verificationLevel: "discovered",
           providerConfidence: this.confidence,
           providerScore: null,

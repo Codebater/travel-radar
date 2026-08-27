@@ -25,7 +25,7 @@ import { cashBaselineRows, awardBaselineRows, buildBaseline } from "./baseline.j
 import { computeCpp } from "./cpp.js"
 import { scoreCash, scoreAward, reasonsFor, matchPresets } from "./scoring.js"
 import { compareProgramsForItinerary } from "./programs.js"
-import { saveCandidate, readState, writeState } from "./store.js"
+import { saveCandidate, deleteCandidate, readState, writeState } from "./store.js"
 import type { DealCandidate } from "./types.js"
 
 const CURSOR_CASH = "anomaly.cursor.flight_prices"
@@ -35,6 +35,8 @@ export interface EvaluationSummary {
   evaluated: number
   candidates: number
   belowThreshold: number
+  /** Decisions removed because a re-evaluation no longer produces one. */
+  withdrawn: number
   skippedThinBaseline: number
   skippedNoBaseline: number
   byType: { cash: number; award: number }
@@ -44,7 +46,7 @@ export interface EvaluationSummary {
 
 function emptySummary(): EvaluationSummary {
   return {
-    evaluated: 0, candidates: 0, belowThreshold: 0,
+    evaluated: 0, candidates: 0, belowThreshold: 0, withdrawn: 0,
     skippedThinBaseline: 0, skippedNoBaseline: 0,
     byType: { cash: 0, award: 0 }, topScore: null, durationMs: 0,
   }
@@ -52,6 +54,7 @@ function emptySummary(): EvaluationSummary {
 
 interface CashObservation {
   id: number
+  search_request_id: number | null
   itinerary_hash: string
   origin: string
   destination: string
@@ -70,6 +73,7 @@ interface CashObservation {
 
 interface AwardObservation {
   id: number
+  search_request_id: number | null
   itinerary_hash: string
   origin: string
   destination: string
@@ -99,7 +103,7 @@ export function evaluateCashObservation(
 
   // §Y the observation's own timestamp is the cut-off, not "now".
   const asOf = row.fetched_at
-  const rows = cashBaselineRows(db, key, asOf, config, row.price_currency, row.id)
+  const rows = cashBaselineRows(db, key, asOf, config, row.price_currency, row.id, row.search_request_id)
   const baseline = buildBaseline(rows, key, row.price_amount, asOf, config)
   if (!baseline) return { skipped: "no-baseline" }
   if (baseline.count < config.minSamplesToEmit) return { skipped: "thin-baseline" }
@@ -168,7 +172,7 @@ export function evaluateAwardObservation(
   }, config)
 
   const asOf = row.fetched_at
-  const rows = awardBaselineRows(db, key, asOf, config, row.id)
+  const rows = awardBaselineRows(db, key, asOf, config, row.id, row.search_request_id)
   const baseline = buildBaseline(rows, key, row.points, asOf, config)
   if (!baseline) return { skipped: "no-baseline" }
   if (baseline.count < config.minSamplesToEmit) return { skipped: "thin-baseline" }
@@ -287,6 +291,10 @@ export function evaluateNewObservations(options: EvaluateOptions = {}): Evaluati
     if ("skipped" in decision) {
       if (decision.skipped === "thin-baseline") summary.skippedThinBaseline++
       else summary.skippedNoBaseline++
+      // A re-evaluation that can no longer say anything must not leave the
+      // old answer standing: after tightening minSamplesToEmit, the CLI would
+      // report zero candidates while the API still served yesterday's.
+      summary.withdrawn += deleteCandidate(db, "flight_prices", row.id)
     } else {
       record(db, decision, config, summary)
     }
@@ -304,6 +312,7 @@ export function evaluateNewObservations(options: EvaluateOptions = {}): Evaluati
     if ("skipped" in decision) {
       if (decision.skipped === "thin-baseline") summary.skippedThinBaseline++
       else summary.skippedNoBaseline++
+      summary.withdrawn += deleteCandidate(db, "award_prices", row.id)
     } else {
       record(db, decision, config, summary)
     }

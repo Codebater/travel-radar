@@ -102,10 +102,15 @@ function runWindow(db: DB, since: string): RunWindow {
            SUM(CASE WHEN status = 'skipped_auth' THEN 1 ELSE 0 END) skippedAuth,
            COALESCE(SUM(observations_added), 0) observationsAdded,
            COALESCE(SUM(provider_calls), 0) providerCalls,
-           COALESCE(SUM(cache_hits), 0) cacheHits
+           COALESCE(SUM(cache_hits), 0) cacheHits,
+           COALESCE(SUM(searches_run), 0) searchesRun
     FROM observation_runs WHERE started_at >= ?
   `).get(since) as any
-  const lookups = (r.providerCalls ?? 0) + (r.cacheHits ?? 0)
+  // Searches, not calls. cache_hits counts LOOKUPS while provider_calls counts
+  // CALLS, and one award search can spend two calls (one per cabin class), so
+  // mixing them understated the hit rate. searches_run is the same unit as
+  // cache_hits, and every search is either served from cache or fetched.
+  const lookups = r.total > 0 ? (r.searchesRun ?? 0) : 0
   return {
     total: r.total ?? 0,
     success: r.success ?? 0,
@@ -181,17 +186,17 @@ export function observerHealth(db: DB = getDb(), now: Date = new Date()): Observ
     .filter(m => m.overdueHours > m.grace)
     .map(({ job, dueAt, overdueHours }) => ({ job, dueAt, overdueHours }))
 
+  // The threshold is applied in SQL, before the limit. Filtering after a
+  // LIMIT 50 would hide older late runs behind recent punctual ones — exactly
+  // backwards, since the late ones are the ones worth seeing.
   const delayedRuns = (db.prepare(`
-    SELECT j.name job, r.scheduled_for scheduledFor, r.started_at startedAt
+    SELECT j.name job, r.scheduled_for scheduledFor, r.started_at startedAt,
+           CAST((julianday(r.started_at) - julianday(r.scheduled_for)) * 1440 AS INTEGER) delayMinutes
     FROM observation_runs r JOIN observation_jobs j ON j.id = r.job_id
     WHERE r.scheduled_for IS NOT NULL AND r.started_at >= ?
+      AND (julianday(r.started_at) - julianday(r.scheduled_for)) * 1440 > 15
     ORDER BY r.started_at DESC LIMIT 50
-  `).all(week) as { job: string; scheduledFor: string; startedAt: string }[])
-    .map(r => ({
-      ...r,
-      delayMinutes: Math.round((Date.parse(r.startedAt) - Date.parse(r.scheduledFor)) / 60_000),
-    }))
-    .filter(r => r.delayMinutes > 15)
+  `).all(week) as { job: string; scheduledFor: string; startedAt: string; delayMinutes: number }[])
 
   const backoff = jobs
     .filter(j => j.consecutiveFailures >= 3)

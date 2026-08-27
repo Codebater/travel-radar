@@ -13,7 +13,7 @@ import os from "os"
 import path from "path"
 import Database from "better-sqlite3"
 import { createMemoryDb, migrate, type DB } from "../db/index.js"
-import { recordPriceObservations, recordAwardObservations } from "../db/repositories.js"
+import { recordPriceObservations, recordAwardObservations, recordSearchRequest } from "../db/repositories.js"
 import { loadAnomalyConfig, confidenceFor, confidenceAtLeast, type AnomalyConfig } from "../anomaly/config.js"
 import {
   buildComparabilityKey, tripLengthBucket, directnessOf, featuresFor, keyToString,
@@ -192,6 +192,68 @@ describe("historical evaluation without look-ahead", () => {
     expect(decision.baseline.percentBelowMedian).toBeCloseTo(5, 1)
   })
 
+  it("excludes same-search siblings even when their timestamps differ", () => {
+    // The defect an adversarial review reproduced: three of four providers
+    // stamped fetched_at once PER ROW, so one search produced rows a
+    // millisecond apart and the earlier ones became "prior history" for the
+    // later ones. On a route with no real history that manufactured a
+    // NEW_OBSERVED_LOW candidate out of one search's internal spread.
+    // Sibling identity now rests on search_request_id, not on the clock.
+    const searchId = recordSearchRequest(db, {
+      origin: "PRG", destination: "BKK", departureDate: "2026-11-10",
+      returnDate: null, cabin: "economy", adults: 1, currency: "USD",
+    }, "observer")
+
+    const prices = [1100, 1050, 1080, 1120, 1060, 550]
+    prices.forEach((amount, i) => {
+      recordPriceObservations(db, [makeFlight({
+        cabin: "economy", returnDate: null,
+        price: { amount, currency: "USD" },
+        // Deliberately staggered, exactly as a per-row clock would.
+        fetchedAt: new Date(T0 + i).toISOString(),
+        departureTime: `2026-11-10T0${i}:00`,
+      })], { adults: 1, searchRequestId: searchId })
+    })
+
+    const cheapest = (db.prepare(
+      `SELECT * FROM flight_prices ORDER BY price_amount ASC LIMIT 1`,
+    ).get() as any)
+    expect(cheapest.price_amount).toBe(550)
+
+    const decision = evaluateCashObservation(db, cheapest, config)
+    expect("skipped" in decision).toBe(true)
+  })
+
+  it("still uses genuine history from an EARLIER search", () => {
+    // The exclusion must be surgical: only the observation's own search is
+    // removed, not everything that shares a timestamp neighbourhood.
+    const older = recordSearchRequest(db, {
+      origin: "PRG", destination: "BKK", departureDate: "2026-11-10",
+      returnDate: null, cabin: "economy", adults: 1, currency: "USD",
+    }, "observer")
+    for (let i = 0; i < 20; i++) {
+      recordPriceObservations(db, [makeFlight({
+        cabin: "economy", returnDate: null,
+        price: { amount: 1000, currency: "USD" }, fetchedAt: at(-10 + i * 0.1),
+      })], { adults: 1, searchRequestId: older })
+    }
+
+    const newer = recordSearchRequest(db, {
+      origin: "PRG", destination: "BKK", departureDate: "2026-11-10",
+      returnDate: null, cabin: "economy", adults: 1, currency: "USD",
+    }, "observer")
+    recordPriceObservations(db, [makeFlight({
+      cabin: "economy", returnDate: null,
+      price: { amount: 500, currency: "USD" }, fetchedAt: at(0),
+    })], { adults: 1, searchRequestId: newer })
+
+    const row = db.prepare(`SELECT * FROM flight_prices ORDER BY id DESC LIMIT 1`).get() as any
+    const decision = evaluateCashObservation(db, row, config) as DealCandidate
+    expect("skipped" in decision).toBe(false)
+    expect(decision.baseline.count).toBe(20)
+    expect(decision.baseline.median).toBe(1000)
+  })
+
   it("excludes siblings from the same fetch", () => {
     // One search returning twenty fares must not make its own cheapest fare
     // look like a historic low against the other nineteen.
@@ -219,6 +281,30 @@ describe("historical evaluation without look-ahead", () => {
       .map(c => `${c.sourceId}:${c.score}`)
     expect(after.sort()).toEqual(before.sort())
     expect(first.evaluated).toBeGreaterThan(0)
+  })
+
+  it("does not call an unchanged price an all-time low", () => {
+    // Percentile counted only strictly-cheaper observations, so a fare
+    // identical to every previous one landed at the 0th percentile - the
+    // strongest possible signal for the most ordinary possible event.
+    cashHistory(20, 1000)
+    const id = cash({ price: { amount: 1000, currency: "USD" }, fetchedAt: at(0) })
+    const decision = evaluateCashObservation(db, readCashRow(id), config) as DealCandidate
+
+    expect(decision.baseline.percentile).toBe(50)
+    expect(decision.baseline.percentBelowMedian).toBe(0)
+    expect(decision.baseline.isNewObservedLow).toBe(false)
+    expect(decision.status).toBe("below-threshold")
+  })
+
+  it("says nothing when the freshest comparable observation is ancient", () => {
+    // A baseline whose newest row predates maxBaselineAgeDays is an archive,
+    // not a comparison.
+    for (let i = 0; i < 20; i++) {
+      cash({ price: { amount: 1000, currency: "USD" }, fetchedAt: at(-360 + i) })
+    }
+    const id = cash({ price: { amount: 400, currency: "USD" }, fetchedAt: at(0) })
+    expect(evaluateCashObservation(db, readCashRow(id), config)).toEqual({ skipped: "no-baseline" })
   })
 
   it("stores the cut-off it used", () => {
@@ -688,6 +774,22 @@ describe("candidate persistence", () => {
     expect(getCandidate(db, candidate.id)!.feedback!.verdict).toBe("BAD_SIGNAL")
   })
 
+  it("withdraws a decision a re-evaluation can no longer make", () => {
+    // Otherwise the table mixes two configurations: the CLI reports zero
+    // candidates while the API still serves yesterday's.
+    cashHistory(8, 1000)
+    cash({ price: { amount: 300, currency: "USD" }, fetchedAt: at(0) })
+    evaluateNewObservations({ db, config, quiet: true })
+    expect(listCandidates(db, { minScore: 0, limit: 50 }).length).toBeGreaterThan(0)
+
+    const stricter: AnomalyConfig = { ...config, minSamplesToEmit: 50 }
+    const summary = recomputeHistory({ db, config: stricter, quiet: true })
+
+    expect(summary.candidates).toBe(0)
+    expect(summary.withdrawn).toBeGreaterThan(0)
+    expect(listCandidates(db, { minScore: 0, limit: 50 })).toHaveLength(0)
+  })
+
   it("advances its cursor so repeat evaluation does no work", () => {
     cashHistory(20, 1850)
     cash({ price: { amount: 500, currency: "USD" }, fetchedAt: at(0) })
@@ -850,18 +952,38 @@ describe("migration", () => {
 
 describe("backups and retention", () => {
   let dir: string
+  let fileDb: DB
+  let dbFile: string
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "radar-backup-"))
+    // A real file-backed database: SQLite's online backup API is what this
+    // module exists to use, and an in-memory handle is now refused outright.
+    dbFile = path.join(dir, "source.db")
+    fileDb = new Database(dbFile) as unknown as DB
+    migrate(fileDb)
   })
 
   afterEach(() => {
+    fileDb.close()
     fs.rmSync(dir, { recursive: true, force: true })
   })
 
+  it("refuses to back up an in-memory database", async () => {
+    // The guard that protects the operator's real backup set from a test run:
+    // a snapshot of a throwaway database would look like the newest backup,
+    // silently skip the next real one, and restore as an empty database.
+    await expect(backupDatabase(db, { dir })).rejects.toThrow(/in-memory/)
+  })
+
   it("writes a restorable copy of the database", async () => {
-    cashHistory(5, 1000)
-    const result = await backupDatabase(db, { dir, retention: 14, at: new Date(T0) })
+    for (let i = 0; i < 5; i++) {
+      recordPriceObservations(fileDb, [makeFlight({
+        cabin: "economy", returnDate: null, fetchedAt: at(-i),
+        price: { amount: 1000 + i, currency: "USD" },
+      })], { adults: 1 })
+    }
+    const result = await backupDatabase(fileDb, { dir, retention: 14, at: new Date(T0) })
 
     expect(fs.existsSync(result.path)).toBe(true)
     const restored = new Database(result.path, { readonly: true })
@@ -872,19 +994,37 @@ describe("backups and retention", () => {
     }
   })
 
+  it("leaves no partial file behind", async () => {
+    await backupDatabase(fileDb, { dir, retention: 14, at: new Date(T0) })
+    expect(fs.readdirSync(dir).filter(f => f.endsWith(".partial"))).toEqual([])
+  })
+
   it("keeps only the configured number of copies, newest first", async () => {
     for (let i = 0; i < 5; i++) {
-      await backupDatabase(db, { dir, retention: 3, at: new Date(T0 + i * 86_400_000) })
+      await backupDatabase(fileDb, { dir, retention: 3, at: new Date(T0 + i * 86_400_000) })
     }
     const kept = listBackups(dir)
     expect(kept).toHaveLength(3)
     expect(kept[0]!.file > kept[1]!.file).toBe(true)
   })
 
+  it("orders by the timestamp in the name, not by mtime", async () => {
+    // Restoring or copying a backup rewrites its mtime; retention must not
+    // then delete the wrong ones.
+    for (let i = 0; i < 3; i++) {
+      await backupDatabase(fileDb, { dir, retention: 10, at: new Date(T0 + i * 86_400_000) })
+    }
+    const oldest = listBackups(dir)[2]!
+    const future = new Date(Date.now() + 86_400_000)
+    fs.utimesSync(oldest.path, future, future)
+
+    expect(listBackups(dir)[0]!.file).not.toBe(oldest.file)
+  })
+
   it("skips a backup that is not due yet", async () => {
-    const first = await backupIfDue(db, { dir, intervalHours: 24, at: new Date(T0) })
+    const first = await backupIfDue(fileDb, { dir, intervalHours: 24, at: new Date(T0) })
     expect(first).not.toBeNull()
-    const second = await backupIfDue(db, { dir, intervalHours: 24, at: new Date(T0 + 3600_000) })
+    const second = await backupIfDue(fileDb, { dir, intervalHours: 24, at: new Date(T0 + 3600_000) })
     expect(second).toBeNull()
   })
 

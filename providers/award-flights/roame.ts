@@ -142,6 +142,8 @@ export class RoameAwardProvider implements AwardFlightProvider {
       return { provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs: 0, completionPct: null, reason: "unconfigured", error: "disabled via ENABLE_ROAME=false" }
     }
 
+    // One clock reading for the whole search - see normalise().
+    const fetchedAt = new Date().toISOString()
     const classes = query.searchClass === "both" ? ["ECON", "PREM"] : [query.searchClass]
     const flights: NormalizedAwardFlight[] = []
     let completion = 0
@@ -157,7 +159,7 @@ export class RoameAwardProvider implements AwardFlightProvider {
           cls, ["ALL"], false, query.flexDays || 0, options.signal,
         )
         completion += result.search.percentCompleted
-        for (const fare of result.fares) flights.push(this.normalise(fare, query))
+        for (const fare of result.fares) flights.push(this.normalise(fare, query, fetchedAt))
       } catch (err) {
         lastError = (err as Error).message
         failedClasses.push(cls)
@@ -201,7 +203,7 @@ export class RoameAwardProvider implements AwardFlightProvider {
     return { ...query, returnDate: null }
   }
 
-  private normalise(fare: RoameFare, query: AwardFlightQuery): NormalizedAwardFlight {
+  private normalise(fare: RoameFare, query: AwardFlightQuery, fetchedAt: string): NormalizedAwardFlight {
     const cabin = guessCabin(fare.cabinClasses)
     const travelDate = fare.departureDateStr || fare.departureDate || query.departureDate
     const departureTime = fare.flightsDepartureDatetimes[0] || null
@@ -254,7 +256,13 @@ export class RoameAwardProvider implements AwardFlightProvider {
       transferOptions: transferOptionsFor(programKey),
       bookingUrl: buildProgramBookingUrl(programKey, fare.originIata, fare.destinationIata, travelDate, cabin),
       provider: this.name,
-      fetchedAt: new Date().toISOString(),
+      // Stamped ONCE per search, not per fare. Everything downstream treats
+      // fetched_at as the identity of a fetch: the anomaly baseline excludes
+      // an observation's own batch with `fetched_at < asOf`, and a per-row
+      // clock makes rows from one search milliseconds apart, so the earlier
+      // ones become "prior history" for the later ones. That manufactured a
+      // NEW_OBSERVED_LOW candidate out of a single search's internal spread.
+      fetchedAt,
       verificationLevel: "discovered",
       providerConfidence: this.confidence,
       providerScore: fare.roameScore ?? null,

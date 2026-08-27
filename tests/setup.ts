@@ -26,6 +26,15 @@ process.env.ATF_API_KEY = ""
 process.env.SERPAPI_MONTHLY_BUDGET ??= "90"
 process.env.SERPAPI_RESERVE_CALLS ??= "10"
 
+// Backups go to a throwaway directory for the same reason the database does.
+// Without this, any test that runs the scheduler writes a snapshot of the test
+// database into the operator's REAL backup set — which then looks like the
+// newest backup, so the next genuine one is skipped as "not due" and a restore
+// hands back an empty database.
+process.env.BACKUP_DIR = path.join(
+  os.tmpdir(), `travel-radar-test-backups-${process.pid}`,
+)
+
 afterAll(() => {
   closeDb()
 })

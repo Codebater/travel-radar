@@ -55,7 +55,10 @@ export function listBackups(dir = backupDir()): BackupFile[] {
       const stat = fs.statSync(full)
       return { file: f, path: full, bytes: stat.size, createdAt: stat.mtime.toISOString() }
     })
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    // Sorted by the timestamp in the NAME, not by mtime: a restore or a file
+    // copy rewrites mtime, and retention would then delete the wrong ones.
+    // Names are ISO-derived and fixed width, so they sort lexicographically.
+    .sort((a, b) => b.file.localeCompare(a.file))
 }
 
 /** Delete everything past the retention count. Returns what was removed. */
@@ -88,12 +91,31 @@ export async function backupDatabase(
   const dir = options.dir ?? backupDir()
   const retention = options.retention ?? backupRetention()
   const at = options.at ?? new Date()
+  // A test database is not worth backing up, and worse, it would land in the
+  // operator's real backup set: `backupIfDue` would then see a fresh "newest
+  // backup" and skip the next real one, and a restore would produce an empty
+  // database. Refusing here is the guard that survives someone forgetting to
+  // set BACKUP_DIR.
+  if ((db as unknown as { memory?: boolean }).memory) {
+    throw new Error("refusing to back up an in-memory database")
+  }
+
   const stamp = at.toISOString().replace(/[:.]/g, "-").slice(0, 19)
   const target = path.join(dir, `travel-radar-${stamp}.db`)
 
   fs.mkdirSync(dir, { recursive: true })
   const started = Date.now()
-  await db.backup(target)
+  // Written under a .partial name and renamed on success. An interrupted
+  // backup otherwise leaves a truncated file that listBackups reports as the
+  // newest good one — the worst possible thing to discover during a restore.
+  const partial = `${target}.partial`
+  try {
+    await db.backup(partial)
+    fs.renameSync(partial, target)
+  } catch (err) {
+    try { fs.unlinkSync(partial) } catch { /* nothing to clean up */ }
+    throw err
+  }
   const bytes = fs.statSync(target).size
 
   return { path: target, bytes, durationMs: Date.now() - started, pruned: pruneBackups(retention, dir) }

@@ -78,13 +78,15 @@ export function buildReport(db: DB, opts: { since?: string } = {}): AnomalyRepor
   `).get(since) as any).c as number
 
   // Latest verdict per candidate - changing your mind should not double-count.
+  // ROW_NUMBER, not MAX(created_at || '#' || id): concatenating the id makes
+  // it a STRING comparison, where '#9' sorts after '#10', so two verdicts
+  // written in the same millisecond resolved to the wrong one.
   const latestVerdict = `
-    SELECT f.candidate_id, f.verdict
-    FROM deal_feedback f
-    JOIN (
-      SELECT candidate_id, MAX(created_at || '#' || id) marker
-      FROM deal_feedback GROUP BY candidate_id
-    ) m ON m.candidate_id = f.candidate_id AND (f.created_at || '#' || f.id) = m.marker
+    SELECT candidate_id, verdict FROM (
+      SELECT candidate_id, verdict,
+             ROW_NUMBER() OVER (PARTITION BY candidate_id ORDER BY created_at DESC, id DESC) rn
+      FROM deal_feedback
+    ) WHERE rn = 1
   `
 
   const verdictRows = db.prepare(`
@@ -160,11 +162,13 @@ export function buildReport(db: DB, opts: { since?: string } = {}): AnomalyRepor
              WHEN score >= 60 THEN '60-69'
              ELSE '<60' END bucket,
            COUNT(*) count,
-           SUM(CASE WHEN v.verdict = 'BAD_SIGNAL' THEN 1 ELSE 0 END) judgedBad
+           SUM(CASE WHEN v.verdict = 'BAD_SIGNAL' THEN 1 ELSE 0 END) judgedBad,
+           MIN(score) sortKey
     FROM deal_candidates
     LEFT JOIN (${latestVerdict}) v ON v.candidate_id = deal_candidates.id
     WHERE observed_at >= ?
-    GROUP BY bucket ORDER BY bucket DESC
+    -- Ordered by score, not by the label: sorting the text put '<60' on top.
+    GROUP BY bucket ORDER BY sortKey DESC
   `).all(since) as any[]
 
   const confidenceMix = db.prepare(`

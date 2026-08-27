@@ -137,8 +137,12 @@ export function listCandidates(db: DB, filter: CandidateFilter = {}): StoredCand
                             COALESCE(c.points, c.price_amount),
                             -- Currency belongs in the key: 450 EUR and 450 USD
                             -- are different offers, and without this one of
-                            -- them silently disappears from the list.
-                            COALESCE(c.price_currency, c.taxes_currency, '')
+                            -- them silently disappears from the list. So do
+                            -- airline and stops: two carriers at the same
+                            -- number on one date are two offers, and only one
+                            -- of them could be tagged with feedback.
+                            COALESCE(c.price_currency, c.taxes_currency, ''),
+                            COALESCE(c.airline, ''), COALESCE(c.stops, -1)
                ORDER BY c.score DESC, c.observed_at DESC, c.id DESC
              ) offer_rank
       FROM deal_candidates c
@@ -266,6 +270,17 @@ export function recordFeedback(
   // candidate is answered by the presence of feedback, so a re-evaluation that
   // rewrites the row cannot silently erase the fact that it was reviewed.
   return Number(info.lastInsertRowid)
+}
+
+/**
+ * Remove the decision for an observation the engine can no longer judge.
+ * Returns how many rows went (0 or 1). Feedback rows cascade with it: a
+ * verdict about a withdrawn decision has nothing left to describe.
+ */
+export function deleteCandidate(db: DB, sourceTable: string, sourceId: number): number {
+  return db.prepare(
+    `DELETE FROM deal_candidates WHERE source_table = ? AND source_id = ?`,
+  ).run(sourceTable, sourceId).changes
 }
 
 // ─── Evaluation cursor ───────────────────────────────────────────────────────

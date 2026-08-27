@@ -152,9 +152,11 @@ export class FastFlightsProvider implements CashFlightProvider {
       }
     }
 
+    // One clock reading for the whole search - see normalise().
+    const fetchedAt = new Date().toISOString()
     const flights = payload.flights
       .filter(f => typeof f.price === "number" && f.price > 0)
-      .map(f => this.normalise(f, query))
+      .map(f => this.normalise(f, query, fetchedAt))
 
     if (flights.length === 0) {
       return {
@@ -166,7 +168,7 @@ export class FastFlightsProvider implements CashFlightProvider {
     return { provider: this.name, ok: true, flights, callsSpent: 0, latencyMs }
   }
 
-  private normalise(f: FFItinerary, query: CashFlightQuery): NormalizedCashFlight {
+  private normalise(f: FFItinerary, query: CashFlightQuery, fetchedAt: string): NormalizedCashFlight {
     const segments: NormalizedSegment[] = f.segments.map(s => ({
       origin: s.origin || query.origin,
       destination: s.destination || query.destination,
@@ -215,7 +217,9 @@ export class FastFlightsProvider implements CashFlightProvider {
       baggage: null,
       bookingUrl: googleFlightsUrl(query),
       provider: this.name,
-      fetchedAt: new Date().toISOString(),
+      // One reading per search — a per-row clock makes same-fetch rows look
+      // like each other's history to anything that orders by fetched_at.
+      fetchedAt,
       verificationLevel: this.verificationLevel,
       providerConfidence: this.confidence,
       priceLevel: null,

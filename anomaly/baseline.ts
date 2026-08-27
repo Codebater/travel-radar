@@ -9,6 +9,12 @@
  *   - even live, siblings from the SAME fetch are excluded, so "cheap" means
  *     cheap against history, not merely the cheapest row in today's search.
  *
+ * Sibling exclusion does NOT rest on timestamp equality. Providers stamp one
+ * clock reading per search now, but that is a convention a future provider
+ * could break silently, and the failure mode is invisible: one search's
+ * internal price spread becomes a fabricated "below the observed median".
+ * So the search_request_id the rows already carry is excluded explicitly.
+ *
  * Baselines are per comparability key (§L). When the strict key is too thin the
  * soft dimensions are relaxed in configured order and the scope is recorded, so
  * a reader can always see how wide the comparison had to be drawn.
@@ -51,6 +57,7 @@ export function cashBaselineRows(
   config: AnomalyConfig,
   currency: string,
   excludeId?: number,
+  excludeSearchRequestId?: number | null,
 ): BaselineRow[] {
   const since = new Date(Date.parse(asOf) - config.baseline.lookbackDays * 86_400_000).toISOString()
   const rows = db.prepare(`
@@ -60,10 +67,12 @@ export function cashBaselineRows(
     WHERE origin = ? AND destination = ? AND cabin = ? AND price_currency = ?
       AND (return_date IS NULL) = ?
       AND fetched_at < ? AND fetched_at >= ?
+      AND (? IS NULL OR search_request_id IS NULL OR search_request_id <> ?)
   `).all(
     key.origin, key.destination, key.cabin, currency,
     key.tripType === "oneway" ? 1 : 0,
     asOf, since,
+    excludeSearchRequestId ?? null, excludeSearchRequestId ?? null,
   ) as (BaselineRow & { id: number })[]
   return excludeId === undefined ? rows : rows.filter(r => r.id !== excludeId)
 }
@@ -76,6 +85,7 @@ export function awardBaselineRows(
   asOf: string,
   config: AnomalyConfig,
   excludeId?: number,
+  excludeSearchRequestId?: number | null,
 ): BaselineRow[] {
   const since = new Date(Date.parse(asOf) - config.baseline.lookbackDays * 86_400_000).toISOString()
   const rows = db.prepare(`
@@ -85,10 +95,12 @@ export function awardBaselineRows(
     WHERE origin = ? AND destination = ? AND cabin = ? AND loyalty_program = ?
       AND (return_date IS NULL) = ?
       AND fetched_at < ? AND fetched_at >= ?
+      AND (? IS NULL OR search_request_id IS NULL OR search_request_id <> ?)
   `).all(
     key.origin, key.destination, key.cabin, key.loyaltyProgram ?? "",
     key.tripType === "oneway" ? 1 : 0,
     asOf, since,
+    excludeSearchRequestId ?? null, excludeSearchRequestId ?? null,
   ) as (BaselineRow & { id: number })[]
   return excludeId === undefined ? rows : rows.filter(r => r.id !== excludeId)
 }
@@ -137,7 +149,13 @@ export function buildBaseline(
   const med = median(values)
   const min = values[0]!
   const max = values[values.length - 1]!
+  // Midpoint rank. Counting only STRICTLY cheaper observations puts a price
+  // identical to every previous one at the 0th percentile — reading as an
+  // all-time low when nothing has moved, which is the single most common
+  // shape in this data (the same fare observed week after week).
   const below = values.filter(v => v < currentValue).length
+  const equal = values.filter(v => v === currentValue).length
+  const rank = below + equal / 2
   const times = chosen.rows.map(r => r.fetchedAt).sort()
   const firstAt = times[0]!
   const lastAt = times[times.length - 1]!
@@ -157,6 +175,11 @@ export function buildBaseline(
     medianTaxes = median(taxValues)
   }
 
+  // A baseline whose freshest observation predates maxBaselineAgeDays is not a
+  // current comparison, it is an archive. Better to say nothing.
+  const ageDays = daysBetween(lastAt, asOf)
+  if (ageDays > config.baseline.maxBaselineAgeDays) return null
+
   const tier = confidenceFor(chosen.rows.length, config)
   return {
     key: keyToString(key, chosen.dropped),
@@ -164,13 +187,13 @@ export function buildBaseline(
     count: chosen.rows.length,
     min, max,
     median: Math.round(med * 100) / 100,
-    percentile: Math.round((below / chosen.rows.length) * 1000) / 10,
+    percentile: Math.round((rank / chosen.rows.length) * 1000) / 10,
     percentBelowMedian: med > 0 ? Math.round(((med - currentValue) / med) * 1000) / 10 : 0,
     differenceFromMinimum: Math.round((currentValue - min) * 100) / 100,
     firstAt, lastAt,
     // "Age" is how stale the FRESHEST baseline observation is — a wide span of
     // old prices is not a current baseline.
-    ageDays: Math.round(daysBetween(lastAt, asOf) * 10) / 10,
+    ageDays: Math.round(ageDays * 10) / 10,
     confidence: tier.label,
     confidenceValue: tier.value,
     medianTaxes,
