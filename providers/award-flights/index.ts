@@ -22,7 +22,7 @@
 import { getDb, currentPeriod, type DB } from "../../db/index.js"
 import {
   readCache, writeCache, recordCacheHit, recordAwardObservations,
-  recordCallAttempt, recordCallOutcome, recordReportedQuota, recordHealth,
+  recordCallAttempt, revertCallAttempts, recordCallOutcome, recordReportedQuota, recordHealth,
 } from "../../db/repositories.js"
 import { awardCacheKey } from "../../cache/key.js"
 import { cachePolicy, ttlToExpiry } from "../../cache/policy.js"
@@ -253,7 +253,7 @@ export async function searchAwardFlights(
 
     const work = (async () => {
       try {
-        return await provider.search(query, options)
+        return await provider.search(query, { ...options, quotaPreRecorded: provider.callsPerSearch })
       } catch (err) {
         // Contract says providers don't throw; survive one that does anyway.
         return {
@@ -270,10 +270,14 @@ export async function searchAwardFlights(
       inFlight.delete(key)
     }
 
-    // True up the estimate when the search cost more than callsPerSearch
-    // (Roame searching ECON and PREM runs two jobs).
+    // Settle the estimate to what was actually spent: more than callsPerSearch
+    // (Roame "both" runs two jobs) records the difference; fewer (a quota guard
+    // refused before spending) reverts the phantom pre-record so refusals can
+    // never inflate usage into a permanent lockout.
     if (result.callsSpent > provider.callsPerSearch) {
       recordCallAttempt(db, provider.name, currentPeriod(), result.callsSpent - provider.callsPerSearch)
+    } else if (result.callsSpent < provider.callsPerSearch) {
+      revertCallAttempts(db, provider.name, provider.callsPerSearch - result.callsSpent)
     }
     recordCallOutcome(db, provider.name, { ok: result.ok, error: result.error })
     if (result.reportedQuota) {

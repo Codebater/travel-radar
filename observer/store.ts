@@ -49,33 +49,46 @@ export interface NewJob {
   enabled?: boolean
 }
 
-/** Insert or update a job by name. Never resets run bookkeeping on reseed. */
+/**
+ * Insert or update a job by name. Never resets run bookkeeping on reseed, and
+ * — unless the caller passes `enabled` explicitly — never flips the enabled
+ * flag either: a route the operator disabled must not silently resume
+ * scheduled provider spend just because the profile was reseeded.
+ */
 export function upsertJob(db: DB, job: NewJob): ObservationJob {
   const now = nowIso()
-  db.prepare(`
-    INSERT INTO observation_jobs
-      (name, origin, destination, cabins, cash_providers, award_providers,
-       priority, frequency_hours, jitter_minutes, date_strategy, enabled,
-       created_at, updated_at, next_run_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(name) DO UPDATE SET
-      origin = excluded.origin,
-      destination = excluded.destination,
-      cabins = excluded.cabins,
-      cash_providers = excluded.cash_providers,
-      award_providers = excluded.award_providers,
-      priority = excluded.priority,
-      frequency_hours = excluded.frequency_hours,
-      jitter_minutes = excluded.jitter_minutes,
-      date_strategy = excluded.date_strategy,
-      enabled = excluded.enabled,
-      updated_at = excluded.updated_at
-  `).run(
-    job.name, job.origin.toUpperCase(), job.destination.toUpperCase(),
-    JSON.stringify(job.cabins), JSON.stringify(job.cashProviders), JSON.stringify(job.awardProviders),
-    job.priority, job.frequencyHours, job.jitterMinutes, JSON.stringify(job.dateStrategy),
-    job.enabled === false ? 0 : 1, now, now, now,
-  )
+  const tx = db.transaction(() => {
+    const existing = getJobByName(db, job.name)
+    if (!existing) {
+      db.prepare(`
+        INSERT INTO observation_jobs
+          (name, origin, destination, cabins, cash_providers, award_providers,
+           priority, frequency_hours, jitter_minutes, date_strategy, enabled,
+           created_at, updated_at, next_run_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        job.name, job.origin.toUpperCase(), job.destination.toUpperCase(),
+        JSON.stringify(job.cabins), JSON.stringify(job.cashProviders), JSON.stringify(job.awardProviders),
+        job.priority, job.frequencyHours, job.jitterMinutes, JSON.stringify(job.dateStrategy),
+        job.enabled === false ? 0 : 1, now, now, now,
+      )
+    } else {
+      const enabled = job.enabled === undefined ? (existing.enabled ? 1 : 0) : (job.enabled ? 1 : 0)
+      db.prepare(`
+        UPDATE observation_jobs SET
+          origin = ?, destination = ?, cabins = ?, cash_providers = ?, award_providers = ?,
+          priority = ?, frequency_hours = ?, jitter_minutes = ?, date_strategy = ?,
+          enabled = ?, updated_at = ?
+        WHERE name = ?
+      `).run(
+        job.origin.toUpperCase(), job.destination.toUpperCase(),
+        JSON.stringify(job.cabins), JSON.stringify(job.cashProviders), JSON.stringify(job.awardProviders),
+        job.priority, job.frequencyHours, job.jitterMinutes, JSON.stringify(job.dateStrategy),
+        enabled, now, job.name,
+      )
+    }
+  })
+  tx()
   return getJobByName(db, job.name)!
 }
 
@@ -159,6 +172,19 @@ export function startRun(db: DB, jobId: number, trigger: ObservationRun["trigger
     VALUES (?, ?, 'running', ?)
   `).run(jobId, nowIso(), trigger)
   return Number(info.lastInsertRowid)
+}
+
+/**
+ * Atomically start a run IF none is running for the job. The check and the
+ * insert share one immediate transaction, so a concurrent manual run and a
+ * scheduler tick cannot both slip past the guard. Returns null when refused.
+ */
+export function tryStartRun(db: DB, jobId: number, trigger: ObservationRun["trigger"]): number | null {
+  const tx = db.transaction((): number | null => {
+    if (hasRunningRun(db, jobId)) return null
+    return startRun(db, jobId, trigger)
+  })
+  return tx.immediate()
 }
 
 export function finishRun(
@@ -265,14 +291,16 @@ export function acquireLease(db: DB, holder: string, ttlSeconds: number, at: Dat
   return tx()
 }
 
-/** Refresh the heartbeat. Returns false when the lease was lost or stopped. */
+/** Refresh the heartbeat. Returns false when the lease was lost. The
+ *  heartbeat is refreshed even while a stop is pending — the holder remains
+ *  the owner until it actually releases, so a stop-then-restart can never
+ *  produce two live schedulers via a "stale" takeover. */
 export function heartbeatLease(db: DB, holder: string, at: Date = new Date()): { ok: boolean; stopRequested: boolean } {
   const lease = readLease(db)
   if (!lease || lease.holder !== holder) return { ok: false, stopRequested: false }
-  if (lease.stopRequested) return { ok: true, stopRequested: true }
   db.prepare(`UPDATE scheduler_state SET heartbeat_at = ? WHERE id = 1 AND holder = ?`)
     .run(at.toISOString(), holder)
-  return { ok: true, stopRequested: false }
+  return { ok: true, stopRequested: lease.stopRequested }
 }
 
 export function releaseLease(db: DB, holder: string): void {

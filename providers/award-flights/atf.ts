@@ -108,7 +108,7 @@ export class ATFAwardProvider implements AwardFlightProvider {
     }
   }
 
-  async search(query: AwardFlightQuery): Promise<AwardSearchResult> {
+  async search(query: AwardFlightQuery, options: { quotaPreRecorded?: number } = {}): Promise<AwardSearchResult> {
     const started = Date.now()
     if (!this.isEnabled()) {
       return { provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs: 0, completionPct: null, reason: "unconfigured", error: "disabled via ENABLE_ATF=false" }
@@ -122,8 +122,11 @@ export class ATFAwardProvider implements AwardFlightProvider {
     // limit from ATF wins over the documented default when known.
     const quota = this.quota()
     const limit = quota.reportedLimit ?? MONTHLY_LIMIT
-    if (quota.estimatedUsed + ATF_AIRLINES.length > limit) {
-      const message = `ATF monthly allowance exhausted (${quota.estimatedUsed}/${limit}, next search needs ${ATF_AIRLINES.length})`
+    // estimatedUsed may already include THIS search (the orchestrator
+    // pre-records attempts); subtract that before projecting.
+    const usedBefore = quota.estimatedUsed - (options.quotaPreRecorded ?? 0)
+    if (usedBefore + ATF_AIRLINES.length > limit) {
+      const message = `ATF monthly allowance exhausted (${usedBefore}/${limit}, next search needs ${ATF_AIRLINES.length})`
       console.warn(`ATF SKIPPED quota guard — ${message}`)
       return {
         provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs: 0,

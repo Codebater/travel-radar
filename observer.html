@@ -85,7 +85,10 @@ tailwind.config = { theme: { extend: { colors: {
 </div>
 
 <script>
-function esc(s) { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; }
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
 function age(iso) {
   if (!iso) return '—';
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);

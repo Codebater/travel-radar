@@ -136,6 +136,14 @@ export interface AwardSearchOptions {
   forceRefresh?: boolean
   /** Cancels a long-running provider search (Roame polling). */
   signal?: AbortSignal
+  /**
+   * How many of this search's calls the caller ALREADY recorded in
+   * provider_usage before invoking search(). The orchestrator pre-records
+   * callsPerSearch (so a crash still leaves a trace); a provider's own quota
+   * guard must subtract this or it double-counts the in-flight search and
+   * refuses too early — and every refusal would inflate usage further.
+   */
+  quotaPreRecorded?: number
 }
 
 /**

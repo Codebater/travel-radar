@@ -230,6 +230,9 @@ export interface MockAwardOptions {
   fail?: AwardSearchResult["reason"]
   /** With fail: also mark the failure partial (some sub-checks failed). */
   failPartial?: boolean
+  /** With fail: report this callsSpent (default callsPerSearch). A quota
+   *  guard's refusal spends 0 while callsPerSearch stays 5. */
+  failCallsSpent?: number
   throws?: boolean
   callsPerSearch?: number
   reportedQuota?: { remaining: number; limit: number }
@@ -275,7 +278,8 @@ export class MockAwardProvider implements AwardFlightProvider {
     if (this.opts.throws) throw new Error("mock award provider exploded")
     if (this.opts.fail) {
       return {
-        provider: this.name, ok: false, flights: [], callsSpent: this.callsPerSearch,
+        provider: this.name, ok: false, flights: [],
+        callsSpent: this.opts.failCallsSpent ?? this.callsPerSearch,
         latencyMs: 1, completionPct: null,
         reason: this.opts.fail, error: `mock failure: ${this.opts.fail}`,
         ...(this.opts.failPartial ? { partial: true } : {}),

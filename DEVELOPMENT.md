@@ -373,7 +373,8 @@ npm run observer:status
 
 - **Roame**: log in at roame.travel → DevTools → Application → Cookies → copy
   the `session` and `csrfSecret` values into
-  `%USERPROFILE%\.openclaw\credentialsoame.json`:
+  `%USERPROFILE%\.openclaw\credentials
+oame.json`:
   `{ "session": "…", "csrfSecret": "…", "sessionExpiresAt": <cookie expiry, ms epoch> }`.
   Refreshing an expired session is the same procedure. Verify with
   `npm run providers` (shows the expiry date, no network call).
@@ -383,7 +384,9 @@ npm run observer:status
 - **AwardWallet** (optional): `awardwallet.json` with `apiKey` + `userId`.
 - **Validate without spending**: `npm run providers` then
   `npm run observer:dry-run`. A minimal live check is one manual
-  `npm run observer:run -- PRG-BKK` (roame: ~2 search jobs; ATF stays untouched).
+  `npm run observer:run -- PRG-BKK` — on an award run this issues 4 award
+  searches x 2 classes = 8 Roame search jobs plus 8 free cash fetches; ATF
+  stays untouched.
 
 ### Testing a provider
 

@@ -15,7 +15,7 @@ import { recordSearchRequest } from "../db/repositories.js"
 import { searchCashFlights } from "../providers/cash-flights/index.js"
 import { searchAwardFlights, getAwardProviders } from "../providers/award-flights/index.js"
 import {
-  startRun, finishRun, completeJobRun, hasRunningRun,
+  tryStartRun, finishRun, completeJobRun,
 } from "./store.js"
 import { planRun, cabinsToSearchClass } from "./sampling.js"
 import type { ObservationJob, ObservationRun, RunPlan, RunStatus } from "./types.js"
@@ -74,7 +74,15 @@ function countObservations(db: DB, searchRequestIds: number[]): number {
  */
 export async function executeJob(
   job: ObservationJob,
-  options: { db?: DB; trigger?: ObservationRun["trigger"]; now?: Date } = {},
+  options: {
+    db?: DB
+    trigger?: ObservationRun["trigger"]
+    now?: Date
+    /** Cooperative abort: checked between date-pairs. The scheduler passes
+     *  "still hold the lease and no stop requested" so a deposed scheduler
+     *  abandons work quickly instead of finishing a long job it no longer owns. */
+    shouldContinue?: () => boolean
+  } = {},
 ): Promise<ExecutionResult> {
   const db = options.db ?? getDb()
   const trigger = options.trigger ?? "schedule"
@@ -83,16 +91,28 @@ export async function executeJob(
   const plan = planRun(job, job.runsCompleted, now)
   const errors: string[] = []
 
-  // Duplicate-run guard: one execution per job at a time.
-  if (hasRunningRun(db, job.id)) {
+  // A run with nothing to do BY DESIGN (award-only job on an off-cadence run)
+  // is a successful no-op that must still advance the rotation — otherwise the
+  // job wedges on the same off-cadence index forever, counting failures.
+  if (plan.cashSearches === 0 && !plan.awardsThisRun) {
+    completeJobRun(db, job.id, { failed: false, countsAsRun: true }, now)
+    return {
+      runId: null, status: "success", plan, searchesRun: 0, providerCalls: 0,
+      cacheHits: 0, observationsAdded: 0, durationMs: 0,
+      errors: [], skippedProviders: [],
+    }
+  }
+
+  // Duplicate-run guard: check + insert in one immediate transaction, so a
+  // concurrent manual run and a scheduler tick cannot both start.
+  const runId = tryStartRun(db, job.id, trigger)
+  if (runId === null) {
     return {
       runId: null, status: "failed", plan, searchesRun: 0, providerCalls: 0,
       cacheHits: 0, observationsAdded: 0, durationMs: 0,
       errors: [`job ${job.name} already has a run in progress`], skippedProviders: [],
     }
   }
-
-  const runId = startRun(db, job.id, trigger)
   let searchesRun = 0
   let providerCalls = 0
   let cacheHits = 0
@@ -108,7 +128,13 @@ export async function executeJob(
   }
 
   // ── The searches ────────────────────────────────────────────────────────
+  let aborted = false
   for (const pair of plan.datePairs) {
+    if (options.shouldContinue && !options.shouldContinue()) {
+      aborted = true
+      errors.push("aborted: scheduler lost the lease or was asked to stop")
+      break
+    }
     let searchRequestId: number | null = null
     try {
       searchRequestId = recordSearchRequest(db, {
@@ -122,6 +148,10 @@ export async function executeJob(
     }
 
     // Cash: cache → free discovery. Metered fallback is forbidden here.
+    // Note: the job's cashProviders list currently acts as an on/off switch —
+    // searchCashFlights consults the global registry (one free provider today).
+    // Per-name filtering becomes meaningful only when a second free provider
+    // exists; the budget projection makes the same assumption.
     if (job.cashProviders.length > 0) {
       for (const cabin of job.cabins) {
         try {
@@ -176,7 +206,7 @@ export async function executeJob(
   let status: RunStatus
   if (searchesRun === 0 && authSkips > 0) status = "skipped_auth"
   else if (searchesRun === 0) status = "failed"
-  else if (hardErrors > 0 || authSkips > 0) status = "partial"
+  else if (aborted || hardErrors > 0 || authSkips > 0) status = "partial"
   else status = "success"
 
   finishRun(db, runId, {

@@ -293,6 +293,19 @@ export function recordCallAttempt(db: DB, provider: string, period = currentPeri
   return tx()
 }
 
+/**
+ * Take back pre-recorded attempts that never became requests (a provider's
+ * quota guard refused before spending). Only ever reverts what THIS caller
+ * pre-recorded; attempted never drops below zero.
+ */
+export function revertCallAttempts(db: DB, provider: string, count: number, period = currentPeriod()): void {
+  if (count <= 0) return
+  db.prepare(`
+    UPDATE provider_usage SET attempted = MAX(0, attempted - ?)
+    WHERE provider = ? AND period = ?
+  `).run(count, provider, period)
+}
+
 export function recordCallOutcome(
   db: DB,
   provider: string,

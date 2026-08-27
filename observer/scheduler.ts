@@ -11,7 +11,7 @@
 
 import { getDb, type DB } from "../db/index.js"
 import {
-  acquireLease, heartbeatLease, releaseLease, newHolderId, dueJobs, reapStaleRuns,
+  acquireLease, heartbeatLease, releaseLease, newHolderId, dueJobs, reapStaleRuns, getJob,
 } from "./store.js"
 import { executeJob } from "./engine.js"
 import { projectMonthlyBudget } from "./budget.js"
@@ -56,15 +56,32 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
   process.on("SIGINT", onSignal)
   process.on("SIGTERM", onSignal)
 
+  // A job can run for minutes (Roame polls up to 90s per class). The lease
+  // must stay visibly alive throughout, or a second `observer:start` would
+  // "take over" a stale-looking lease from a scheduler that is merely busy —
+  // so a timer heartbeats every ttl/3 seconds for the process lifetime, and
+  // its result feeds the flags the job loop acts on.
+  let leaseLost = false
+  let stopViaDb = false
+  const beatMs = Math.max(5, Math.floor(leaseTtl / 3)) * 1000
+  const beatTimer = setInterval(() => {
+    const beat = heartbeatLease(db, holder)
+    if (!beat.ok) leaseLost = true
+    else if (beat.stopRequested) stopViaDb = true
+  }, beatMs)
+
+  const shouldContinue = () => !stopping && !leaseLost && !stopViaDb
+
   let ticks = 0
   let exitReason = "stopped"
   try {
     for (;;) {
       if (stopping) { exitReason = "signal"; break }
+      if (leaseLost) { exitReason = "lease lost to another scheduler"; break }
 
       const beat = heartbeatLease(db, holder)
       if (!beat.ok) { exitReason = "lease lost to another scheduler"; break }
-      if (beat.stopRequested) { exitReason = "stop requested via observer:stop"; break }
+      if (beat.stopRequested || stopViaDb) { exitReason = "stop requested via observer:stop"; break }
 
       // Hygiene: runs left 'running' by a crash are closed out.
       const reaped = reapStaleRuns(db)
@@ -73,16 +90,25 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
       // Jobs already carry per-job jitter in next_run_at, so due jobs simply
       // run in priority order — sequentially, to keep bursts impossible.
       for (const job of dueJobs(db)) {
-        if (stopping) break
-        await executeJob(job, { db, trigger: "schedule" })
-        heartbeatLease(db, holder)   // long jobs must not look crashed
+        if (!shouldContinue()) break
+        // Re-verify against FRESH state: another scheduler (or a manual run)
+        // may have executed this job after our snapshot — its next_run_at is
+        // then in the future and re-running it would double-spend and skew the
+        // grid rotation. The fresh row also carries the current runsCompleted.
+        const fresh = getJob(db, job.id)
+        if (!fresh || !fresh.enabled) continue
+        if (fresh.nextRunAt && new Date(fresh.nextRunAt) > new Date()) continue
+        await executeJob(fresh, { db, trigger: "schedule", shouldContinue })
       }
+      if (leaseLost) { exitReason = "lease lost to another scheduler"; break }
+      if (stopViaDb) { exitReason = "stop requested via observer:stop"; break }
 
       ticks++
       if (options.maxTicks !== undefined && ticks >= options.maxTicks) { exitReason = "maxTicks"; break }
       await new Promise(r => setTimeout(r, tickSeconds * 1000))
     }
   } finally {
+    clearInterval(beatTimer)
     process.off("SIGINT", onSignal)
     process.off("SIGTERM", onSignal)
     releaseLease(db, holder)

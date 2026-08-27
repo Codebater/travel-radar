@@ -15,7 +15,7 @@ import { setAwardProviders } from "../providers/award-flights/index.js"
 import { readUsage } from "../db/repositories.js"
 import {
   upsertJob, listJobs, dueJobs, getJobByName, setJobEnabled, completeJobRun,
-  startRun, finishRun, listRuns, hasRunningRun, reapStaleRuns,
+  startRun, tryStartRun, finishRun, listRuns, hasRunningRun, reapStaleRuns,
   acquireLease, heartbeatLease, releaseLease, readLease, requestStop, newHolderId,
 } from "../observer/store.js"
 import { departureGrid, sampleDatePairs, planRun, cabinsToSearchClass, DEFAULT_DATE_STRATEGY } from "../observer/sampling.js"
@@ -23,8 +23,9 @@ import { projectMonthlyBudget } from "../observer/budget.js"
 import { executeJob } from "../observer/engine.js"
 import { runScheduler } from "../observer/scheduler.js"
 import { seedJobsFromProfile } from "../observer/cli.js"
+import { searchAwardFlights } from "../providers/award-flights/index.js"
 import type { NewJob } from "../observer/store.js"
-import { MockProvider, MockAwardProvider, makeFlight, makeAwardFlight } from "./mocks.js"
+import { MockProvider, MockAwardProvider, makeFlight, makeAwardFlight, makeAwardQuery } from "./mocks.js"
 
 let db: DB
 const savedEnv = { ...process.env }
@@ -383,6 +384,120 @@ describe("scheduler loop", () => {
     const reason = await runScheduler({ db, tickSeconds: 1, maxTicks: 1 })
     expect(reason).toContain("another scheduler already holds the lease")
     releaseLease(db, holder)
+  })
+})
+
+// ─── Review-finding regressions (Phase 4 adversarial review) ─────────────────
+
+describe("review fixes", () => {
+  it("heartbeat keeps refreshing while a stop is pending — no stale takeover during graceful stop", () => {
+    const a = newHolderId(), b = newHolderId()
+    acquireLease(db, a, 90)
+    requestStop(db)
+    const before = readLease(db)!.heartbeatAt
+    const later = new Date(Date.now() + 5000)
+    expect(heartbeatLease(db, a, later)).toEqual({ ok: true, stopRequested: true })
+    expect(readLease(db)!.heartbeatAt > before).toBe(true)   // still refreshed
+    // A second scheduler cannot steal the lease while the holder winds down.
+    expect(acquireLease(db, b, 90, later)).toBe(false)
+    releaseLease(db, a)
+  })
+
+  it("reseeding does NOT re-enable a job the operator disabled", () => {
+    seedJobsFromProfile(db)
+    setJobEnabled(db, "PRG-MEX", false)
+    seedJobsFromProfile(db)                                  // reseed
+    expect(getJobByName(db, "PRG-MEX")!.enabled).toBe(false) // stays disabled
+    expect(getJobByName(db, "PRG-BKK")!.enabled).toBe(true)  // others untouched
+  })
+
+  it("an award-only job's off-cadence run is a successful no-op that advances rotation", async () => {
+    setAwardProviders([new MockAwardProvider({ name: "roame", flights: [makeAwardFlight()] })])
+    const job = smallJob({ cashProviders: [], dateStrategy: { ...DEFAULT_DATE_STRATEGY, datesPerRun: 1, awardEveryNRuns: 2 } })
+
+    // Run 0: awards on — real searches.
+    const r0 = await executeJob(job, { db, trigger: "manual" })
+    expect(r0.searchesRun).toBe(1)
+    expect(getJobByName(db, job.name)!.runsCompleted).toBe(1)
+
+    // Run 1: awards off and no cash — previously wedged forever as "failed".
+    const j1 = getJobByName(db, job.name)!
+    const r1 = await executeJob(j1, { db, trigger: "manual" })
+    expect(r1.status).toBe("success")
+    expect(getJobByName(db, job.name)!.runsCompleted).toBe(2)  // rotation advanced
+    expect(getJobByName(db, job.name)!.consecutiveFailures).toBe(0)
+
+    // Run 2: awards on again — the cadence recovered.
+    const j2 = getJobByName(db, job.name)!
+    const r2 = await executeJob(j2, { db, trigger: "manual" })
+    expect(r2.searchesRun).toBeGreaterThan(0)
+  })
+
+  it("executeJob aborts cooperatively when the scheduler loses the lease", async () => {
+    setProviders([new MockProvider({ name: "free_mock", flights: [makeFlight()] })])
+    const job = smallJob({ awardProviders: [] })
+    const result = await executeJob(job, { db, trigger: "schedule", shouldContinue: () => false })
+    expect(result.errors.join(" ")).toContain("aborted")
+    expect(result.searchesRun).toBe(0)                       // stopped before spending
+  })
+
+  it("a refused (budget-exhausted) award search reverts its pre-recorded attempts", async () => {
+    setAwardProviders([new MockAwardProvider({
+      name: "atf-mock", callsPerSearch: 5, fail: "budget-exhausted", failCallsSpent: 0,
+    })])
+    await searchAwardFlights(makeAwardQuery(), { db })
+    // Pre-record +5, refusal spent 0 → settle reverts to 0. Refusals can never
+    // inflate usage into a lockout.
+    expect(readUsage(db, "atf-mock").attempted).toBe(0)
+  })
+
+  it("the ATF guard accounts for pre-recorded attempts instead of double-counting", async () => {
+    process.env.ATF_API_KEY = "synthetic-test-key-never-used"
+    const { recordCallAttempt: rca } = await import("../db/repositories.js")
+    const { getDb, closeDb } = await import("../db/index.js")
+    const tmp = path.join(os.tmpdir(), `atf-pre-${process.pid}-${Date.now()}.db`)
+    process.env.DATABASE_PATH = tmp
+    closeDb()
+    const guardDb = getDb()
+    // 151 attempted INCLUDING a 5-call pre-record for this search →
+    // usedBefore = 146 → 146+5 > 150 → refuse without network.
+    rca(guardDb, "atf", undefined, 151)
+    const { ATFAwardProvider } = await import("../providers/award-flights/atf.js")
+    const result = await new ATFAwardProvider().search({
+      origin: "PRG", destination: "BKK", departureDate: "2026-11-10",
+      returnDate: null, searchClass: "both", adults: 1,
+    }, { quotaPreRecorded: 5 })
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe("budget-exhausted")
+    expect(result.callsSpent).toBe(0)
+    closeDb()
+    fs.rmSync(tmp, { force: true }); fs.rmSync(tmp + "-wal", { force: true }); fs.rmSync(tmp + "-shm", { force: true })
+  })
+
+  it("tryStartRun refuses the second concurrent start atomically", () => {
+    const job = smallJob({ awardProviders: [] })
+    const first = tryStartRun(db, job.id, "manual")
+    expect(first).not.toBeNull()
+    expect(tryStartRun(db, job.id, "schedule")).toBeNull()
+    finishRun(db, first!, { status: "success", searchesRun: 0, providerCalls: 0, cacheHits: 0, observationsAdded: 0, errors: [], durationMs: 1 })
+    expect(tryStartRun(db, job.id, "manual")).not.toBeNull()
+  })
+
+  it("the scheduler re-verifies due-ness from fresh state before each job", async () => {
+    setProviders([new MockProvider({ name: "free_mock", flights: [makeFlight()] })])
+    const job = smallJob({ awardProviders: [] })
+    db.prepare("UPDATE observation_jobs SET next_run_at = ?").run(new Date(Date.now() - 1000).toISOString())
+
+    // Simulate another scheduler having just run the job: next_run_at moves to
+    // the future between the snapshot and execution. Our loop must skip it.
+    // (Direct unit: dueJobs snapshot says due; fresh check says not.)
+    const snapshot = dueJobs(db)
+    expect(snapshot).toHaveLength(1)
+    db.prepare("UPDATE observation_jobs SET next_run_at = ?").run(new Date(Date.now() + 3600_000).toISOString())
+
+    const reason = await runScheduler({ db, tickSeconds: 1, maxTicks: 1 })
+    expect(reason).toBe("maxTicks")
+    expect(listRuns(db)).toHaveLength(0)                     // nothing executed
   })
 })
 
