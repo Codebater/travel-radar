@@ -1,0 +1,27 @@
+-- Phase 5 correction: award observations are ONE-WAY.
+--
+-- Every award source integrated so far prices a single direction. Roame is
+-- called with (origin, destination, one date) and the booking URLs this project
+-- builds for its programs all say tripType=ONE_WAY; ATF's request is
+-- ?departure_code&arrival_code&date. Both nevertheless stamped the SEARCH's
+-- return date onto each fare, so a one-way price was recorded as though it
+-- covered a return.
+--
+-- That was cosmetic until Phase 5, which refuses to compare a one-way with a
+-- return. Left alone it would have done two harmful things: split identical
+-- one-way fares into two baselines depending on whether the search that found
+-- them happened to carry a return date, and — the moment a genuine round-trip
+-- award source appeared — compared a round-trip price against one-way history
+-- at roughly double, manufacturing "50% below median" out of a units error.
+--
+-- No observation, price or point value is touched. Only a metadata field that
+-- was never true is cleared, so the history is internally consistent with what
+-- the providers actually return.
+--
+-- itinerary_hash is deliberately NOT recomputed: hashes are only ever compared
+-- with other hashes, so rows minted before this migration remain consistent
+-- among themselves. A physical flight observed both before and after will not
+-- group across the boundary, which costs a little cross-era program grouping
+-- and nothing else.
+
+UPDATE award_prices SET return_date = NULL WHERE return_date IS NOT NULL;

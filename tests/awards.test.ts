@@ -6,6 +6,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import fs from "fs"
+import path from "path"
 import {
   searchAwardFlights, setAwardProviders, getAwardProviders, dedupeAwards, crossVerify,
 } from "../providers/award-flights/index.js"
@@ -458,6 +460,37 @@ describe("program ≠ airline (§multi-program acceptance)", () => {
     const out = await searchAwardFlights(makeAwardQuery(), { db })
     expect(out.flights).toHaveLength(3)
     expect(new Set(out.flights.map(f => f.itineraryHash)).size).toBe(1)
+  })
+})
+
+describe("award fares are one-way (units correction)", () => {
+  it("keeps the raw cache key sensitive to the return date", () => {
+    // The key function itself must still distinguish them; collapsing is a
+    // per-provider decision made through normalizeCacheQuery, not a global one.
+    expect(awardCacheKey(makeAwardQuery({ returnDate: null }), "roame"))
+      .not.toBe(awardCacheKey(makeAwardQuery({ returnDate: "2026-11-20" }), "roame"))
+  })
+
+  it("collapses the return date for Roame, which never sends it", async () => {
+    // The observer rotates trip lengths across one outbound date. Without this
+    // collapse each length is a separate Roame search for identical data.
+    const { RoameAwardProvider } = await import("../providers/award-flights/roame.js")
+    const provider = new RoameAwardProvider()
+    const normalized = provider.normalizeCacheQuery!(makeAwardQuery({ returnDate: "2026-11-20" }))
+    expect(normalized.returnDate).toBeNull()
+    expect(awardCacheKey(normalized, "roame"))
+      .toBe(awardCacheKey(provider.normalizeCacheQuery!(makeAwardQuery({ returnDate: "2026-12-01" })), "roame"))
+  })
+
+  it("has no provider left that stamps the query's return date onto an award fare", () => {
+    // A one-way price recorded as a round trip is a units error, and the
+    // anomaly engine does arithmetic across that dimension.
+    for (const file of ["roame.ts", "atf.ts"]) {
+      const text = fs.readFileSync(
+        path.join(process.cwd(), "providers", "award-flights", file), "utf-8")
+      const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+      expect(code).not.toMatch(/returnDate:\s*query\.returnDate/)
+    }
   })
 })
 

@@ -190,6 +190,17 @@ export class RoameAwardProvider implements AwardFlightProvider {
     }
   }
 
+  /**
+   * Roame's request is (origin, destination, departureDate, class, flexDays).
+   * The return date is never sent, so a search for the same outbound date with
+   * a different trip length is the SAME request and must hit the same cache
+   * entry — otherwise the observer's rotating trip lengths (7/10/14/21 nights)
+   * turn one Roame search into four identical ones.
+   */
+  normalizeCacheQuery(query: AwardFlightQuery): AwardFlightQuery {
+    return { ...query, returnDate: null }
+  }
+
   private normalise(fare: RoameFare, query: AwardFlightQuery): NormalizedAwardFlight {
     const cabin = guessCabin(fare.cabinClasses)
     const travelDate = fare.departureDateStr || fare.departureDate || query.departureDate
@@ -203,7 +214,8 @@ export class RoameAwardProvider implements AwardFlightProvider {
         departureDate: travelDate,
         departureTime,
         arrivalTime: fare.arrivalDatetime,
-        returnDate: query.returnDate ?? null,
+        // NOT query.returnDate — see the returnDate field below.
+        returnDate: null,
         cabin,
         airlines: fare.operatingAirlines,
         stops: fare.numStops,
@@ -214,7 +226,17 @@ export class RoameAwardProvider implements AwardFlightProvider {
       departureDate: travelDate,
       departureTime,
       arrivalTime: fare.arrivalDatetime || null,
-      returnDate: query.returnDate ?? null,
+      // A Roame award fare is ONE-WAY. searchRoame() is called with origin,
+      // destination and a single date — there is no return leg in the request —
+      // and every booking URL this project builds for those programs says so
+      // (tripType=ONE_WAY / O / OW / one-way). Stamping the SEARCH's return
+      // date here made a one-way price look like a round-trip one, which
+      // matters now that the anomaly engine refuses to compare one-way with
+      // return: identical one-way fares were landing in two separate baselines
+      // depending on whether the search that found them had a return date, and
+      // a genuine round-trip source would later have been compared against
+      // them at roughly half the price.
+      returnDate: null,
       // Roame reports operating carriers; the marketing carrier is not exposed.
       airline: null,
       operatingAirlines: fare.operatingAirlines,

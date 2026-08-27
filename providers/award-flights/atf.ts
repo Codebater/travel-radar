@@ -263,7 +263,9 @@ export class ATFAwardProvider implements AwardFlightProvider {
             origin: query.origin,
             destination: query.destination,
             departureDate: query.departureDate,
-            returnDate: query.returnDate ?? null,
+            // One-way, like Roame: ATF's request is
+            // ?departure_code&arrival_code&date with no return leg.
+            returnDate: null,
             cabin: cabinKey,
             airlines: [meta.name],
           }),
@@ -272,7 +274,7 @@ export class ATFAwardProvider implements AwardFlightProvider {
           departureDate: query.departureDate,
           departureTime: null,
           arrivalTime: null,
-          returnDate: query.returnDate ?? null,
+          returnDate: null,
           airline: meta.name,
           operatingAirlines: [meta.name],
           flightNumbers: [],
