@@ -161,6 +161,14 @@ tailwind.config = {
           </button>
         </div>
       </form>
+      <div class="mt-3 flex items-center gap-3 flex-wrap">
+        <button type="button" id="refreshBtn" onclick="refreshLivePrice()"
+          class="text-xs px-3 py-1.5 rounded-lg border border-gray-700 text-gray-300 hover:text-white hover:border-accent transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Bypass the cache and ask the metered provider to confirm prices">
+          <span id="refreshBtnText">↻ Refresh live price</span>
+        </button>
+        <span id="refreshHint" class="text-[11px] text-gray-500">Uses one metered API call per cabin</span>
+      </div>
       <p class="text-xs text-gray-500 mt-3">
         Sources: Roame (award flights across 19+ programs) · Google Flights (cash prices via SerpAPI) · Results saved to results.json
       </p>
@@ -357,6 +365,36 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+/**
+ * Phase 2 freshness signal. Cash results carry provenance from the provider
+ * layer: which tier the price came from, and how old a cached one is.
+ */
+function freshnessBadge(flight) {
+  if (flight.type !== 'cash' || !flight.verificationLevel) return '';
+  const age = ageLabel(flight.cacheAgeMinutes, flight.fetchedAt);
+  if (flight.verificationLevel === 'verified') {
+    return `<span class="badge-green text-[10px] px-1.5 py-0.5 rounded-full" title="Confirmed by a metered provider">✓ Verified${age ? ' · ' + escapeHtml(age) : ''}</span>`;
+  }
+  if (flight.verificationLevel === 'cached') {
+    return `<span class="badge-yellow text-[10px] px-1.5 py-0.5 rounded-full" title="Replayed from the local cache — no provider call was made">Cached${age ? ' · ' + escapeHtml(age) : ''}</span>`;
+  }
+  return `<span class="badge-blue text-[10px] px-1.5 py-0.5 rounded-full" title="Found by a free discovery provider; verification recommended before booking">Discovery${age ? ' · ' + escapeHtml(age) : ''}</span>`;
+}
+
+function ageLabel(cacheAgeMinutes, fetchedAt) {
+  let minutes = typeof cacheAgeMinutes === 'number' ? cacheAgeMinutes : null;
+  if (minutes === null && fetchedAt) {
+    const ms = Date.now() - new Date(fetchedAt).getTime();
+    if (Number.isFinite(ms) && ms >= 0) minutes = Math.floor(ms / 60000);
+  }
+  if (minutes === null) return '';
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h old`;
+  return `${Math.floor(hours / 24)}d old`;
+}
+
 function formatPoints(n) {
   if (!n) return '0';
   if (n >= 1000) return `${Math.round(n/1000)}K`;
@@ -490,6 +528,8 @@ function renderFlightCard(flight, idx) {
     : flight.source === 'aa-direct'
     ? '<span class="badge-yellow text-[10px] px-1.5 py-0.5 rounded-full">AA Direct</span>'
     : '<span class="badge-yellow text-[10px] px-1.5 py-0.5 rounded-full">Est.</span>';
+
+  const freshness = freshnessBadge(flight);
   
   // RT mode: make card selectable
   const isSelectable = rtMode && (rtStep === 'outbound' || rtStep === 'return');
@@ -548,7 +588,7 @@ function renderFlightCard(flight, idx) {
             <p class="text-2xl font-bold text-white">${formatPoints(flight.points)}</p>
             <div class="flex items-center gap-1 justify-end flex-wrap">
               <span class="${cabinBadge} text-xs px-2 py-0.5 rounded-full">${cabinLabel}</span>
-              ${sourceBadge}
+              ${sourceBadge}${freshness}
             </div>
           </div>
         </div>
@@ -590,7 +630,7 @@ function renderFlightCard(flight, idx) {
             <p class="text-2xl font-bold text-white">${flight.cashPrice ? '$' + flight.cashPrice.toLocaleString() : '<span class="text-gray-500 text-base">Price N/A</span>'}</p>
             <div class="flex items-center gap-1 justify-end flex-wrap">
               <span class="badge-blue text-xs px-2 py-0.5 rounded-full">Cash</span>
-              ${sourceBadge}
+              ${sourceBadge}${freshness}
             </div>
           </div>
         </div>
@@ -907,32 +947,54 @@ function toggleBalances() {
 
 // ─── Search Handler ──────────────────────────────────────────────────────────
 
+let searchInFlight = false;
+
 async function handleSearch(event) {
   event.preventDefault();
-  
+  if (searchInFlight || refreshInFlight) return;
+
   const from = document.getElementById('inputFrom').value.toUpperCase().trim();
   const to = document.getElementById('inputTo').value.toUpperCase().trim();
   const date = document.getElementById('inputDate').value;
-  const ret = document.getElementById('inputReturn').value;
-  const cls = document.getElementById('inputClass').value;
-  
+
   if (!from || !to || !date) {
     alert('Please fill in From, To, and Departure Date');
     return;
   }
-  
-  // Show loading
+
+  searchInFlight = true;
   document.getElementById('searchBtn').disabled = true;
   document.getElementById('searchBtnText').textContent = 'Searching...';
   document.getElementById('searchSpinner').classList.remove('hidden');
+  try {
+    await runSearchRequest({ from, to, date });
+  } finally {
+    searchInFlight = false;
+    document.getElementById('searchBtn').disabled = false;
+    document.getElementById('searchBtnText').textContent = 'Search';
+    document.getElementById('searchSpinner').classList.add('hidden');
+  }
+}
+
+/**
+ * Issue one search against the API and render whatever comes back.
+ * `refresh` bypasses the cache; `verify` asks the metered provider to confirm.
+ */
+async function runSearchRequest({ from, to, date, refresh = false, verify = false }) {
+  const ret = document.getElementById('inputReturn').value;
+  const cls = document.getElementById('inputClass').value;
+
   document.getElementById('loadingSection').classList.remove('hidden');
   document.getElementById('resultsSection').classList.add('hidden');
-  
+
   const flexLabel = flexDays > 0 ? ` (±${flexDays} day${flexDays > 1 ? 's' : ''})` : '';
-  document.getElementById('loadingText').textContent = `Searching ${from} → ${to}${flexLabel} across all programs...`;
-  
+  document.getElementById('loadingText').textContent =
+    `${refresh ? 'Refreshing live prices for' : 'Searching'} ${from} → ${to}${flexLabel} across all programs...`;
+
   try {
     const params = new URLSearchParams({ from, to, date, return: ret, class: cls, flex: String(flexDays) });
+    if (refresh) params.set('refresh', '1');
+    if (verify) params.set('verify', '1');
     const searchUrl = './api/search?' + params.toString();
 
     let resp;
@@ -979,10 +1041,43 @@ async function handleSearch(event) {
     }
   } catch (err) {
     document.getElementById('loadingText').textContent = `Error: ${err.message}`;
+  }
+}
+
+/**
+ * Explicit "refresh live price": bypasses the cache and permits the metered
+ * reserve. Guarded so a double-click cannot issue two billable searches — the
+ * server collapses duplicates too, this just avoids the round trip.
+ */
+let refreshInFlight = false;
+
+async function refreshLivePrice() {
+  if (refreshInFlight || searchInFlight) return;
+
+  const from = (document.getElementById('inputFrom').value || '').toUpperCase().trim();
+  const to = (document.getElementById('inputTo').value || '').toUpperCase().trim();
+  const date = document.getElementById('inputDate').value;
+  if (!from || !to || !date) { alert('Please fill in From, To and Departure Date first'); return; }
+
+  if (!confirm(
+    `Refresh live prices for ${from} → ${to} on ${date}?
+
+` +
+    `This bypasses the cache and may spend metered SerpAPI calls ` +
+    `(one per cabin) from your monthly budget.`
+  )) return;
+
+  refreshInFlight = true;
+  const btn = document.getElementById('refreshBtn');
+  const btnText = document.getElementById('refreshBtnText');
+  btn.disabled = true;
+  btnText.textContent = '↻ Refreshing…';
+  try {
+    await runSearchRequest({ from, to, date, refresh: true, verify: true });
   } finally {
-    document.getElementById('searchBtn').disabled = false;
-    document.getElementById('searchBtnText').textContent = 'Search';
-    document.getElementById('searchSpinner').classList.add('hidden');
+    refreshInFlight = false;
+    btn.disabled = false;
+    btnText.textContent = '↻ Refresh live price';
   }
 }
 

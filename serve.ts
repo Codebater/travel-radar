@@ -16,6 +16,9 @@ import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
 import { runSearch, type SearchConfig, type DashboardResults } from "./search.ts"
+import { providerHealth } from "./providers/cash-flights/index.js"
+import { getDb } from "./db/index.js"
+import { allUsage, priceHistory } from "./db/repositories.js"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
 // Bind to loopback by default — this is a local dev tool holding live loyalty
@@ -33,6 +36,18 @@ const VALID_CLASSES = ["ECON", "PREM", "both"]
 const VALID_SOURCES = ["roame", "atf", "google", "hidden-city"]
 
 class BadRequest extends Error {}
+
+/** "1"/"true"/"yes" → true; absent or anything else → false. */
+function boolParam(value: string | null): boolean {
+  return value !== null && ["1", "true", "yes"].includes(value.toLowerCase())
+}
+
+/**
+ * Searches already running, keyed by their parameters. A double-clicked
+ * "Refresh live price" must join the in-flight search rather than starting a
+ * second one and spending a second metered call.
+ */
+const inFlight = new Map<string, Promise<DashboardResults>>()
 
 function iata(value: string, field: string): string {
   if (!IATA_RE.test(value)) throw new BadRequest(`Invalid ${field}: expected a 3-letter IATA code, got "${value}"`)
@@ -81,9 +96,47 @@ const server = http.createServer(async (req, res) => {
     }
   }
   
+  // Route: /api/providers — provider health, quota and local usage.
+  // Never performs a billable call.
+  if (url.pathname === "/api/providers") {
+    try {
+      const health = await providerHealth()
+      const usage = allUsage(getDb())
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ checkedAt: new Date().toISOString(), providers: health, usage }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/price-history — observations accumulated for a route.
+  if (url.pathname === "/api/price-history") {
+    try {
+      const origin = iata(url.searchParams.get("from") || "", "from")
+      const destination = iata(url.searchParams.get("to") || "", "to")
+      const departureDate = url.searchParams.get("date")
+      const cabin = url.searchParams.get("cabin")
+      const stats = priceHistory(getDb(), {
+        origin, destination,
+        departureDate: departureDate ? isoDate(departureDate, "date") : undefined,
+        cabin: cabin || undefined,
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ origin, destination, stats }, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
   // Route: /api/search — trigger a live search
   if (url.pathname === "/api/search") {
     let from: string, to: string, date: string, ret: string, cls: string, flex: number, sources: string[]
+    let refresh = false, verify = false
     try {
       from = iata(url.searchParams.get("from") || "LAX", "from")
       to = iata(url.searchParams.get("to") || "DXB", "to")
@@ -99,6 +152,11 @@ const server = http.createServer(async (req, res) => {
       const unknown = sources.filter(s => !VALID_SOURCES.includes(s))
       if (unknown.length > 0) throw new BadRequest(`Unknown source(s): ${unknown.join(", ")}. Valid: ${VALID_SOURCES.join(", ")}`)
       if (sources.length === 0) throw new BadRequest("At least one source is required")
+      // "Refresh live price" — bypass the cash cache and permit the metered
+      // reserve, because a person explicitly asked for a fresh number.
+      refresh = boolParam(url.searchParams.get("refresh"))
+      // Ask the metered provider to confirm the free provider's prices.
+      verify = boolParam(url.searchParams.get("verify"))
     } catch (err) {
       const message = (err as Error).message
       console.warn(`⚠️ Rejected search request: ${message}`)
@@ -107,7 +165,27 @@ const server = http.createServer(async (req, res) => {
       return
     }
 
-    console.log(`🔍 API search: ${from}→${to} ${date}${ret ? ` ↩${ret}` : ''} ${cls} flex±${flex}`)
+    console.log(
+      `🔍 API search: ${from}→${to} ${date}${ret ? ` ↩${ret}` : ''} ${cls} flex±${flex}` +
+      `${refresh ? " [refresh]" : ""}${verify ? " [verify]" : ""}`
+    )
+
+    // Collapse duplicate concurrent requests for the same search. Without this a
+    // double-clicked refresh button issues two metered verifications.
+    const requestKey = [from, to, date, ret, cls, flex, sources.join(","), refresh, verify].join("|")
+    const running = inFlight.get(requestKey)
+    if (running) {
+      console.log("   ↩ joining identical in-flight search (no extra provider calls)")
+      try {
+        const shared = await running
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify(shared))
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: (err as Error).message }))
+      }
+      return
+    }
 
     try {
       // Build outbound search config
@@ -121,10 +199,21 @@ const server = http.createServer(async (req, res) => {
         output: path.join(ROOT, "results.json"),
         verbose: true,
         flexDays: flex,
+        forceRefresh: refresh,
+        userInitiated: refresh,
+        verifyPrices: verify,
+        source: "api",
       }
-      
+
       // Run outbound search
-      const outboundResults = await runSearch(outboundConfig)
+      const work = runSearch(outboundConfig)
+      inFlight.set(requestKey, work)
+      let outboundResults: DashboardResults
+      try {
+        outboundResults = await work
+      } finally {
+        inFlight.delete(requestKey)
+      }
       
       // Tag all outbound flights
       for (const flight of outboundResults.flights) {
@@ -149,6 +238,10 @@ const server = http.createServer(async (req, res) => {
           output: path.join(ROOT, "results-return.json"),
           verbose: true,
           flexDays: flex,
+          forceRefresh: refresh,
+          userInitiated: refresh,
+          verifyPrices: verify,
+          source: "api",
         }
         
         const returnResults = await runSearch(returnConfig)
