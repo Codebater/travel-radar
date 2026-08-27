@@ -16,7 +16,7 @@ import path from "path"
 import os from "os"
 import { getDb, type DB } from "../../db/index.js"
 import {
-  latestBalanceSnapshot, saveBalanceSnapshot, recordCallAttempt, recordCallOutcome,
+  latestBalanceSnapshot, saveBalanceSnapshot, recordCallAttempt, recordCallOutcome, readUsage,
   type BalanceRow,
 } from "../../db/repositories.js"
 import type { ProviderHealth } from "../cash-flights/types.js"
@@ -103,42 +103,113 @@ const FALLBACK_BALANCES: BalanceRow[] = [
   { program: "Bilt Rewards", programKey: "bilt", balance: 59390 },
 ]
 
-async function fetchFromAwardWallet(db: DB): Promise<BalanceRow[] | null> {
-  let creds: { apiKey?: string; api_key?: string; userId?: string; user_id?: string }
+const AW_BASE = "https://business.awardwallet.com/api/export/v1"
+
+interface AwCreds { apiKey?: string; api_key?: string; userId?: string | number; user_id?: string | number }
+
+function readCreds(): { apiKey: string | null; userId: string | null } {
   try {
-    creds = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf-8"))
+    const c = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf-8")) as AwCreds
+    const userId = c.userId ?? c.user_id
+    return { apiKey: c.apiKey || c.api_key || null, userId: userId != null ? String(userId) : null }
   } catch (err) {
     console.warn(`⚠️ AwardWallet credentials unreadable: ${(err as Error).message}`)
-    return null
+    return { apiKey: null, userId: null }
   }
-  const apiKey = creds.apiKey || creds.api_key
-  const userId = creds.userId || creds.user_id
-  if (!apiKey || !userId) return null
+}
+
+/** Persist a discovered userId so the lookup happens once, not every refresh. */
+function cacheUserId(userId: string): void {
+  try {
+    const c = JSON.parse(fs.readFileSync(CREDENTIALS_PATH, "utf-8")) as AwCreds
+    c.userId = userId
+    fs.writeFileSync(CREDENTIALS_PATH, JSON.stringify(c, null, 2) + "\n")
+  } catch { /* best effort — a failed write just means we rediscover next time */ }
+}
+
+async function awFetch(apiKey: string, path: string, timeoutMs = 20_000): Promise<{ status: number; body: any }> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const resp = await fetch(`${AW_BASE}${path}`, {
+      headers: { "X-Authentication": apiKey, Accept: "application/json" },
+      signal: controller.signal,
+    })
+    const text = await resp.text()
+    let body: any = null
+    try { body = JSON.parse(text) } catch { body = { raw: text.slice(0, 200) } }
+    return { status: resp.status, body }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/**
+ * Turn an AwardWallet error body into something the operator can act on.
+ * IP_DENIED in particular is a dashboard setting, not a bad key — saying
+ * "unauthorized" there would send someone hunting the wrong problem.
+ */
+function describeAwError(status: number, body: any): string {
+  const code = body?.code
+  if (code === "IP_DENIED") {
+    return "IP not whitelisted for this AwardWallet key — add this machine's public IP " +
+           "under AwardWallet Business → API settings (the NAS will need its own entry later)"
+  }
+  if (status === 401) return `unauthorized (${code || "check the API key"})`
+  return `HTTP ${status}${code ? ` ${code}` : ""}${body?.message ? `: ${String(body.message).slice(0, 120)}` : ""}`
+}
+
+/**
+ * Find the connected user whose accounts we read. Only the key was supplied,
+ * and the balances endpoint is per-user, so the id is discovered once from
+ * /connections and then cached into the credentials file.
+ */
+async function discoverUserId(apiKey: string): Promise<{ userId: string | null; error: string | null }> {
+  const { status, body } = await awFetch(apiKey, "/connections")
+  if (status !== 200) return { userId: null, error: describeAwError(status, body) }
+
+  const list: any[] = Array.isArray(body) ? body : (body?.connections ?? body?.users ?? [])
+  if (!Array.isArray(list) || list.length === 0) {
+    return { userId: null, error: "no connected users on this AwardWallet account" }
+  }
+  // Prefer the connection with the most accounts — that is the real profile.
+  const best = [...list].sort((a, b) => (b.accounts?.length ?? 0) - (a.accounts?.length ?? 0))[0]
+  const id = best?.userId ?? best?.id
+  return id != null ? { userId: String(id), error: null } : { userId: null, error: "connection carried no userId" }
+}
+
+async function fetchFromAwardWallet(db: DB): Promise<BalanceRow[] | null> {
+  const creds = readCreds()
+  if (!creds.apiKey) return null
 
   recordCallAttempt(db, "awardwallet")
   try {
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 20_000)
-    let resp: Response
-    try {
-      resp = await fetch(`https://business.awardwallet.com/api/export/v1/connectedUser/${userId}`, {
-        headers: { "X-Authentication": apiKey, Accept: "application/json" },
-        signal: controller.signal,
-      })
-    } finally {
-      clearTimeout(timer)
+    let userId = creds.userId
+    if (!userId) {
+      const discovered = await discoverUserId(creds.apiKey)
+      if (!discovered.userId) {
+        recordCallOutcome(db, "awardwallet", { ok: false, error: discovered.error })
+        console.warn(`⚠️ AwardWallet: ${discovered.error}`)
+        return null
+      }
+      userId = discovered.userId
+      cacheUserId(userId)
+      console.log(`BALANCES: discovered AwardWallet connected user, cached for future refreshes`)
     }
-    if (!resp.ok) {
-      recordCallOutcome(db, "awardwallet", { ok: false, error: `HTTP ${resp.status}` })
+
+    const { status, body } = await awFetch(creds.apiKey, `/connectedUser/${encodeURIComponent(userId)}`)
+    if (status !== 200) {
+      const error = describeAwError(status, body)
+      recordCallOutcome(db, "awardwallet", { ok: false, error })
+      console.warn(`⚠️ AwardWallet: ${error}`)
       return null
     }
-    const data = await resp.json() as any
-    if (!data.accounts) {
+    if (!body?.accounts) {
       recordCallOutcome(db, "awardwallet", { ok: false, error: "no accounts in response" })
       return null
     }
     recordCallOutcome(db, "awardwallet", { ok: true })
-    return data.accounts
+    return body.accounts
       .filter((a: any) => (a.balanceRaw || 0) > 0)
       .map((a: any) => ({
         program: a.displayName || a.name,
@@ -212,12 +283,21 @@ export function balancesHealth(db: DB = getDb()): ProviderHealth {
       detail: `no credentials at ${CREDENTIALS_PATH}; fallback balances in use`,
     }
   }
+  const usage = readUsage(db, "awardwallet")
   if (snapshot) {
     const hours = Math.round(snapshot.ageMinutes / 6) / 10
     const fresh = snapshot.ageMinutes <= balanceTtlHours() * 60
     return {
       provider: "awardwallet", status: "ok", latencyMs: null, checkedAt, quota: null,
       detail: `${snapshot.balances.length} programs cached, last refresh ${hours}h ago${fresh ? "" : " (stale — next search refreshes)"}`,
+    }
+  }
+  // No snapshot yet: if a fetch has already failed, say WHY rather than
+  // implying everything is fine and waiting for a search to fail again.
+  if (usage.failed > 0 && usage.lastError) {
+    return {
+      provider: "awardwallet", status: "degraded", latencyMs: null, checkedAt, quota: null,
+      detail: `configured but not yet working — ${usage.lastError.slice(0, 160)}`,
     }
   }
   return {
