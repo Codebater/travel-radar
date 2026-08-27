@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest"
+import { getDb } from "../db/index.js"
 import { spawn, type ChildProcess } from "child_process"
 import fs from "fs"
 import net from "net"
@@ -184,9 +185,13 @@ describe("network binding", () => {
 
 describe("Phase 3 endpoints", () => {
   it("serves /api/results/latest from the database (404 on a fresh one)", async () => {
-    // The test server runs against a fresh temp DATABASE_PATH with no search
-    // persisted — a clean 404 proves the endpoint is DB-backed and functional
-    // without any results.json involvement.
+    // Every suite in this run shares one DATABASE_PATH (vitest runs them in a
+    // single process), so "fresh" has to be made true rather than assumed: an
+    // earlier suite exercising runSearch persists a result, and this assertion
+    // then silently depended on file ordering. Clearing the table is the
+    // difference between testing the endpoint and testing the schedule.
+    getDb().prepare("DELETE FROM search_results").run()
+
     const res = await fetch(`${base}/api/results/latest`)
     expect(res.status).toBe(404)
     const body = await res.json() as { error?: string }

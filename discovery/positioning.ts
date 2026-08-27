@@ -117,20 +117,41 @@ export function assessPositioning(
   }
 
   // ── The money ────────────────────────────────────────────────────────────
-  let positioningCost = amountFor(leg.typicalCost, input.currency)
+  //
+  // A return trip has to get to the positioning airport AND back from it. The
+  // configured `typicalCost` is a single ticket (a Railjet seat, a bus fare),
+  // so a return trip pays it twice. Counting it once was a straight
+  // understatement of the thing this whole module exists to expose.
+  const isReturn = input.tripType !== "oneway"
+  const legsNeeded = isReturn ? 2 : 1
+
+  let positioningCost = amountFor(leg.typicalCost, input.currency) * legsNeeded
   let costBasis: PositioningAssessment["costBasis"] = leg.mode === "flight" ? "estimated" : "ground-fixed"
 
   if (leg.mode === "flight") {
-    // A positioning FLIGHT has a real market price, so prefer a fare this
-    // radar has actually seen over the configured guess. Both directions are
-    // needed for a return trip; the one-way observation is doubled only when
-    // no return observation exists, and that is recorded as an estimate.
-    const observed = observedFare(db, leg.from, airport, "economy", input.currency, input.asOf, {
-      tripType: input.tripType === "oneway" ? "oneway" : "return",
+    // A positioning FLIGHT has a real market price, so prefer one this radar
+    // has actually seen over the configured guess.
+    //
+    // Scoped to the SAME departure date. Without that it took the cheapest
+    // fare on any date in the window, which is a different (and always
+    // cheaper) journey than the one being priced - and every distortion in
+    // this module has to be checked in the direction of flattering
+    // positioning, because that is the direction that costs money.
+    const sameDay = observedFare(db, leg.from, airport, "economy", input.currency, input.asOf, {
+      departureDate: input.departureDate,
+      tripType: isReturn ? "return" : "oneway",
     })
-    if (observed) {
-      positioningCost = observed.price
+    if (sameDay) {
+      positioningCost = sameDay.price
       costBasis = "observed"
+    } else {
+      // No return fare on the day: a one-way observation doubled is a better
+      // estimate than the configured guess, but it stays labelled an estimate.
+      const oneWay = observedFare(db, leg.from, airport, "economy", input.currency, input.asOf, {
+        departureDate: input.departureDate,
+        tripType: "oneway",
+      })
+      if (oneWay) positioningCost = oneWay.price * legsNeeded
     }
   }
 
@@ -170,8 +191,11 @@ export function assessPositioning(
   penalty = Math.min(1, Math.round(penalty * 1000) / 1000)
 
   // ── Is it actually worth it? ─────────────────────────────────────────────
+  // Compared against a home fare of the SAME trip type: a one-way positioning
+  // fare set beside a home round trip would look like a spectacular saving and
+  // be a straightforward category error.
   const home = bestHomeFare(db, input.destination, input.cabin, input.currency, input.asOf, config, {
-    tripType: input.tripType,
+    tripType: isReturn ? "return" : "oneway",
   })
   const savingVsHome = home === null ? null : Math.round((home - trueTripStartCost) * 100) / 100
   const savingPercent = home === null || home <= 0 || savingVsHome === null
@@ -207,7 +231,8 @@ export function assessPositioning(
     worthwhile,
     note: home === null
       ? "no comparable home-airport fare observed yet, so the saving is unknown"
-      : `${trueTripStartCost} ${input.currency} true start cost vs ${home} from home`,
+      : `${trueTripStartCost} ${input.currency} true start cost ` +
+        `(${legsNeeded === 2 ? "two positioning legs" : "one positioning leg"}) vs ${home} from home`,
   }
 }
 

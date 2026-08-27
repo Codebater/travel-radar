@@ -311,6 +311,9 @@ describe("positioning economics", () => {
     for (let i = 0; i < 3; i++) {
       recordPriceObservations(db, [makeFlight({
         origin: "PRG", destination: "WAW", cabin: "economy", returnDate: null,
+        // On the DATE being priced: the cheapest PRG-WAW fare in the window is
+        // a different journey from the one this traveller has to take.
+        departureDate: day(30),
         price: { amount: 41, currency: "USD" }, fetchedAt: at(-i - 1),
       })], { adults: 1 })
     }
@@ -321,6 +324,78 @@ describe("positioning economics", () => {
     }, config)
     expect(a.costBasis).toBe("observed")
     expect(a.positioningCost).toBe(41)
+  })
+
+  it("ignores a cheap positioning fare on a DIFFERENT date", () => {
+    // It used to take the cheapest fare on any date in the window, which is a
+    // cheaper journey than the one being priced - and every distortion here
+    // has to be checked in the direction of flattering positioning.
+    homeFare(900)
+    recordPriceObservations(db, [makeFlight({
+      origin: "PRG", destination: "WAW", cabin: "economy", returnDate: null,
+      departureDate: day(90), price: { amount: 12, currency: "USD" }, fetchedAt: at(-1),
+    })], { adults: 1 })
+
+    const a = assessPositioning(db, {
+      positioningAirport: "WAW", destination: "BKK", departureDate: day(30),
+      departureTime: `${day(30)}T14:00`, cabin: "economy",
+      mainFare: 500, currency: "USD", asOf: at(0), tripType: "oneway",
+    }, config)
+    expect(a.positioningCost).not.toBe(12)
+    expect(a.costBasis).toBe("estimated")
+  })
+
+  it("charges a return trip for BOTH positioning legs", () => {
+    // You have to get to Budapest and back from it. Counting the train once
+    // was a straight understatement of the thing this module exists to expose.
+    homeFare(900)
+    // A return home fare too, so the comparison line has something to say -
+    // the helper above only seeds one-ways.
+    for (let i = 0; i < 3; i++) {
+      recordPriceObservations(db, [makeFlight({
+        origin: "VIE", destination: "BKK", cabin: "economy",
+        departureDate: day(30), returnDate: day(44),
+        price: { amount: 900, currency: "USD" }, fetchedAt: at(-i - 1),
+      })], { adults: 1 })
+    }
+    const oneWay = assessPositioning(db, {
+      positioningAirport: "BUD", destination: "BKK", departureDate: day(30),
+      departureTime: `${day(30)}T14:00`, cabin: "economy",
+      mainFare: 500, currency: "USD", asOf: at(0), tripType: "oneway",
+    }, config)
+    const returnTrip = assessPositioning(db, {
+      positioningAirport: "BUD", destination: "BKK", departureDate: day(30),
+      departureTime: `${day(30)}T14:00`, cabin: "economy",
+      mainFare: 500, currency: "USD", asOf: at(0), tripType: "return",
+    }, config)
+
+    expect(returnTrip.positioningCost).toBe(oneWay.positioningCost * 2)
+    expect(returnTrip.trueTripStartCost).toBeGreaterThan(oneWay.trueTripStartCost)
+    expect(returnTrip.note).toMatch(/two positioning legs/)
+  })
+
+  it("compares a return positioning fare against a return home fare", () => {
+    // A one-way positioning fare beside a home round trip would look like a
+    // spectacular saving and be a category error.
+    for (let i = 0; i < 3; i++) {
+      recordPriceObservations(db, [makeFlight({
+        origin: "VIE", destination: "BKK", cabin: "economy",
+        departureDate: day(30), returnDate: day(44),
+        price: { amount: 800, currency: "USD" }, fetchedAt: at(-i - 1),
+      })], { adults: 1 })
+      recordPriceObservations(db, [makeFlight({
+        origin: "VIE", destination: "BKK", cabin: "economy",
+        departureDate: day(30), returnDate: null,
+        price: { amount: 420, currency: "USD" }, fetchedAt: at(-i - 1),
+      })], { adults: 1 })
+    }
+    const a = assessPositioning(db, {
+      positioningAirport: "BUD", destination: "BKK", departureDate: day(30),
+      departureTime: `${day(30)}T14:00`, cabin: "economy",
+      mainFare: 600, currency: "USD", asOf: at(0), tripType: "return",
+    }, config)
+    // The 420 one-way must not be the yardstick for a return trip.
+    expect(a.comparableHomeFare).toBe(800)
   })
 
   it("compares against the CHEAPEST home airport, not an arbitrary one", () => {

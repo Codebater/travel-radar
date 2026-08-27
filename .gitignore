@@ -48,3 +48,6 @@ tmp_*.ts
 _dbg*.ts
 _s[0-9]*.ts
 _q[0-9]*.ts
+_refute*.ts
+zz_*.ts
+tests/tmp-*.test.ts

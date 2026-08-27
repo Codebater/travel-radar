@@ -243,14 +243,20 @@ async function main() {
       const currency = process.env.CASH_CURRENCY || "USD"
       const asOf = new Date().toISOString()
 
-      const home = bestHomeFare(db, destination, cabin, currency, asOf, config)
-      console.log(`Positioning comparison for ${destination} (${cabin}), all from stored observations.\n`)
-      console.log(`Best observed fare from a home airport: ${home ?? "none observed"} ${home ? currency : ""}\n`)
+      // Round trips only, on both sides. A one-way positioning fare next to a
+      // home round trip is not a comparison, it is a category error that always
+      // makes positioning look brilliant.
+      const tripType = "return" as const
+      const home = bestHomeFare(db, destination, cabin, currency, asOf, config, { tripType })
+      console.log(`Positioning comparison for ${destination} (${cabin}, return trips), from stored observations.\n`)
+      console.log(`Best observed return fare from a home airport: ${home ?? "none observed"} ${home ? currency : ""}\n`)
 
       for (const airport of originsFor("positioning", config)) {
         const observed = db.prepare(`
-          SELECT MIN(price_amount) price, departure_date, departure_time
+          SELECT price_amount price, departure_date, departure_time
           FROM flight_prices WHERE origin = ? AND destination = ? AND cabin = ? AND price_currency = ?
+            AND return_date IS NOT NULL
+          ORDER BY price_amount ASC LIMIT 1
         `).get(airport, destination, cabin, currency) as { price: number | null; departure_date: string; departure_time: string | null }
         if (!observed?.price) {
           console.log(`  ${airport}: no fare observed yet`)
@@ -259,7 +265,7 @@ async function main() {
         const a = assessPositioning(db, {
           positioningAirport: airport, destination,
           departureDate: observed.departure_date, departureTime: observed.departure_time,
-          cabin, mainFare: observed.price, currency, asOf,
+          cabin, mainFare: observed.price, currency, asOf, tripType,
         }, config)
         console.log(
           `  ${airport}: fare ${a.mainFare} + ${a.mode} ${a.positioningCost}` +
