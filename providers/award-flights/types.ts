@@ -123,6 +123,13 @@ export interface AwardSearchResult {
   completionPct: number | null
   /** Quota the provider itself reported alongside this response (ATF does). */
   reportedQuota?: { remaining: number; limit: number }
+  /**
+   * ok:true but incomplete: part of the search failed (one Roame class, some
+   * ATF airlines). Partial results are served and recorded as observations but
+   * MUST NOT be cached — caching one would freeze the missing part's absence
+   * for the whole TTL. `error` describes what failed.
+   */
+  partial?: boolean
 }
 
 export interface AwardSearchOptions {
@@ -151,4 +158,12 @@ export interface AwardFlightProvider {
   quota(): ProviderQuota | null
 
   search(query: AwardFlightQuery, options?: AwardSearchOptions): Promise<AwardSearchResult>
+
+  /**
+   * Optionally collapse query dimensions this provider ignores, so its cache
+   * key does not fragment. ATF's request is (origin, destination, date) only
+   * and always returns all cabins - searching "PREM" after "both" must hit the
+   * same entry instead of re-spending 5 of its 150 monthly calls.
+   */
+  normalizeCacheQuery?(query: AwardFlightQuery): AwardFlightQuery
 }

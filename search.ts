@@ -71,6 +71,13 @@ interface SearchConfig {
   /** Ask the metered provider to confirm the free provider's prices. */
   verifyPrices?: boolean
   source?: "api" | "cli" | "test"
+  /**
+   * Persist the payload to search_results (default true). serve.ts sets false
+   * for the internal return-leg search of a round trip: only the MERGED
+   * outbound+return payload may become the "latest result", never the
+   * reversed return leg on its own.
+   */
+  persistResults?: boolean
 }
 
 interface DashboardResults {
@@ -83,6 +90,10 @@ interface DashboardResults {
     sources: string[]
     completionPct: Record<string, number>
     totalFlights?: number     // set by serve.ts when outbound + return are merged
+    /** The unified search_requests row this payload belongs to. serve.ts uses
+     *  it to persist the MERGED outbound+return payload over the outbound row,
+     *  so the dashboard's "latest result" is never just the reversed return leg. */
+    searchRequestId?: number | null
   }
   balances: PointsBalance[]
   /** Where the balances came from and how old they are (never the values themselves in logs). */
@@ -529,23 +540,27 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
     )
   }
 
+  let cashPromise: Promise<void> = Promise.resolve()
   if (config.sources.includes("google")) {
-    promises.push(
-      searchCashSource(config, searchRequestId).then(({ flights, completion, warnings }) => {
-        otherFlights.push(...flights)
-        completionPct["google"] = completion
-        sourceWarnings.push(...warnings)
-        console.log(`✅ Cash flights: ${flights.length} fares`)
-      }).catch(err => {
-        console.error(`❌ Cash flight search failed: ${err.message}`)
-        completionPct["google"] = 0
-      })
-    )
+    cashPromise = searchCashSource(config, searchRequestId).then(({ flights, completion, warnings }) => {
+      otherFlights.push(...flights)
+      completionPct["google"] = completion
+      sourceWarnings.push(...warnings)
+      console.log(`✅ Cash flights: ${flights.length} fares`)
+    }).catch(err => {
+      console.error(`❌ Cash flight search failed: ${err.message}`)
+      completionPct["google"] = 0
+    })
+    promises.push(cashPromise)
   }
 
   if (config.sources.includes("hidden-city")) {
+    // Chained after the cash source on purpose: the hidden-city direct-price
+    // query is identical to the main economy search, so running it afterwards
+    // turns it into a cache hit instead of a concurrent duplicate fetch (and,
+    // when the free provider is down, a duplicate SerpAPI spend).
     promises.push(
-      searchHiddenCity(config, searchRequestId).then(({ flights, completion }) => {
+      cashPromise.then(() => searchHiddenCity(config, searchRequestId)).then(({ flights, completion }) => {
         otherFlights.push(...flights)
         completionPct["hidden-city"] = completion
         console.log(`✅ Hidden City: ${flights.length} opportunities`)
@@ -573,6 +588,14 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
 
   // Sort scored flights by value score (highest first)
   scored.sort((a, b) => b.valueScore - a.valueScore)
+
+  // The dashboard's per-card cent-per-mile badge and its "cpp"/"value" sorts
+  // read flight.cppValue. Awards now arrive from the provider layer with
+  // cppValue null (the old hardcoded estimate is gone), so feed those fields
+  // from the value engine's realCpp - strictly better data, same UI contract.
+  for (const f of scored) {
+    if (f.type === "award" && f.cppValue === null && f.realCpp !== null) f.cppValue = f.realCpp
+  }
 
   // Same flight, different programs → explicit comparison (§ best redemption)
   const redemptionComparisons = buildRedemptionComparisons(scored)
@@ -604,6 +627,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
       searchedAt: new Date().toISOString(),
       sources: config.sources,
       completionPct,
+      searchRequestId,
     },
     balances,
     balancesMeta: {
@@ -621,7 +645,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   }
 
   // SQLite is the persistence source; results.json remains a debug export.
-  if (searchRequestId !== null) {
+  if (searchRequestId !== null && config.persistResults !== false) {
     try {
       saveSearchResult(db, searchRequestId, results)
     } catch (err) {

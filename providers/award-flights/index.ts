@@ -204,14 +204,17 @@ export async function searchAwardFlights(
       continue
     }
 
-    const key = awardCacheKey(query, provider.name)
+    const key = awardCacheKey(provider.normalizeCacheQuery?.(query) ?? query, provider.name)
 
     // ── Tier 0: this provider's own cache ─────────────────────────────────
     if (!options.forceRefresh) {
+      // An empty payload is a valid entry: "this provider recently confirmed
+      // nothing is available". Re-asking would re-spend quota (5 ATF calls)
+      // for the same answer.
       const entry = readCache<NormalizedAwardFlight>(db, key)
-      if (entry && !entry.isExpired && entry.flights.length > 0) {
+      if (entry && !entry.isExpired) {
         recordCacheHit(db, key)
-        console.log(`AWARD CACHE HIT ${label(query)} ${provider.name.toUpperCase()} (${entry.ageMinutes}m old)`)
+        console.log(`AWARD CACHE HIT ${label(query)} ${provider.name.toUpperCase()} (${entry.flights.length} results, ${entry.ageMinutes}m old)`)
         const flights = entry.flights
           .map(f => ({ ...f, verificationLevel: "cached" as const }))
         collected.push(...flights)
@@ -236,7 +239,10 @@ export async function searchAwardFlights(
         flightCount: result.flights.length, callsSpent: 0, latencyMs: result.latencyMs,
         completionPct: result.completionPct, error: result.error ?? null,
       })
-      if (result.ok) collected.push(...result.flights)
+      // Clone: the originator holds the same objects, and crossVerify mutates
+      // verificationLevel in place - sharing references would bleed one
+      // search's cross-verified labels into another's results.
+      if (result.ok) collected.push(...result.flights.map(f => ({ ...f })))
       else if (result.error) warnings.push(`${provider.name}: ${result.error}`)
       continue
     }
@@ -285,23 +291,46 @@ export async function searchAwardFlights(
     })
 
     if (result.ok) {
-      console.log(`${provider.name.toUpperCase()} ${result.flights.length} results (${result.latencyMs}ms)`)
-      collected.push(...result.flights)
+      console.log(`${provider.name.toUpperCase()} ${result.flights.length} results (${result.latencyMs}ms)${result.partial ? " [PARTIAL]" : ""}`)
+      collected.push(...result.flights.map(f => ({ ...f })))
       try {
-        writeCache(db, key, provider.name, {
-          origin: query.origin, destination: query.destination,
-          departureDate: query.departureDate, returnDate: query.returnDate ?? null,
-          cabin: query.searchClass, adults: query.adults,
-        }, result.flights, ttlToExpiry(policy.awardTtlHours))
+        // A partial result (one Roame class failed, some ATF airlines failed)
+        // is real data worth using and recording — but caching it would freeze
+        // the missing part's absence for the whole TTL, so partials are never
+        // written to the cache and the next search retries in full.
+        if (!result.partial) {
+          writeCache(db, key, provider.name, {
+            origin: query.origin, destination: query.destination,
+            departureDate: query.departureDate, returnDate: query.returnDate ?? null,
+            cabin: query.searchClass, adults: query.adults,
+          }, result.flights, ttlToExpiry(policy.awardTtlHours))
+        } else {
+          warnings.push(`${provider.name}: partial results (${result.error}) — not cached; next search retries in full`)
+        }
         recordAwardObservations(db, result.flights, {
-          rawRef: key, searchRequestId: options.searchRequestId ?? null,
+          rawRef: result.partial ? null : key, searchRequestId: options.searchRequestId ?? null,
         })
       } catch (err) {
         warnings.push(`could not persist ${provider.name} results: ${(err as Error).message}`)
       }
     } else {
+      // "No availability" is a real, complete answer worth caching: repeating
+      // the search inside the TTL must not re-spend quota (5 ATF calls) to
+      // hear the same nothing. Provider errors, timeouts and partial-empty
+      // results are NOT cached - those must retry.
+      if (result.reason === "no-results" && !result.partial) {
+        try {
+          writeCache(db, key, provider.name, {
+            origin: query.origin, destination: query.destination,
+            departureDate: query.departureDate, returnDate: query.returnDate ?? null,
+            cabin: query.searchClass, adults: query.adults,
+          }, [], ttlToExpiry(policy.awardTtlHours))
+        } catch (err) {
+          warnings.push(`could not cache ${provider.name} empty result: ${(err as Error).message}`)
+        }
+      }
       warnings.push(`${provider.name}: ${result.error || result.reason}`)
-      console.warn(`${provider.name.toUpperCase()} failed — ${result.reason}: ${result.error}`)
+      console.warn(`${provider.name.toUpperCase()} failed: ${result.reason}: ${result.error}`)
     }
   }
 

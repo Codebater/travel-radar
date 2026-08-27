@@ -237,6 +237,32 @@ describe("duplicate request collapsing", () => {
   }, 60_000)
 })
 
+describe("round-trip persistence (review finding)", () => {
+  it("persists the MERGED payload, not the reversed return leg, as the latest result", async () => {
+    // The high-severity review finding: serve.ts ran runSearch twice for a
+    // round trip (outbound, then return); each persisted its own payload, so
+    // the return leg (persisted last) became /api/results/latest and a
+    // dashboard reload showed only the reversed route. Uses the free cash
+    // provider only — nothing metered is configured in this environment.
+    const res = await fetch(
+      `${base}/api/search?from=PRG&to=SIN&date=2026-12-05&return=2026-12-19&class=ECON&sources=google`)
+    expect(res.status).toBe(200)
+
+    const latest = await fetch(`${base}/api/results/latest`)
+    expect(latest.status).toBe(200)
+    const payload = await latest.json() as any
+    // The persisted latest must be the outbound-rooted MERGED result...
+    expect(payload.meta.origin).toBe("PRG")
+    expect(payload.meta.destination).toBe("SIN")
+    expect(payload.meta.returnDate).toBe("2026-12-19")
+    // ...containing both directions, not just one leg.
+    const directions = new Set(payload.flights.map((f: any) => f.direction || "outbound"))
+    expect(directions.has("outbound")).toBe(true)
+    expect(directions.has("return")).toBe(true)
+    expect(payload.meta.totalFlights).toBe(payload.flights.length)
+  }, 120_000)
+})
+
 describe("provider endpoints do not spend money", () => {
   it("reports health without performing a billable call", async () => {
     const res = await fetch(`${base}/api/providers`)

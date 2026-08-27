@@ -142,6 +142,7 @@ export class RoameAwardProvider implements AwardFlightProvider {
     let completion = 0
     let callsSpent = 0
     let lastError: string | null = null
+    const failedClasses: string[] = []
 
     for (const cls of classes) {
       try {
@@ -154,6 +155,7 @@ export class RoameAwardProvider implements AwardFlightProvider {
         for (const fare of result.fares) flights.push(this.normalise(fare, query))
       } catch (err) {
         lastError = (err as Error).message
+        failedClasses.push(cls)
       }
     }
 
@@ -171,7 +173,16 @@ export class RoameAwardProvider implements AwardFlightProvider {
     if (flights.length === 0) {
       return { provider: this.name, ok: false, flights: [], callsSpent, latencyMs, completionPct, reason: "no-results", error: "Roame returned no fares" }
     }
-    return { provider: this.name, ok: true, flights, callsSpent, latencyMs, completionPct }
+    // Some classes succeeded and some failed (e.g. ECON returned fares but the
+    // PREM job died). ok:true so the fares are used, but flagged partial so the
+    // orchestrator never caches a half-empty payload as a complete "both"
+    // result — that would silently hide business/first availability for the
+    // whole cache TTL.
+    const partial = failedClasses.length > 0
+    return {
+      provider: this.name, ok: true, flights, callsSpent, latencyMs, completionPct,
+      ...(partial ? { partial: true, error: `${failedClasses.join("/")} search failed: ${lastError}` } : {}),
+    }
   }
 
   private normalise(fare: RoameFare, query: AwardFlightQuery): NormalizedAwardFlight {

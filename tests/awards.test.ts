@@ -12,14 +12,17 @@ import {
 import { awardCacheKey } from "../cache/key.js"
 import { createMemoryDb, type DB } from "../db/index.js"
 import {
-  readCache, readUsage, recordAwardObservations, awardPriceHistory, recordSearchRequest,
+  readUsage, recordAwardObservations, awardPriceHistory, recordSearchRequest,
 } from "../db/repositories.js"
 import { buildRedemptionComparisons } from "../value-compare.js"
 import { scoreFlights } from "../value-engine.js"
 import type { UnifiedFlightResult } from "../roame-scraper.js"
 import {
-  MockAwardProvider, makeAwardQuery, makeAwardFlight, syntheticBalances,
+  MockAwardProvider, MockProvider, makeAwardQuery, makeAwardFlight, makeFlight, syntheticBalances,
 } from "./mocks.js"
+import { ATFAwardProvider } from "../providers/award-flights/atf.js"
+import { setProviders } from "../providers/cash-flights/index.js"
+import { runSearch } from "../search.js"
 
 let db: DB
 const savedEnv = { ...process.env }
@@ -32,6 +35,7 @@ beforeEach(() => {
 
 afterEach(() => {
   setAwardProviders(null)
+  setProviders(null)
   db.close()
   process.env = { ...savedEnv }
   vi.restoreAllMocks()
@@ -130,6 +134,167 @@ describe("award cache", () => {
     const byProvider = new Map(second.perProvider.map(p => [p.provider, p]))
     expect(byProvider.get("roame-mock")!.fromCache).toBe(true)
     expect(byProvider.get("atf-mock")!.fromCache).toBe(false)
+  })
+})
+
+describe("partial results are never cached (review finding)", () => {
+  // The confirmed Phase 3 review finding: a "both" search where ECON succeeded
+  // and PREM threw returned ok:true and was cached as a complete result for
+  // the whole TTL — business/first availability silently vanished for hours.
+  it("serves partial results but re-queries the provider on the next search", async () => {
+    const provider = new MockAwardProvider({ name: "roame-mock", partialError: "PREM search failed: session rejected" })
+    setAwardProviders([provider])
+    const q = makeAwardQuery({ searchClass: "both" })
+
+    const first = await searchAwardFlights(q, { db })
+    expect(first.flights).toHaveLength(1)                       // partial data is still used
+    expect(first.warnings.join(" ")).toContain("partial results")
+    expect(first.warnings.join(" ")).toContain("not cached")
+
+    await searchAwardFlights(q, { db })
+    expect(provider.calls).toHaveLength(2)                      // retried in full, not served from cache
+  })
+
+  it("still records partial results as history observations", async () => {
+    setAwardProviders([new MockAwardProvider({ name: "roame-mock", partialError: "PREM failed" })])
+    await searchAwardFlights(makeAwardQuery({ searchClass: "both" }), { db })
+    expect((db.prepare("SELECT COUNT(*) c FROM award_prices").get() as any).c).toBe(1)
+  })
+
+  it("complete results are still cached exactly as before", async () => {
+    const provider = new MockAwardProvider({ name: "roame-mock" })
+    setAwardProviders([provider])
+    const q = makeAwardQuery({ searchClass: "both" })
+    await searchAwardFlights(q, { db })
+    await searchAwardFlights(q, { db })
+    expect(provider.calls).toHaveLength(1)
+  })
+})
+
+describe("empty results are cached (review finding)", () => {
+  // "No availability" is a complete answer. Without caching it, every repeat
+  // of a no-availability route re-spends the full quota cost (5 ATF calls) to
+  // hear the same nothing.
+  it("caches a no-results outcome and answers the repeat search for zero calls", async () => {
+    const provider = new MockAwardProvider({ name: "atf-mock", callsPerSearch: 5, fail: "no-results" })
+    setAwardProviders([provider])
+    const q = makeAwardQuery()
+
+    const first = await searchAwardFlights(q, { db })
+    expect(first.flights).toEqual([])
+    expect(provider.calls).toHaveLength(1)
+    expect(readUsage(db, "atf-mock").attempted).toBe(5)
+
+    const second = await searchAwardFlights(q, { db })
+    expect(second.flights).toEqual([])
+    expect(provider.calls).toHaveLength(1)                       // served from the empty cache entry
+    expect(readUsage(db, "atf-mock").attempted).toBe(5)          // no further quota spent
+    const outcome = second.perProvider.find(p => p.provider === "atf-mock")!
+    expect(outcome.fromCache).toBe(true)
+    expect(outcome.flightCount).toBe(0)
+  })
+
+  it("does NOT cache an empty result when part of the check failed", async () => {
+    // Two airlines answered "nothing", three failed outright: caching that as
+    // confirmed emptiness would freeze the failed airlines' absence.
+    const provider = new MockAwardProvider({ name: "atf-mock", callsPerSearch: 5, fail: "no-results", failPartial: true })
+    setAwardProviders([provider])
+    const q = makeAwardQuery()
+    await searchAwardFlights(q, { db })
+    await searchAwardFlights(q, { db })
+    expect(provider.calls).toHaveLength(2)                       // retried, not served from cache
+  })
+
+  it("does NOT cache provider errors or timeouts", async () => {
+    const provider = new MockAwardProvider({ name: "roame-mock", fail: "timeout" })
+    setAwardProviders([provider])
+    const q = makeAwardQuery()
+    await searchAwardFlights(q, { db })
+    await searchAwardFlights(q, { db })
+    expect(provider.calls).toHaveLength(2)
+  })
+})
+
+describe("cache-key normalization (review finding)", () => {
+  it("ATF collapses search class and flex days it ignores", () => {
+    const atf = new ATFAwardProvider()
+    const normalized = atf.normalizeCacheQuery(makeAwardQuery({ searchClass: "PREM", flexDays: 2 }))
+    expect(normalized.searchClass).toBe("both")
+    expect(normalized.flexDays).toBe(0)
+    // Route and date are untouched.
+    expect(normalized.origin).toBe("PRG")
+    expect(normalized.departureDate).toBe("2026-11-10")
+  })
+
+  it("a PREM search after a 'both' search hits the same cache entry", async () => {
+    const provider = new MockAwardProvider({ name: "atf-mock", callsPerSearch: 5, normalizeAllClasses: true })
+    setAwardProviders([provider])
+
+    await searchAwardFlights(makeAwardQuery({ searchClass: "both" }), { db })
+    await searchAwardFlights(makeAwardQuery({ searchClass: "PREM" }), { db })
+    expect(provider.calls).toHaveLength(1)                       // byte-identical ATF payload reused
+    expect(readUsage(db, "atf-mock").attempted).toBe(5)          // not 10
+  })
+
+  it("providers without the hook still key on the full query", async () => {
+    const provider = new MockAwardProvider({ name: "roame-mock" })
+    setAwardProviders([provider])
+    await searchAwardFlights(makeAwardQuery({ searchClass: "both" }), { db })
+    await searchAwardFlights(makeAwardQuery({ searchClass: "PREM" }), { db })
+    expect(provider.calls).toHaveLength(2)                       // Roame results DO differ by class
+  })
+})
+
+describe("no cross-search label bleed (review finding)", () => {
+  it("a joiner consulting one provider does not inherit another search's cross-verification", async () => {
+    const shared = makeAwardFlight()
+    const roame = new MockAwardProvider({ name: "roame", flights: [shared], delayMs: 80 })
+    const atf = new MockAwardProvider({ name: "atf", flights: [{ ...shared }], delayMs: 120 })
+    setAwardProviders([roame, atf])
+    const q = makeAwardQuery()
+
+    // A consults both providers (its results become cross-verified); B starts
+    // concurrently, restricted to atf only, and joins A's in-flight atf call.
+    const [a, b] = await Promise.all([
+      searchAwardFlights(q, { db }),
+      searchAwardFlights(q, { db, providers: ["atf"] }),
+    ])
+
+    expect(a.crossVerifiedCount).toBeGreaterThan(0)
+    expect(atf.calls).toHaveLength(1)                            // B joined A's call
+    // B saw one provider's evidence only — cross-verified would be a lie.
+    expect(b.flights.every(f => f.verificationLevel !== "cross-verified")).toBe(true)
+  })
+})
+
+describe("full runSearch pipeline offline (cppValue backfill)", () => {
+  it("awards reach the payload with cppValue fed by realCpp and comparisons built", async () => {
+    const flight = makeAwardFlight()
+    setAwardProviders([new MockAwardProvider({ name: "roame", flights: [
+      { ...flight, loyaltyProgram: "AEROPLAN", loyaltyProgramName: "Aeroplan", points: 70000 },
+      { ...flight, loyaltyProgram: "LIFEMILES", loyaltyProgramName: "Avianca LifeMiles", points: 63000 },
+    ] })])
+    setProviders([new MockProvider({ name: "free_mock", flights: [
+      makeFlight({ origin: "PRG", destination: "BKK", returnDate: null, cabin: "business",
+                   airlines: ["OS"], stops: 1, price: { amount: 2800, currency: "USD" } }),
+    ] })])
+
+    const results = await runSearch({
+      origin: "PRG", destination: "BKK", departureDate: "2026-11-10",
+      searchClass: "PREM", sources: ["roame", "google"],
+      output: "unused.json", verbose: false, source: "test",
+    })
+
+    const awards = results.flights.filter(f => f.type === "award")
+    expect(awards.length).toBe(2)
+    for (const a of awards) {
+      expect(a.realCpp).not.toBeNull()
+      expect(a.cppValue).toBe(a.realCpp)     // dashboard badge/sorts stay functional
+    }
+    expect(results.redemptionComparisons!.length).toBe(1)
+    expect(results.redemptionComparisons![0]!.optionCount).toBe(2)
+    expect(results.meta.searchRequestId).toBeTruthy()
+    expect(results.balancesMeta!.source).toBe("fallback")
   })
 })
 

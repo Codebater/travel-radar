@@ -20,7 +20,7 @@ import { providerHealth } from "./providers/cash-flights/index.js"
 import { awardProviderHealth } from "./providers/award-flights/index.js"
 import { balancesHealth } from "./providers/balances/index.js"
 import { getDb } from "./db/index.js"
-import { allUsage, priceHistory, awardPriceHistory, latestSearchResult } from "./db/repositories.js"
+import { allUsage, priceHistory, awardPriceHistory, latestSearchResult, saveSearchResult } from "./db/repositories.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
@@ -282,6 +282,9 @@ const server = http.createServer(async (req, res) => {
           userInitiated: refresh,
           verifyPrices: verify,
           source: "api",
+          // The reversed leg must never become the dashboard's "latest result";
+          // the merged payload is persisted after the merge instead.
+          persistResults: false,
         }
         
         const returnResults = await runSearch(returnConfig)
@@ -301,7 +304,19 @@ const server = http.createServer(async (req, res) => {
         outboundResults.meta.totalFlights = outboundResults.flights.length
       }
       
-      // Save combined results
+      // Persist the merged payload as the search's result. Each runSearch
+      // persisted its own leg already; without this re-save the return leg
+      // (persisted last) would be the dashboard's "latest result" and a reload
+      // would show only the reversed route.
+      if (ret && outboundResults.meta.searchRequestId != null) {
+        try {
+          saveSearchResult(getDb(), outboundResults.meta.searchRequestId, outboundResults)
+        } catch (err) {
+          console.warn(`⚠️ could not persist merged RT result: ${(err as Error).message}`)
+        }
+      }
+
+      // Debug export only since Phase 3 - the application state lives in SQLite.
       fs.writeFileSync(path.join(ROOT, "results.json"), JSON.stringify(outboundResults, null, 2))
       
       res.writeHead(200, { "Content-Type": "application/json" })

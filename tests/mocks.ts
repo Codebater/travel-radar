@@ -228,9 +228,15 @@ export interface MockAwardOptions {
   enabled?: boolean
   flights?: NormalizedAwardFlight[]
   fail?: AwardSearchResult["reason"]
+  /** With fail: also mark the failure partial (some sub-checks failed). */
+  failPartial?: boolean
   throws?: boolean
   callsPerSearch?: number
   reportedQuota?: { remaining: number; limit: number }
+  /** ok:true but flagged partial (one class/airline failed) with this error. */
+  partialError?: string
+  /** Implement the ATF-style cache-key normalizer (class/flex collapsed). */
+  normalizeAllClasses?: boolean
   /** Artificial latency, to exercise concurrent-collapse behaviour. */
   delayMs?: number
 }
@@ -250,6 +256,10 @@ export class MockAwardProvider implements AwardFlightProvider {
   isConfigured(): boolean { return this.isEnabled() && this.opts.configured !== false }
   quota() { return null }
 
+  normalizeCacheQuery(query: AwardFlightQuery): AwardFlightQuery {
+    return this.opts.normalizeAllClasses ? { ...query, searchClass: "both", flexDays: 0 } : query
+  }
+
   async health() {
     return {
       provider: this.name,
@@ -268,6 +278,7 @@ export class MockAwardProvider implements AwardFlightProvider {
         provider: this.name, ok: false, flights: [], callsSpent: this.callsPerSearch,
         latencyMs: 1, completionPct: null,
         reason: this.opts.fail, error: `mock failure: ${this.opts.fail}`,
+        ...(this.opts.failPartial ? { partial: true } : {}),
       }
     }
     const flights = (this.opts.flights ?? [makeAwardFlight()]).map(f => ({
@@ -275,8 +286,9 @@ export class MockAwardProvider implements AwardFlightProvider {
     }))
     return {
       provider: this.name, ok: true, flights, callsSpent: this.callsPerSearch,
-      latencyMs: 1, completionPct: 100,
+      latencyMs: 1, completionPct: this.opts.partialError ? 50 : 100,
       ...(this.opts.reportedQuota ? { reportedQuota: this.opts.reportedQuota } : {}),
+      ...(this.opts.partialError ? { partial: true, error: this.opts.partialError } : {}),
     }
   }
 }

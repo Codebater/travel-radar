@@ -62,6 +62,13 @@ export class ATFAwardProvider implements AwardFlightProvider {
     return (process.env.ENABLE_ATF ?? "true") !== "false"
   }
 
+  /** ATF ignores search class and flex days (one request per airline per
+   *  route+date, all cabins in the response), so those must not fragment the
+   *  cache key into duplicate 5-call spends. */
+  normalizeCacheQuery(query: AwardFlightQuery): AwardFlightQuery {
+    return { ...query, searchClass: "both", flexDays: 0 }
+  }
+
   isConfigured(): boolean {
     return this.isEnabled() && Boolean(process.env.ATF_API_KEY || fs.existsSync(CREDENTIALS_PATH))
   }
@@ -119,7 +126,8 @@ export class ATFAwardProvider implements AwardFlightProvider {
       const reported = this.extractReportedQuota(results)
 
       if (flights.length === 0) {
-        const allFailed = results.every(r => r.error || !r.response?.success)
+        const failed = results.filter(r => r.error || !r.response?.success)
+        const allFailed = failed.length === results.length
         return {
           provider: this.name, ok: false, flights: [], callsSpent: ATF_AIRLINES.length, latencyMs,
           completionPct: null,
@@ -128,12 +136,25 @@ export class ATFAwardProvider implements AwardFlightProvider {
             ? results.map(r => `${r.airline}: ${r.error || "success=false"}`).join("; ").slice(0, 300)
             : "no available award cabins on this route/date",
           ...(reported ? { reportedQuota: reported } : {}),
+          // Some airlines answered "nothing available" but others failed
+          // outright - an empty result that must NOT be cached as confirmed
+          // emptiness, or the failed airlines' absence freezes for the TTL.
+          ...(!allFailed && failed.length > 0 ? { partial: true } : {}),
         }
       }
+      // Airlines whose check failed outright (transport error or API-reported
+      // failure) — different from success=true with no available cabins, which
+      // is a legitimate "no seats" answer.
+      const failedAirlines = results
+        .filter(r => r.error || !r.response?.success)
+        .map(r => r.airline)
+      const partial = failedAirlines.length > 0
+
       return {
         provider: this.name, ok: true, flights, callsSpent: ATF_AIRLINES.length, latencyMs,
-        completionPct: 100,
+        completionPct: Math.round(((ATF_AIRLINES.length - failedAirlines.length) / ATF_AIRLINES.length) * 100),
         ...(reported ? { reportedQuota: reported } : {}),
+        ...(partial ? { partial: true, error: `airline check(s) failed: ${failedAirlines.join(", ")}` } : {}),
       }
     } catch (err) {
       return {

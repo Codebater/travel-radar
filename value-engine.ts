@@ -154,8 +154,13 @@ function findCashComparable(
   const bucket = cashBuckets.get(bucketKey)
   
   if (bucket && bucket.prices.length > 0) {
-    const inCabin = cashFlights.filter(f => f.type === "cash" && f.cabinClass === award.cabinClass && f.cashPrice)
-    return { price: Math.round(bucket.avgPrice), source: "same-cabin", basis: basisOf(inCabin) }
+    // Basis must come from the same flights the price came from: same cabin
+    // AND same stop bucket - otherwise a verified fare in a different bucket
+    // could label an unverified average as "verified".
+    const inBucket = cashFlights.filter(f =>
+      f.type === "cash" && f.cashPrice && f.cabinClass === award.cabinClass &&
+      (f.stops === 0 ? 0 : 1) === stopBucket)
+    return { price: Math.round(bucket.avgPrice), source: "same-cabin", basis: basisOf(inBucket) }
   }
   
   // 3. Any cabin bucket as last resort
@@ -165,7 +170,8 @@ function findCashComparable(
                     cashBuckets.get(`${award.cabinClass}:1`)
   
   if (anyBucket) {
-    return { price: Math.round(anyBucket.avgPrice), source: "same-cabin", basis: basisOf(cashFlights) }
+    const sameCabin = cashFlights.filter(f => f.type === "cash" && f.cashPrice && f.cabinClass === award.cabinClass)
+    return { price: Math.round(anyBucket.avgPrice), source: "same-cabin", basis: basisOf(sameCabin.length ? sameCabin : cashFlights) }
   }
   
   // 4. Fallback estimates (only if we have NO cash data at all)
