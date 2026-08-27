@@ -1,11 +1,22 @@
-.hybrid-squad/
-integrations/
-roame-test.json
+# Secrets and local config
 .env
+
+# Dependencies
 node_modules/
-.env
-node_modules/
-package-lock.json
+# package-lock.json is tracked on purpose: npm install needs .npmrc's
+# legacy-peer-deps plus a pinned tree to resolve reproducibly.
+
+# Generated search output and caches
 results*.json
+roame-results*.json
+roame-test.json
+atf-results*.json
 serpapi-usage.json
 tmp/
+
+# Python virtualenv for the helper scripts
+.venv/
+
+# Agent scratch
+.hybrid-squad/
+integrations/
