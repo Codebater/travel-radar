@@ -1,0 +1,18 @@
+# Python dependencies for the helper scripts in scripts/.
+# Optional: the Node app runs without them, it just loses the sources below.
+#
+#   python -m venv .venv
+#   .venv/Scripts/pip install -r requirements.txt   (Windows)
+#   .venv/bin/pip install -r requirements.txt       (macOS/Linux)
+#
+# search.ts auto-detects .venv (both layouts) and falls back to python on PATH.
+
+# scripts/search-google-flights.py — primary Google Flights cash source, no API key.
+# Pinned to 2.2: fast-flights 3.x dropped FlightData/get_flights_from_filter, which
+# the script imports. Moving to the 3.x API is a rewrite, not a Phase 1 fix.
+fast-flights==2.2
+# fast-flights imports typing_extensions but does not declare it as a dependency
+typing_extensions>=4.9
+
+# scripts/search-hidden-city.py and the other scripts — SerpAPI HTTP calls
+requests>=2.31
