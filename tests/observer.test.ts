@@ -137,7 +137,26 @@ describe("date sampling", () => {
   it("does NOT brute-force the horizon — one run is a small slice", () => {
     const plan = planRun({ ...(upsertJob(db, testJob())), runsCompleted: 0 })
     expect(plan.datePairs.length).toBe(4)                  // not 180, not even 12
-    expect(plan.cashSearches).toBe(8)                      // 4 pairs × 2 cabins
+    // 4 pairs × 2 cabins × 2 trip types. The one-way series exists so an award
+    // (always one-way) has a same-trip-type cash fare to compute a CPP against;
+    // both use the free provider, so this is seconds, not quota.
+    expect(plan.cashSearches).toBe(16)
+  })
+
+  it("counts only the configured cash trip types", () => {
+    const returnOnly = upsertJob(db, testJob({
+      name: "PRG-RTONLY",
+      dateStrategy: { ...DEFAULT_DATE_STRATEGY, cashTripTypes: ["return"] },
+    }))
+    expect(planRun(returnOnly, 0).cashSearches).toBe(8)
+
+    // An older job whose stored strategy predates the field must not silently
+    // collapse to zero cash searches.
+    const legacy = upsertJob(db, testJob({
+      name: "PRG-LEGACY",
+      dateStrategy: { ...DEFAULT_DATE_STRATEGY, cashTripTypes: undefined },
+    }))
+    expect(planRun(legacy, 0).cashSearches).toBe(8)
   })
 
   it("maps cabins to award search classes", () => {
@@ -237,7 +256,8 @@ describe("observer execution", () => {
 
     const result = await executeJob(job, { db, trigger: "manual" })
     expect(result.status).toBe("success")
-    expect(result.searchesRun).toBe(2)                     // 1 cash + 1 award
+    // 1 date pair × 1 cabin × 2 trip types, plus 1 award search.
+    expect(result.searchesRun).toBe(3)
     expect(result.observationsAdded).toBeGreaterThan(0)
 
     const runs = listRuns(db, { jobId: job.id })
@@ -265,7 +285,8 @@ describe("observer execution", () => {
     const second = await executeJob(jobAgain, { db, trigger: "manual" })
     expect(second.providerCalls).toBe(0)
     expect(second.cacheHits).toBeGreaterThan(0)
-    expect(cash.calls).toHaveLength(1)                     // provider not asked again
+    // Two cash calls on the first run (return + one-way), none on the repeat.
+    expect(cash.calls).toHaveLength(2)                     // provider not asked again
     expect(award.calls).toHaveLength(1)
     // Cache replays append no duplicate history.
     expect(second.observationsAdded).toBe(0)

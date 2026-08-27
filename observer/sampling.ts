@@ -21,6 +21,7 @@ export const DEFAULT_DATE_STRATEGY: DateStrategy = {
   tripLengths: [7, 10, 14, 21],
   datesPerRun: 4,
   awardEveryNRuns: 2,
+  cashTripTypes: ["return", "oneway"],
 }
 
 function addDays(date: Date, days: number): Date {
@@ -86,7 +87,14 @@ export function planRun(job: ObservationJob, runIndex = job.runsCompleted, now: 
     job.awardProviders.length > 0 &&
     runIndex % Math.max(1, job.dateStrategy.awardEveryNRuns) === 0
 
-  const cashSearches = job.cashProviders.length > 0 ? datePairs.length * job.cabins.length : 0
+  // One-way and return are separate observations, never compared with each
+  // other, and the one-way series is what makes an award's CPP computable.
+  const tripTypes = job.dateStrategy.cashTripTypes?.length
+    ? job.dateStrategy.cashTripTypes
+    : (["return"] as const)
+  const cashSearches = job.cashProviders.length > 0
+    ? datePairs.length * job.cabins.length * tripTypes.length
+    : 0
   const awardSearches = awardsThisRun ? datePairs.length : 0
 
   // Award search class: economy+business → one "both" Roame search (2 jobs).

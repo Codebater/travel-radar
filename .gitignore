@@ -34,3 +34,13 @@ tmp/
 # Agent scratch
 .hybrid-squad/
 integrations/
+
+# Scratch files written by review/verification agents while reproducing a bug.
+# They are throwaway probes, not part of the project.
+_repro*.ts
+__refute_tmp*.ts
+tests/zz-*-tmp.test.ts
+_probe*.ts
+.bench-tmp*.ts
+_atf_*.ts
+_aw*.ts

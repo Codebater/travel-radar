@@ -22,6 +22,17 @@ export interface DateStrategy {
   datesPerRun: number
   /** Award providers run on every Nth run (cash runs every time). */
   awardEveryNRuns: number
+  /**
+   * Which cash trip types to observe.
+   *
+   * "return" is what a traveller actually buys on these routes. "oneway" is
+   * collected because every award source we have prices ONE direction, and CPP
+   * compares an award against a cash fare of the SAME trip type — without a
+   * one-way cash baseline the CPP component (20% of the award score) is
+   * dropped for every award the observer collects. Both are free
+   * (fast_flights), so the cost is a few seconds per run, not quota.
+   */
+  cashTripTypes?: ("return" | "oneway")[]
 }
 
 export interface ObservationJob {

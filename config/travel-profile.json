@@ -44,7 +44,9 @@
       "stepDays": 14,
       "tripLengths": [7, 10, 14, 21],
       "datesPerRun": 4,
-      "awardEveryNRuns": 2
+      "awardEveryNRuns": 2,
+      "cashTripTypes": ["return", "oneway"],
+      "cashTripTypesNote": "Return is what actually gets booked on these routes. One-way is collected because every award source integrated so far prices ONE direction, and a CPP is only honest against a cash fare of the same trip type - without one-way cash the CPP component (20% of the award score) is dropped for every award the observer collects. Both use the free provider, so this costs seconds per run, not quota."
     }
   }
 }

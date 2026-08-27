@@ -158,24 +158,35 @@ export async function executeJob(
     // Per-name filtering becomes meaningful only when a second free provider
     // exists; the budget projection makes the same assumption.
     if (job.cashProviders.length > 0) {
+      // Both trip types by default. A return fare is what gets booked; a
+      // one-way fare is the only honest comparator for an award, since every
+      // award source we have prices one direction. They are separate
+      // observations and are never compared with each other.
+      const tripTypes = job.dateStrategy.cashTripTypes?.length
+        ? job.dateStrategy.cashTripTypes
+        : (["return"] as const)
+
       for (const cabin of job.cabins) {
-        try {
-          const outcome = await searchCashFlights({
-            origin: job.origin, destination: job.destination,
-            departureDate: pair.departureDate, returnDate: pair.returnDate,
-            cabin, adults: 1, currency: CASH_CURRENCY,
-          }, {
-            source: "observer",
-            searchRequestId: searchRequestId ?? undefined,
-            allowMeteredFallback: false,
-            db,
-          })
-          searchesRun++
-          if (outcome.fromCache) cacheHits++
-          else providerCalls += Math.max(1, outcome.callsSpent)   // one free fetch, or metered count
-          errors.push(...outcome.warnings.map(w => `cash ${cabin}: ${w}`))
-        } catch (err) {
-          errors.push(`cash ${cabin} ${pair.departureDate}: ${(err as Error).message}`)
+        for (const tripType of tripTypes) {
+          try {
+            const outcome = await searchCashFlights({
+              origin: job.origin, destination: job.destination,
+              departureDate: pair.departureDate,
+              returnDate: tripType === "return" ? pair.returnDate : null,
+              cabin, adults: 1, currency: CASH_CURRENCY,
+            }, {
+              source: "observer",
+              searchRequestId: searchRequestId ?? undefined,
+              allowMeteredFallback: false,
+              db,
+            })
+            searchesRun++
+            if (outcome.fromCache) cacheHits++
+            else providerCalls += Math.max(1, outcome.callsSpent)   // one free fetch, or metered count
+            errors.push(...outcome.warnings.map(w => `cash ${cabin} ${tripType}: ${w}`))
+          } catch (err) {
+            errors.push(`cash ${cabin} ${tripType} ${pair.departureDate}: ${(err as Error).message}`)
+          }
         }
       }
     }
