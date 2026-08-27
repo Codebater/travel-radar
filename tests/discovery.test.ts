@@ -22,7 +22,10 @@ import {
 } from "../discovery/sampling.js"
 import { assessPositioning, bestHomeFare, observedFare } from "../discovery/positioning.js"
 import { findOpenJaws, bestComparableRoundTrip } from "../discovery/openjaw.js"
-import { upsertDiscoveryJob, listDiscoveryJobs, listDiscoveryRuns, type NewDiscoveryJob } from "../discovery/store.js"
+import {
+  upsertDiscoveryJob, listDiscoveryJobs, listDiscoveryRuns, startDiscoveryRun,
+  type NewDiscoveryJob,
+} from "../discovery/store.js"
 import { planDiscoveryRun, executeDiscoveryJob } from "../discovery/engine.js"
 import { projectDiscoveryBudget, discoveryVerificationPool, newRunBudget, canSpend, spend } from "../discovery/budget.js"
 import { selectForVerification } from "../discovery/verification.js"
@@ -1784,6 +1787,53 @@ describe("open jaw as a discovery method", () => {
     expect(byLabel.length).toBeGreaterThan(byNature.length)
     expect(byNature.every(c => c.isOpenJaw)).toBe(true)
     expect(buildFeed(db, { minScore: 0 }).sections.openjaw.every(c => c.isOpenJaw)).toBe(true)
+  })
+
+  it("never spends a metered call re-searching an open jaw as a round trip", () => {
+    // The metered confirmation re-searches (origin, destination, departure,
+    // return) as ONE round trip. For an open jaw those four fields describe a
+    // trip that does not exist, so the call would confirm the wrong fare and
+    // then stamp `verified` on the candidate on the strength of it. Open jaws
+    // score far below the gate today, which is luck rather than a guard.
+    const j = job({ name: "oj-verify" })
+    const runId = startDiscoveryRun(db, j.id, "manual")
+
+    db.prepare(`
+      INSERT INTO deal_candidates (
+        source_table, source_id, observed_at, as_of, evaluated_at, type,
+        origin, destination, route, departure_date, return_date, trip_type, cabin,
+        price_amount, price_currency, baseline_key, baseline_scope,
+        observed_median, observed_minimum, observed_maximum, percent_below_median,
+        percentile, sample_size, baseline_confidence, baseline_first_at,
+        baseline_last_at, baseline_age_days, provider, provider_confidence,
+        verification_level, score, score_breakdown, weights_version, engine_version,
+        reasons, features, presets_matched, threshold, mode, status, notified,
+        created_at, discovered_by, discovery_run_id, sanity, verification_status,
+        is_open_jaw
+      ) VALUES (
+        'open_jaw', 9001, ?, ?, ?, 'cash',
+        'PRG', 'BKK', 'PRG-BKK/HKT-VIE', ?, ?, 'return', 'economy',
+        400, 'USD', 'k', 'strict',
+        900, 800, 1000, 55,
+        2, 40, 'HIGHER', ?, ?, 1, 'a + b', 'medium',
+        'discovered', 95, '{}', 'shadow-2', 'shadow-2',
+        '[]', '{}', '[]', 70, 'shadow', 'candidate', 0,
+        ?, 'OPEN_JAW', ?, 'ok', 'unverified', 1
+      )
+    `).run(at(0), at(0), at(0), day(30), day(37), at(-30), at(-1), at(0), runId)
+
+    // Same row shape, ordinary round trip: the gate is genuinely open.
+    db.prepare(`
+      UPDATE deal_candidates SET is_open_jaw = 0, route = 'PRG-BKK', source_id = 9002
+      WHERE source_id = 9001
+    `).run()
+    expect(selectForVerification(db, runId, config).length).toBe(1)
+
+    db.prepare(`
+      UPDATE deal_candidates SET is_open_jaw = 1, route = 'PRG-BKK/HKT-VIE'
+      WHERE source_id = 9002
+    `).run()
+    expect(selectForVerification(db, runId, config)).toHaveLength(0)
   })
 
   it("knows which arrivals it is configured to assemble", () => {

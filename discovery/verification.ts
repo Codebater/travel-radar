@@ -54,6 +54,16 @@ interface VerifiableCandidate {
  * Which candidates from this run deserve a paid confirmation, most convincing
  * first. Deliberately restricted to cash: a metered call confirms a cash fare,
  * and there is no metered award source to confirm anything with.
+ *
+ * Open jaws are excluded, and the exclusion is structural rather than lucky.
+ * The confirmation below re-searches (origin, destination, departure, return)
+ * as ONE round trip; for an open jaw those four fields describe a trip that
+ * does not exist, so the call would confirm the wrong fare and then stamp
+ * `verified` on the candidate on the strength of it. Confirming one honestly
+ * means two metered calls for two one-ways - a budget decision nobody has
+ * taken - so it does not happen until somebody takes it. Open jaws today score
+ * far below the gate, but "it cannot reach the bug" is not the same as "the
+ * bug is not there".
  */
 export function selectForVerification(
   db: DB, runId: number | null, config: DiscoveryConfig,
@@ -65,6 +75,7 @@ export function selectForVerification(
            percent_below_median, baseline_confidence, price_amount, price_currency
     FROM deal_candidates
     WHERE discovery_run_id = ? AND type = 'cash' AND sanity = 'ok'
+      AND is_open_jaw = 0
       AND verification_status = 'unverified'
       AND score >= ? AND percent_below_median >= ?
     ORDER BY score DESC
