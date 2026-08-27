@@ -697,6 +697,20 @@ describe("candidate persistence", () => {
     expect(second.evaluated).toBe(0)
   })
 
+  it("does not collapse two offers that merely share a number", () => {
+    // 450 EUR and 450 USD are different offers. Collapsing on the bare amount
+    // would drop one of them from the list entirely.
+    cashHistory(20, 1000, { price: { amount: 1000, currency: "EUR" } })
+    cashHistory(20, 1000, { price: { amount: 1000, currency: "USD" }, airline: "YY" })
+    cash({ price: { amount: 450, currency: "EUR" }, fetchedAt: at(0) })
+    cash({ price: { amount: 450, currency: "USD" }, fetchedAt: at(0), airline: "YY" })
+    evaluateNewObservations({ db, config, quiet: true })
+
+    const shown = listCandidates(db, { minScore: 0, limit: 100 })
+      .filter(c => c.priceAmount === 450)
+    expect(shown.map(c => c.priceCurrency).sort()).toEqual(["EUR", "USD"])
+  })
+
   it("collapses repeat observations of the same offer when listing", () => {
     awardHistory(20, 100_000)
     // The same fare seen three times on three different days.

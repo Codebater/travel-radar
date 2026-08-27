@@ -134,7 +134,11 @@ export function listCandidates(db: DB, filter: CandidateFilter = {}): StoredCand
              ROW_NUMBER() OVER (
                PARTITION BY c.type, c.route, c.cabin, COALESCE(c.loyalty_program, ''),
                             c.departure_date, COALESCE(c.return_date, ''),
-                            COALESCE(c.points, c.price_amount)
+                            COALESCE(c.points, c.price_amount),
+                            -- Currency belongs in the key: 450 EUR and 450 USD
+                            -- are different offers, and without this one of
+                            -- them silently disappears from the list.
+                            COALESCE(c.price_currency, c.taxes_currency, '')
                ORDER BY c.score DESC, c.observed_at DESC, c.id DESC
              ) offer_rank
       FROM deal_candidates c
