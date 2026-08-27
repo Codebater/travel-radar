@@ -18,10 +18,16 @@
 
 import fs from "fs"
 import path from "path"
+import os from "os"
 import type { UnifiedFlightResult } from "./roame-scraper.js"
 
 const ATF_BASE_URL = "https://awardtravelfinder.com/api/v1"
-const CREDENTIALS_PATH = path.join(process.env.HOME!, ".openclaw/credentials/awardtravelfinder.json")
+/** Home directory, cross-platform. HOME is unset on Windows outside of Git Bash. */
+function homeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || os.homedir()
+}
+
+const CREDENTIALS_PATH = path.join(homeDir(), ".openclaw", "credentials", "awardtravelfinder.json")
 const MONTHLY_LIMIT = 150
 const WARN_AT_REMAINING = 20
 

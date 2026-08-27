@@ -18,6 +18,8 @@
 
 import fs from "fs"
 import path from "path"
+import os from "os"
+import { fileURLToPath } from "url"
 import { execSync } from "child_process"
 import { searchRoame, roameFaresToUnified } from "./roame-scraper.js"
 import type { RoameFare, UnifiedFlightResult } from "./roame-scraper.js"
@@ -26,8 +28,13 @@ import { scoreFlights, type ValueScoredFlight, type ValueInsight } from "./value
 import { getSweetSpotsForRoute } from "./sweet-spots.ts"
 import { findFundingPaths } from "./transfer-partners.ts"
 
+/** Home directory, cross-platform. HOME is unset on Windows outside of Git Bash. */
+function homeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || os.homedir()
+}
+
 // ─── Load .env file ──────────────────────────────────────────────────────────
-const ROOT = path.dirname(new URL(import.meta.url).pathname)
+const ROOT = path.dirname(fileURLToPath(import.meta.url))
 const envPath = path.join(ROOT, ".env")
 if (fs.existsSync(envPath)) {
   const envContent = fs.readFileSync(envPath, "utf-8")
@@ -74,6 +81,7 @@ interface DashboardResults {
     searchedAt: string
     sources: string[]
     completionPct: Record<string, number>
+    totalFlights?: number     // set by serve.ts when outbound + return are merged
   }
   balances: PointsBalance[]
   flights: ValueScoredFlight[]
@@ -99,7 +107,7 @@ interface Recommendation {
 
 async function loadBalances(): Promise<PointsBalance[]> {
   // Try AwardWallet first
-  const awPath = path.join(process.env.HOME!, ".openclaw/credentials/awardwallet.json")
+  const awPath = path.join(homeDir(), ".openclaw", "credentials", "awardwallet.json")
   if (fs.existsSync(awPath)) {
     try {
       const creds = JSON.parse(fs.readFileSync(awPath, "utf-8"))

@@ -14,8 +14,14 @@
 
 import fs from "fs"
 import path from "path"
+import os from "os"
 
-const CREDENTIALS_PATH = path.join(process.env.HOME!, ".openclaw/credentials/roame.json")
+/** Home directory, cross-platform. HOME is unset on Windows outside of Git Bash. */
+function homeDir(): string {
+  return process.env.HOME || process.env.USERPROFILE || os.homedir()
+}
+
+const CREDENTIALS_PATH = path.join(homeDir(), ".openclaw", "credentials", "roame.json")
 const GRAPHQL_URL = "https://roame.travel/api/graphql"
 
 // ─── Types ───────────────────────────────────────────────────────────────────

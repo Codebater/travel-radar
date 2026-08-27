@@ -14,10 +14,11 @@
 import http from "http"
 import fs from "fs"
 import path from "path"
+import { fileURLToPath } from "url"
 import { runSearch, type SearchConfig, type DashboardResults } from "./search.ts"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
-const ROOT = path.dirname(new URL(import.meta.url).pathname)
+const ROOT = path.dirname(fileURLToPath(import.meta.url))
 
 const MIME_TYPES: Record<string, string> = {
   ".html": "text/html",
