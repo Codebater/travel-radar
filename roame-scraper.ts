@@ -98,6 +98,15 @@ export interface UnifiedFlightResult {
   fareClass: string
   travelDate?: string       // YYYY-MM-DD
   direction?: "outbound" | "return"
+  // ── Phase 2 provenance (cash results only) ────────────────────────────────
+  /** Which cash provider produced this, e.g. "fast_flights" | "serpapi". */
+  provider?: string
+  /** cached = replayed from our store, discovered = free provider, verified = metered. */
+  verificationLevel?: "cached" | "discovered" | "verified"
+  providerConfidence?: "high" | "medium" | "low"
+  fetchedAt?: string
+  /** Age of the cached payload in minutes, when served from cache. */
+  cacheAgeMinutes?: number | null
 }
 
 // ─── Credentials ─────────────────────────────────────────────────────────────
@@ -130,21 +139,84 @@ function loadCredentials(): RoameCredentials {
 
 // ─── GraphQL Client ──────────────────────────────────────────────────────────
 
-async function graphql(query: string, variables: Record<string, any>, creds?: RoameCredentials): Promise<any> {
+/** Per-request timeout. Roame has no published SLA; this stops a hung socket
+ *  from holding a search open until the poll deadline expires. */
+const REQUEST_TIMEOUT_MS = 20_000
+
+/** Transient statuses worth one retry. 401/403 mean the session is dead — no
+ *  amount of retrying fixes that, and hammering an auth-failing endpoint is
+ *  exactly the aggressive polling we want to avoid. */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504])
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
+async function graphql(
+  query: string,
+  variables: Record<string, any>,
+  creds?: RoameCredentials,
+  signal?: AbortSignal,
+): Promise<any> {
   const credentials = creds || loadCredentials()
-  
-  const resp = await fetch(GRAPHQL_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Cookie": `session=${credentials.session}; csrfSecret=${credentials.csrfSecret}`,
-    },
-    body: JSON.stringify({ query, variables }),
-  })
-  
-  if (!resp.ok) {
-    throw new Error(`Roame API HTTP ${resp.status}: ${resp.statusText}`)
+
+  // One retry, with backoff, and only for transient failures.
+  const MAX_ATTEMPTS = 2
+  let lastError: Error | null = null
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (signal?.aborted) throw new Error("Roame search cancelled")
+
+    const controller = new AbortController()
+    const onAbort = () => controller.abort()
+    signal?.addEventListener("abort", onAbort, { once: true })
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
+
+    let resp: Response
+    try {
+      resp = await fetch(GRAPHQL_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Cookie": `session=${credentials.session}; csrfSecret=${credentials.csrfSecret}`,
+        },
+        body: JSON.stringify({ query, variables }),
+        signal: controller.signal,
+      })
+    } catch (err) {
+      const aborted = (err as Error).name === "AbortError"
+      if (aborted && signal?.aborted) throw new Error("Roame search cancelled")
+      lastError = new Error(aborted
+        ? `Roame request timed out after ${REQUEST_TIMEOUT_MS}ms`
+        : `Roame request failed: ${(err as Error).message}`)
+      if (attempt < MAX_ATTEMPTS) { await sleep(1500 * attempt); continue }
+      throw lastError
+    } finally {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+    }
+
+    if (resp.status === 401 || resp.status === 403) {
+      throw new Error(
+        `Roame API HTTP ${resp.status}: session rejected. ` +
+        `Log in at roame.travel again and update ${CREDENTIALS_PATH}`
+      )
+    }
+
+    if (!resp.ok) {
+      lastError = new Error(`Roame API HTTP ${resp.status}: ${resp.statusText}`)
+      if (RETRYABLE_STATUS.has(resp.status) && attempt < MAX_ATTEMPTS) {
+        await sleep(1500 * attempt)
+        continue
+      }
+      throw lastError
+    }
+
+    return await parseGraphqlBody(resp)
   }
+
+  throw lastError ?? new Error("Roame request failed")
+}
+
+async function parseGraphqlBody(resp: Response): Promise<any> {
   
   const json = await resp.json()
   if (json.errors) {
@@ -193,7 +265,8 @@ export async function pollResults(
   jobUUID: string,
   maxWaitMs: number = 90000,
   onProgress?: (pct: number, fareCount: number) => void,
-  creds?: RoameCredentials
+  creds?: RoameCredentials,
+  signal?: AbortSignal,
 ): Promise<{ fares: RoameFare[], percentCompleted: number }> {
   const fareFragment = `
     arrivalDatetime availableSeats departureDate operatingAirlines
@@ -208,22 +281,56 @@ export async function pollResults(
   let lastPct = 0
   let lastFareCount = 0
   let staleCount = 0
-  
+  // Whatever the last successful poll returned. A poll failing late in a search
+  // must not throw away everything found so far.
+  let lastGoodFares: RoameFare[] = []
+  let consecutivePollErrors = 0
+  const MAX_POLL_ERRORS = 3
+
   while (Date.now() - start < maxWaitMs) {
-    const result = await graphql(
-      `query pingSearchResultsQuery($jobUUID: String!) {
-        pingSearchResults(jobUUID: $jobUUID) {
-          percentCompleted
-          fares { ${fareFragment} }
+    if (signal?.aborted) return { fares: lastGoodFares, percentCompleted: lastPct }
+
+    let result: any
+    try {
+      result = await graphql(
+        `query pingSearchResultsQuery($jobUUID: String!) {
+          pingSearchResults(jobUUID: $jobUUID) {
+            percentCompleted
+            fares { ${fareFragment} }
+          }
+        }`,
+        { jobUUID },
+        creds,
+        signal,
+      )
+      consecutivePollErrors = 0
+    } catch (err) {
+      const message = (err as Error).message
+      // A dead session will never recover — stop immediately rather than
+      // hammering the endpoint for the rest of the poll window.
+      if (message.includes("session rejected") || message.includes("cancelled")) {
+        if (lastGoodFares.length > 0) {
+          console.warn(`⚠️ Roame poll stopped (${message}); keeping ${lastGoodFares.length} fares found so far`)
+          return { fares: lastGoodFares, percentCompleted: lastPct }
         }
-      }`,
-      { jobUUID },
-      creds
-    )
-    
+        throw err
+      }
+      consecutivePollErrors++
+      if (consecutivePollErrors >= MAX_POLL_ERRORS) {
+        if (lastGoodFares.length > 0) {
+          console.warn(`⚠️ Roame poll failed ${consecutivePollErrors}x (${message}); keeping ${lastGoodFares.length} fares found so far`)
+          return { fares: lastGoodFares, percentCompleted: lastPct }
+        }
+        throw err
+      }
+      await new Promise(r => setTimeout(r, 3000 * consecutivePollErrors))
+      continue
+    }
+
     const { percentCompleted, fares } = result.data.pingSearchResults
+    lastGoodFares = fares
     onProgress?.(percentCompleted, fares.length)
-    
+
     if (percentCompleted >= 100) {
       return { fares, percentCompleted }
     }
@@ -242,8 +349,13 @@ export async function pollResults(
     lastFareCount = fares.length
     await new Promise(r => setTimeout(r, 3000))
   }
-  
-  return { fares: [], percentCompleted: lastPct }
+
+  // Deadline reached. Return what the last successful poll gave us instead of
+  // discarding a partially complete search.
+  if (lastGoodFares.length > 0) {
+    console.warn(`⚠️ Roame poll hit the ${maxWaitMs}ms deadline at ${lastPct}%; returning ${lastGoodFares.length} fares`)
+  }
+  return { fares: lastGoodFares, percentCompleted: lastPct }
 }
 
 // ─── Search Wrapper ──────────────────────────────────────────────────────────
@@ -256,6 +368,7 @@ export async function searchRoame(
   programs: string[] = ["ALL"],
   verbose: boolean = false,
   daysAround: number = 0,
+  signal?: AbortSignal,
 ): Promise<RoameSearchResult> {
   const creds = loadCredentials()
   

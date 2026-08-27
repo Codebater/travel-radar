@@ -27,6 +27,9 @@ import { searchATF, atfToUnified, ATF_AIRLINE_META } from "./atf-scraper.js"
 import { scoreFlights, type ValueScoredFlight, type ValueInsight } from "./value-engine.ts"
 import { getSweetSpotsForRoute } from "./sweet-spots.ts"
 import { findFundingPaths } from "./transfer-partners.ts"
+import { searchCashFlights } from "./providers/cash-flights/index.js"
+import { resolvePython } from "./providers/cash-flights/python-bridge.js"
+import type { NormalizedCashFlight, CabinClass } from "./providers/cash-flights/index.js"
 
 /** Home directory, cross-platform. HOME is unset on Windows outside of Git Bash. */
 function homeDir(): string {
@@ -45,7 +48,11 @@ if (fs.existsSync(envPath)) {
     if (eqIdx > 0) {
       const key = trimmed.slice(0, eqIdx).trim()
       const val = trimmed.slice(eqIdx + 1).trim()
-      if (!process.env[key]) process.env[key] = val
+      // The real environment always wins, including when it deliberately sets a
+      // variable to empty. `SERP_API_KEY=` in the environment means "do not use
+      // SerpAPI"; treating that as unset would let .env silently switch a paid
+      // provider back on.
+      if (process.env[key] === undefined) process.env[key] = val
     }
   }
 }
@@ -62,6 +69,13 @@ interface SearchConfig {
   output: string
   verbose: boolean
   flexDays?: number   // 0, 1, or 2 — passed to Roame's daysAround
+  /** Bypass the cash cache and refetch. */
+  forceRefresh?: boolean
+  /** A person asked for this, so the metered reserve may be spent. */
+  userInitiated?: boolean
+  /** Ask the metered provider to confirm the free provider's prices. */
+  verifyPrices?: boolean
+  source?: "api" | "cli" | "test"
 }
 
 interface PointsBalance {
@@ -290,256 +304,91 @@ function crossReferenceATFAndRoame(
   return merged
 }
 
-// ─── Python Interpreter Resolution ────────────────────────────────────────
+// ─── Cash Flights (provider abstraction) ──────────────────────────────────
+//
+// Phase 2 moved every cash-price concern behind providers/cash-flights:
+// provider selection, the cache, the price history and the SerpAPI budget all
+// live there. This function only adapts the normalised result back into the
+// UnifiedFlightResult shape that the value engine and dashboard already expect.
 
-/**
- * Resolve the Python interpreter for the helper scripts.
- * Prefers the project venv (POSIX and Windows layouts), then falls back to
- * whichever of python3/python actually exists on PATH.
- */
-function resolvePython(): string {
-  const candidates = [
-    path.join(ROOT, ".venv", "bin", "python3"),
-    path.join(ROOT, ".venv", "Scripts", "python.exe"),
-  ]
-  for (const c of candidates) {
-    if (fs.existsSync(c)) return c
+/** Currency the cash providers are asked for. The value engine compares cash
+ *  against award taxes without conversion, so this stays USD unless overridden. */
+const CASH_CURRENCY = process.env.CASH_CURRENCY || "USD"
+
+function toUnified(f: NormalizedCashFlight, idx: number, cacheAgeMinutes: number | null): UnifiedFlightResult {
+  return {
+    id: `cash-${f.provider}-${idx}`,
+    source: "google",
+    type: "cash",
+    origin: f.origin,
+    destination: f.destination,
+    airline: f.airlines.join(" / ") || f.airline || "Unknown",
+    operatingAirlines: f.airlines,
+    flightNumbers: f.flightNumbers,
+    stops: f.stops ?? 0,
+    durationMinutes: f.durationMinutes ?? 0,
+    departureTime: f.departureTime || "",
+    arrivalTime: f.arrivalTime || "",
+    airports: f.segments.length
+      ? [f.segments[0]!.origin, ...f.segments.slice(1).map(s => s.origin), f.segments[f.segments.length - 1]!.destination]
+      : [f.origin, f.destination],
+    cabinClass: f.cabin,
+    equipment: f.segments.map(s => s.aircraft || "").filter(Boolean),
+    points: null,
+    pointsProgram: null,
+    cashPrice: f.price.amount,
+    taxes: f.taxes?.amount ?? 0,
+    currency: f.price.currency,
+    cppValue: null,
+    roameScore: null,
+    availableSeats: null,
+    bookingUrl: f.bookingUrl,
+    fareClass: f.priceLevel ? `price-level:${f.priceLevel}` : "",
+    travelDate: f.departureDate,
+    // Phase 2 freshness metadata — consumed by the dashboard badge.
+    provider: f.provider,
+    verificationLevel: f.verificationLevel,
+    providerConfidence: f.providerConfidence,
+    fetchedAt: f.fetchedAt,
+    cacheAgeMinutes,
   }
-  for (const bin of process.platform === "win32" ? ["python", "python3"] : ["python3", "python"]) {
-    try {
-      execFileSync(bin, ["--version"], { stdio: "ignore", timeout: 10000 })
-      return bin
-    } catch { /* try next */ }
-  }
-  return process.platform === "win32" ? "python" : "python3"
 }
 
-// ─── fast_flights (Primary Google Flights Source) ─────────────────────────
+async function searchCashSource(
+  config: SearchConfig,
+): Promise<{ flights: UnifiedFlightResult[]; completion: number; warnings: string[] }> {
+  const cabins: CabinClass[] = config.searchClass === "both"
+    ? ["economy", "business"]
+    : config.searchClass === "PREM" ? ["business"] : ["economy"]
 
-async function searchFastFlights(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
-  const scriptPath = path.join(ROOT, "scripts", "search-google-flights.py")
-  const pythonBin = resolvePython()
-  
-  if (!fs.existsSync(scriptPath)) {
-    console.warn("⚠️ fast_flights script not found, falling back to SerpAPI")
-    return { flights: [], completion: 0 }
-  }
+  const flights: UnifiedFlightResult[] = []
+  const warnings: string[] = []
+  let anySucceeded = false
 
-  const cabinMap: Record<string, string> = { ECON: "economy", PREM: "business", both: "economy" }
-  const classesToSearch = config.searchClass === "both" ? ["economy", "business"] : [cabinMap[config.searchClass] || "economy"]
-  const allFlights: UnifiedFlightResult[] = []
+  for (const cabin of cabins) {
+    const outcome = await searchCashFlights({
+      origin: config.origin,
+      destination: config.destination,
+      departureDate: config.departureDate,
+      returnDate: config.returnDate || null,
+      cabin,
+      adults: 1,
+      currency: CASH_CURRENCY,
+    }, {
+      source: config.source ?? "cli",
+      forceRefresh: config.forceRefresh,
+      userInitiated: config.userInitiated,
+      verify: config.verifyPrices,
+    })
 
-  for (const cabin of classesToSearch) {
-    try {
-      // execFileSync (not execSync): arguments are passed as an argv array so
-      // route/date values can never be interpreted as shell syntax.
-      const argv = [scriptPath, config.origin, config.destination, config.departureDate, "--class", cabin]
-      if (config.returnDate) argv.push("--return", config.returnDate)
-
-      const output = execFileSync(pythonBin, argv, {
-        timeout: 45000,
-        env: { ...process.env },
-        encoding: "utf-8",
-      })
-
-      // Parse only the last line (JSON output) — stderr goes to console
-      const lines = output.trim().split("\n")
-      const jsonLine = lines[lines.length - 1]!
-      const results = JSON.parse(jsonLine) as any[]
-
-      for (const r of results) {
-        const depTimeStr = r.departureTime || ""
-        const extractedDate = depTimeStr && /^\d{4}-\d{2}-\d{2}/.test(depTimeStr) ? depTimeStr.slice(0, 10) : config.departureDate
-
-        allFlights.push({
-          id: `google-${allFlights.length}`,
-          source: "google",
-          type: "cash",
-          origin: r.origin || config.origin,
-          destination: r.destination || config.destination,
-          airline: r.airline || "Unknown",
-          operatingAirlines: (r.airline || "Unknown").split(", "),
-          flightNumbers: [],
-          stops: r.stops || 0,
-          durationMinutes: r.durationMinutes || 0,
-          departureTime: r.departureTime || "",
-          arrivalTime: r.arrivalTime || "",
-          airports: [r.origin || config.origin, r.destination || config.destination],
-          cabinClass: r.cabinClass || cabin,
-          equipment: [],
-          points: null,
-          pointsProgram: null,
-          cashPrice: r.cashPrice || null,
-          taxes: 0,
-          currency: "USD",
-          cppValue: null,
-          roameScore: null,
-          availableSeats: null,
-          bookingUrl: `https://www.google.com/travel/flights?q=flights+from+${config.origin}+to+${config.destination}+on+${config.departureDate}`,
-          fareClass: r.isBest ? "best" : "",
-          travelDate: extractedDate,
-        })
-      }
-    } catch (err) {
-      console.warn(`⚠️ fast_flights (${cabin}) failed:`, (err as Error).message?.slice(0, 200))
+    if (outcome.flights.length > 0) anySucceeded = true
+    warnings.push(...outcome.warnings)
+    for (const f of outcome.flights) {
+      flights.push(toUnified(f, flights.length, outcome.cacheAgeMinutes))
     }
   }
 
-  return { flights: allFlights, completion: allFlights.length > 0 ? 100 : 0 }
-}
-
-// ─── SerpAPI Usage Limiter ─────────────────────────────────────────────────
-const USAGE_FILE = path.join(ROOT, "serpapi-usage.json")
-const MONTHLY_LIMIT = 95  // hard cap (5 buffer under 100 free tier)
-const WARN_AT = 80
-
-/**
- * Read the usage counter. A corrupt counter file is reported loudly instead of
- * silently resetting to zero, which would let a run blow past the free tier.
- */
-function readSerpApiUsage(): { month: string; searches: number; limit: number; warn_at: number; last_reset: string } {
-  const fresh = { month: "", searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: "" }
-  if (!fs.existsSync(USAGE_FILE)) return fresh
-  try {
-    return JSON.parse(fs.readFileSync(USAGE_FILE, "utf-8"))
-  } catch (err) {
-    console.warn(
-      `⚠️ ${USAGE_FILE} is unreadable (${(err as Error).message}). ` +
-      `Treating this month as ${MONTHLY_LIMIT}/${MONTHLY_LIMIT} used so the free tier is not exceeded. ` +
-      `Delete the file to reset the counter.`
-    )
-    return { ...fresh, month: new Date().toISOString().slice(0, 7), searches: MONTHLY_LIMIT }
-  }
-}
-
-function checkSerpApiUsage(): { allowed: boolean; used: number } {
-  let usage = readSerpApiUsage()
-  
-  const currentMonth = new Date().toISOString().slice(0, 7)
-  if (usage.month !== currentMonth) {
-    usage = { month: currentMonth, searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: new Date().toISOString().slice(0, 10) }
-    fs.writeFileSync(USAGE_FILE, JSON.stringify(usage, null, 2))
-  }
-  
-  if (usage.searches >= MONTHLY_LIMIT) {
-    console.warn(`🛑 SerpAPI monthly limit reached (${usage.searches}/${MONTHLY_LIMIT}). Skipping to stay on free tier.`)
-    return { allowed: false, used: usage.searches }
-  }
-  if (usage.searches >= WARN_AT) {
-    console.warn(`⚠️ SerpAPI usage warning: ${usage.searches}/${MONTHLY_LIMIT} searches used this month`)
-  }
-  return { allowed: true, used: usage.searches }
-}
-
-function incrementSerpApiUsage(): void {
-  let usage = readSerpApiUsage()
-  const currentMonth = new Date().toISOString().slice(0, 7)
-  if (usage.month !== currentMonth) {
-    usage = { month: currentMonth, searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: new Date().toISOString().slice(0, 10) }
-  }
-  usage.searches++
-  fs.writeFileSync(USAGE_FILE, JSON.stringify(usage, null, 2))
-}
-
-async function searchSerpApiGoogle(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
-  const apiKey = process.env.SERP_API_KEY
-  if (!apiKey) {
-    console.warn("⚠️ SERP_API_KEY not set — get one at https://serpapi.com/manage-api-key (100 free/mo)")
-    return { flights: [], completion: 0 }
-  }
-
-  const { allowed, used } = checkSerpApiUsage()
-  if (!allowed) return { flights: [], completion: 0 }
-
-  const cabinMap: Record<string, number> = { ECON: 1, PREM: 2, both: 1 }
-  const cabinNames: Record<number, string> = { 1: "economy", 2: "business" }
-  const classesToSearch = config.searchClass === "both" ? [1, 2] : [cabinMap[config.searchClass] || 1]
-  const allFlights: UnifiedFlightResult[] = []
-
-  for (const travelClass of classesToSearch) {
-    try {
-      const params = new URLSearchParams({
-        engine: "google_flights",
-        departure_id: config.origin,
-        arrival_id: config.destination,
-        outbound_date: config.departureDate,
-        type: config.returnDate ? "1" : "2",
-        travel_class: String(travelClass),
-        currency: "USD",
-        hl: "en",
-        api_key: apiKey,
-      })
-      if (config.returnDate) params.set("return_date", config.returnDate)
-
-      incrementSerpApiUsage()
-      const resp = await fetch(`https://serpapi.com/search?${params}`)
-      if (!resp.ok) {
-        const body = await resp.text()
-        console.warn(`⚠️ SerpAPI ${resp.status}: ${body.slice(0, 200)}`)
-        continue
-      }
-
-      const data = await resp.json() as any
-
-      for (const category of ["best_flights", "other_flights"]) {
-        for (const itinerary of data[category] || []) {
-          const legs = itinerary.flights || []
-          if (legs.length === 0) continue
-
-          const firstLeg = legs[0]
-          const lastLeg = legs[legs.length - 1]
-          const airlines = [...new Set(legs.map((l: any) => l.airline).filter(Boolean))] as string[]
-          const flightNums = legs.map((l: any) => l.flight_number).filter(Boolean)
-          const layovers = itinerary.layovers || []
-          const airports = [
-            firstLeg.departure_airport?.id || config.origin,
-            ...layovers.map((l: any) => l.id || l.name),
-            lastLeg.arrival_airport?.id || config.destination,
-          ].filter(Boolean)
-
-          // Extract travel date from departure time or fall back to search date
-          const depTimeStr = firstLeg.departure_airport?.time || ""
-          const extractedDate = depTimeStr ? depTimeStr.split("T")[0] || depTimeStr.split(" ")[0] || config.departureDate : config.departureDate
-          const flightTravelDate = extractedDate && /^\d{4}-\d{2}-\d{2}/.test(extractedDate) ? extractedDate.slice(0, 10) : config.departureDate
-
-          allFlights.push({
-            id: `google-${allFlights.length}`,
-            source: "google",
-            type: "cash",
-            origin: firstLeg.departure_airport?.id || config.origin,
-            destination: lastLeg.arrival_airport?.id || config.destination,
-            airline: airlines.join(" / ") || "Unknown",
-            operatingAirlines: airlines,
-            flightNumbers: flightNums,
-            stops: layovers.length,
-            durationMinutes: itinerary.total_duration || legs.reduce((s: number, l: any) => s + (l.duration || 0), 0),
-            departureTime: firstLeg.departure_airport?.time || "",
-            arrivalTime: lastLeg.arrival_airport?.time || "",
-            airports,
-            cabinClass: cabinNames[travelClass] || "economy",
-            equipment: legs.map((l: any) => l.airplane || "").filter(Boolean),
-            points: null,
-            pointsProgram: null,
-            cashPrice: itinerary.price || null,
-            taxes: 0,
-            currency: "USD",
-            cppValue: null,
-            roameScore: null,
-            availableSeats: null,
-            bookingUrl: itinerary.booking_token
-              ? `https://www.google.com/travel/flights/booking?token=${encodeURIComponent(itinerary.booking_token)}`
-              : `https://www.google.com/travel/flights?q=flights+from+${config.origin}+to+${config.destination}+on+${config.departureDate}`,
-            fareClass: itinerary.type || "",
-            travelDate: flightTravelDate,
-          })
-        }
-      }
-    } catch (err) {
-      console.warn(`⚠️ SerpAPI Google Flights (class ${travelClass}) failed:`, (err as Error).message)
-    }
-  }
-
-  return { flights: allFlights, completion: allFlights.length > 0 ? 100 : 0 }
+  return { flights, completion: anySucceeded ? 100 : 0, warnings }
 }
 
 // ─── Hidden City Engine ──────────────────────────────────────────────────────
@@ -742,6 +591,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   let roameFlights: UnifiedFlightResult[] = []
   let atfFlights: UnifiedFlightResult[] = []
 
+  const cashWarnings: string[] = []
   const promises: Promise<void>[] = []
   
   if (config.sources.includes("roame")) {
@@ -772,29 +622,13 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   
   if (config.sources.includes("google")) {
     promises.push(
-      (async () => {
-        // Try fast_flights first (no API key needed, no rate limits)
-        console.log("🔍 Trying fast_flights (primary)...")
-        const fastResult = await searchFastFlights(config).catch(err => {
-          console.warn(`⚠️ fast_flights failed: ${err.message?.slice(0, 100)}`)
-          return { flights: [] as UnifiedFlightResult[], completion: 0 }
-        })
-        
-        if (fastResult.flights.length > 0) {
-          otherFlights.push(...fastResult.flights)
-          completionPct["google"] = fastResult.completion
-          console.log(`✅ Google Flights (fast_flights): ${fastResult.flights.length} cash fares`)
-          return
-        }
-        
-        // Fallback to SerpAPI if fast_flights returned nothing
-        console.log("🔄 fast_flights returned 0 results, falling back to SerpAPI...")
-        const serpResult = await searchSerpApiGoogle(config)
-        otherFlights.push(...serpResult.flights)
-        completionPct["google"] = serpResult.completion
-        console.log(`✅ Google Flights (SerpAPI fallback): ${serpResult.flights.length} cash fares`)
-      })().catch(err => {
-        console.error(`❌ Google Flights failed: ${err.message}`)
+      searchCashSource(config).then(({ flights, completion, warnings }) => {
+        otherFlights.push(...flights)
+        completionPct["google"] = completion
+        cashWarnings.push(...warnings)
+        console.log(`✅ Cash flights: ${flights.length} fares`)
+      }).catch(err => {
+        console.error(`❌ Cash flight search failed: ${err.message}`)
         completionPct["google"] = 0
       })
     )
@@ -844,6 +678,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   // Generate recommendations from value-scored results
   const recommendations = generateRecommendations(scored, balances, config)
   const warnings = generateWarnings(balances)
+  for (const w of [...new Set(cashWarnings)]) warnings.push(`⚠️ Cash provider — ${w}`)
   
   // Get route sweet spots for context
   const routeSpots = getSweetSpotsForRoute(config.origin, config.destination)
@@ -899,6 +734,8 @@ Options:
   --sources <list>       Comma-separated: roame,atf,google,hidden-city (default: roame,atf,google,hidden-city)
   --output <file>        Output file (default: results.json)
   --flex <0|1|2>         Flexible dates: search ±N days via Roame (default: 0)
+  --refresh              Bypass the cash cache and refetch (may spend metered calls)
+  --verify               Ask the metered provider to confirm cash prices
   --verbose              Show detailed progress
 `)
     process.exit(0)
@@ -914,6 +751,11 @@ Options:
     output: getArg("--output", "results.json"),
     flexDays: parseInt(getArg("--flex", "0")),
     verbose: hasFlag("--verbose"),
+    forceRefresh: hasFlag("--refresh"),
+    // A person typed this command, so the metered reserve may be spent.
+    userInitiated: hasFlag("--refresh") || hasFlag("--verify"),
+    verifyPrices: hasFlag("--verify"),
+    source: "cli",
   }
   
   const results = await runSearch(config)
