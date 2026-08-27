@@ -171,8 +171,11 @@ function evaluatePhase(
     if (!verdict.eligible) continue
     result.eligible++
 
-    // A dry run stops here. It has said what it would do, which is the whole
-    // point; queueing would leave real work behind for the next real pass.
+    // A dry run stops here, and so does a disabled system. Both have said what
+    // they would do, which is the whole point; queueing would leave real work
+    // behind - and a queue that accumulates while delivery is switched off
+    // turns "enable notifications" into an immediate burst of everything the
+    // radar has thought since it was turned off.
     if (dryRun) continue
 
     // §17 quiet hours QUEUE, they do not cancel. The extreme bypass is the one
@@ -514,7 +517,11 @@ export async function runNotificationPass(options: PassOptions): Promise<PassRes
   // 2. Decide. This happens even when delivery is switched off: the whole
   // point of the shadow period is to be able to read what WOULD have been sent.
   try {
-    evaluatePhase(db, config, now, result, options.dryRun === true)
+    // `live` is computed below for the delivery phases; the evaluation phase
+    // needs it too, so that a disabled system records decisions without
+    // building up a backlog.
+    evaluatePhase(db, config, now, result,
+      options.dryRun === true || !notificationsEnabled(config))
   } catch (err) {
     result.errors.push(`evaluate: ${(err as Error).message}`)
   }

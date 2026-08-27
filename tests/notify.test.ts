@@ -913,6 +913,23 @@ describe("the master switch", () => {
     expect(channel.sent).toHaveLength(0)
   })
 
+  it("does not build up a backlog while it is switched off", async () => {
+    // A queue that accumulates while delivery is off turns "enable
+    // notifications" into an immediate burst of everything the radar has
+    // thought since it was turned off - which is the worst possible first
+    // impression for a system whose whole asset is being worth reading.
+    const source = makeObservation()
+    makeCandidate({ source_id: source })
+    for (let i = 0; i < 3; i++) {
+      await runNotificationPass({ db, channel: new NullChannel(), now: NOW, config })
+    }
+    expect(listQueue(db)).toHaveLength(0)
+    // The decisions are still recorded: that is the shadow record.
+    expect((db.prepare(
+      `SELECT COUNT(*) c FROM notification_events WHERE kind='decision'`,
+    ).get() as any).c).toBeGreaterThan(0)
+  })
+
   it("keeps the committed config off", () => {
     expect(loadNotificationConfig(true).enabled).toBe(false)
   })
