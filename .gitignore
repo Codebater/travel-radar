@@ -15,6 +15,10 @@ data/*.db-shm
 # sensitive content (loyalty balance snapshots) and must never be committed.
 data/backups/
 
+# Unattended scheduler logs. No secrets are logged, but run history belongs in
+# the database, not in the repository.
+data/*.log
+
 # Generated search output and caches
 results*.json
 roame-results*.json

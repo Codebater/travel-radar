@@ -152,8 +152,21 @@ async function awFetch(apiKey: string, path: string, timeoutMs = 20_000): Promis
 function describeAwError(status: number, body: any): string {
   const code = body?.code
   if (code === "IP_DENIED") {
-    return "IP not whitelisted for this AwardWallet key — add this machine's public IP " +
+    // The vendor's machine code is kept in the text on purpose: the failure
+    // classifier that decides "auth problem" vs "server error" reads this
+    // string, and a purely human sentence would be filed as a transient error.
+    return "IP_DENIED: IP not whitelisted for this AwardWallet key — add this machine's public IP " +
            "under AwardWallet Business → API settings (the NAS will need its own entry later)"
+  }
+  // Observed live 2026-08-27 once the IP whitelist was in place. The key and
+  // the IP are both accepted; the account plan is the gate, and the vendor
+  // hands back the exact remedy, so it is passed straight through.
+  if (code === "BUSINESS_ADMINS_REQUIRE_PLUS") {
+    const fix = body?.how_to_fix ?? {}
+    return "BUSINESS_ADMINS_REQUIRE_PLUS: AwardWallet accepts this key and this IP, but every admin on the business account must " +
+           "hold AwardWallet Plus before the API returns data" +
+           (fix.check_admins_url ? ` — check admins at ${fix.check_admins_url}` : "") +
+           (fix.upgrade_url ? `, upgrade at ${fix.upgrade_url}` : "")
   }
   if (status === 401) return `unauthorized (${code || "check the API key"})`
   return `HTTP ${status}${code ? ` ${code}` : ""}${body?.message ? `: ${String(body.message).slice(0, 120)}` : ""}`
@@ -166,6 +179,19 @@ function describeAwError(status: number, body: any): string {
  */
 async function discoverUserId(apiKey: string): Promise<{ userId: string | null; error: string | null }> {
   const { status, body } = await awFetch(apiKey, "/connections")
+  if (status === 404) {
+    // This plan does not expose /connections at all. Reporting its 404 would
+    // send someone hunting a wrong URL, so ask the endpoint we actually need
+    // and report ITS answer — which is where the real gate lives, and which
+    // starts succeeding by itself once the account is upgraded.
+    const probe = await awFetch(apiKey, "/connectedUser")
+    return {
+      userId: null,
+      error: probe.status === 404
+        ? "AwardWallet exposes neither /connections nor /connectedUser for this key — set userId in the credentials file manually"
+        : describeAwError(probe.status, probe.body),
+    }
+  }
   if (status !== 200) return { userId: null, error: describeAwError(status, body) }
 
   const list: any[] = Array.isArray(body) ? body : (body?.connections ?? body?.users ?? [])

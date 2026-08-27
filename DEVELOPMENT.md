@@ -369,6 +369,116 @@ npm run observer:status
   Scheduler CONTROL is CLI-only on purpose — nothing on the network can start,
   stop or reconfigure it.
 
+### Running the observer unattended (Phase 5)
+
+Phase 4 proved the scheduler works; Phase 5 is about proving it keeps working
+when nobody is watching.
+
+```bash
+npm run observer:health
+```
+
+That is the one command to run after a few days away. It answers, from data
+the system already writes:
+
+| Question | Where the answer comes from |
+| --- | --- |
+| Is the scheduler alive? | the lease, plus its heartbeat age |
+| Is it *actually* alive? | a lease whose heartbeat stopped reports **STALE**, not RUNNING |
+| How long has it been up? | `acquired_at` versus now |
+| Did runs happen on time? | `observation_runs.scheduled_for` versus `started_at` |
+| Did any run get skipped? | enabled jobs overdue by more than 10% of their cadence |
+| Is the cache earning its keep? | cache hits over cache hits + live calls, per window |
+| Is anything failing quietly? | `provider_events`, bucketed to the last 24h |
+| Is a provider locked out? | failures classified as `auth` are called out separately |
+| Will this fit on the NAS? | the scheduler's own RSS and CPU, written by its heartbeat |
+
+The same numbers are on the Observer page under **Observer Health**, and at
+`GET /api/observer/health`.
+
+**Starting it for real.** The scheduler is an ordinary long-lived Node process,
+so on Windows the simplest durable start is a detached process:
+
+```bash
+powershell -Command "Start-Process npx.cmd -ArgumentList 'tsx','observer/cli.ts','start' -WorkingDirectory (Get-Location) -WindowStyle Hidden -RedirectStandardOutput data/observer.log -RedirectStandardError data/observer.err.log"
+```
+
+It survives the terminal that started it, but not a reboot — there is
+deliberately no auto-start entry, since that changes machine configuration.
+`npm run observer:stop` asks it to exit cleanly through the database.
+
+**Backups.** Whoever holds the lease takes one online SQLite snapshot per
+`BACKUP_INTERVAL_HOURS` and keeps `BACKUP_RETENTION` copies in `BACKUP_DIR`.
+Take one by hand with `npm run db:backup`. These use SQLite's backup API, not a
+file copy: copying a WAL-mode database while the scheduler is writing produces
+a file that looks fine and restores wrong. Backups are full copies and carry
+balance snapshots, so `data/backups/` is git-ignored.
+
+**Retention.** Cache entries expire; observation history never does. Nothing in
+the codebase deletes from `flight_prices` or `award_prices`, and a test asserts
+that.
+
+### Shadow anomaly engine (Phase 5)
+
+The beginning of the deal intelligence, running silently so its judgment can be
+measured against real observations before it is ever allowed to interrupt
+anybody.
+
+```bash
+npm run anomaly:evaluate
+```
+```bash
+npm run anomaly:candidates -- --min 70 --limit 20
+```
+```bash
+npm run anomaly:report
+```
+```bash
+npm run anomaly:feedback -- 42 BAD_SIGNAL "same fare every week"
+```
+```bash
+npm run anomaly:backfill
+```
+
+- **Shadow mode is structural, not a setting.** There is no notification
+  transport anywhere in `anomaly/`, `notified` is written 0 on every row, and a
+  test fails the build if any source file there so much as calls `fetch`.
+  Enabling alerts will be a visible, reviewed change — not a config flip.
+- **No look-ahead.** A decision about an observation from time T uses only
+  observations recorded strictly *before* T, siblings from the same fetch
+  included. Live evaluation and `anomaly:backfill` take the identical code
+  path, so a backfill result means what it says. Re-run the backfill after
+  changing weights to see what the new configuration *would* have said.
+- **Comparability is enforced.** Origin, destination, cabin, trip type,
+  currency and (for awards) loyalty program are never relaxed. Trip-length
+  bucket and direct-versus-connecting are dropped in configured order when the
+  strict sample is too thin, and the relaxation is recorded on the candidate as
+  `RELAXED_BASELINE`.
+- **Thin samples produce nothing.** Below `minSamplesToEmit` (5) prior
+  comparable observations the engine records no decision at all. Between 5 and
+  19 it emits with `THIN_BASELINE` and a heavy confidence penalty. The tiers
+  (INSUFFICIENT / VERY_LOW / LOW / MEDIUM / HIGHER) are product labels, not
+  statistical confidence intervals, and every threshold is configurable.
+- **Points and taxes stay separate.** 55k + €600 and 70k + €90 are both
+  defensible answers depending on whose points you hold, so they are never
+  collapsed into one number. CPP is computed only where a real cash comparable
+  exists, carries its provenance, and is capped when that comparable is thin.
+- **A missing component is dropped, not zeroed.** If our cash history has a gap
+  the award loses its CPP component and the remaining weights renormalise —
+  blaming the award for our blind spot would manufacture false negatives.
+- **Every candidate explains itself**, including the reasons not to trust it:
+  `THIN_BASELINE`, `RELAXED_BASELINE`, `STALE_BASELINE`, `DISCOVERY_PRICE_ONLY`,
+  `WEAK_CASH_COMPARATOR`, `NO_CASH_COMPARATOR`.
+- **Feedback**: GOOD_DEAL / NORMAL / BAD_SIGNAL, from the Observer page or the
+  CLI. `npm run anomaly:report` then shows which reason codes ride along with
+  bad signals and which routes flood the list. Nothing is tuned automatically.
+- **Extreme-deal presets** (EXTREME, WTF) exist in `config/anomaly.json` as
+  thresholds only. Candidates record which preset they *would* have matched, so
+  those thresholds can be chosen from evidence later instead of guessed now.
+
+Everything in `anomaly/` is pure database work: it contacts no provider and
+cannot spend a single API call, so evaluating a year of history is free.
+
 ### Credentials for live award validation
 
 - **Roame program keys**: Roame's identifier for Miles & More is `LUFTHANSA`
@@ -397,8 +507,35 @@ oame.json`:
   economy-only and only a few calls per day. Set `ATF_AIRLINES=iberia` (or
   another short list) so a single search does not exhaust a day.
   ATF answers "nothing available" with HTTP 400 — the client treats that as a
-  cacheable empty result, not an error, so repeats cost nothing.
-- **AwardWallet** (optional): `awardwallet.json` with `apiKey` + `userId`.
+  cacheable empty result, not an error, so repeats cost nothing. It also
+  appears not to CHARGE for those: after eight empty Iberia probes the vendor
+  still reported 50/50 remaining, and only a call that returned data
+  decremented it. Our own counter still counts every attempt, which errs the
+  safe way.
+  **What ATF actually returns here** (measured 2026-08-27, see
+  `providers/award-flights/coverage.json`): British Airways works and is the
+  proof that the whole ATF path — normalisation, taxes, currency, persistence,
+  caching — is correct end to end (LHR→JFK returned 27,500 Avios + 75 GBP, 6
+  seats, and the identical repeat cost 0 calls). **Iberia returned nothing on
+  ten consecutive probes**, including short-haul MAD→LHR where Avios space is
+  normally plentiful and MAD→JFK on the very date BA LHR→JFK had seats. Iberia
+  calls also take ~13s against BA's ~0.7s, which looks like an upstream search
+  timing out and being reported as "no availability". Recorded as DEGRADED: the
+  integration works, the data does not. Do not schedule it.
+- **AwardWallet** (optional): `awardwallet.json` with `apiKey`; `userId` is
+  discovered and cached automatically where the plan exposes `/connections`.
+  Two gates were hit in sequence, and each reports itself in
+  `npm run providers` rather than as a generic failure:
+  1. `IP_DENIED` — the calling machine's public IP must be whitelisted under
+     AwardWallet Business → API settings. The NAS will need its own entry.
+  2. `BUSINESS_ADMINS_REQUIRE_PLUS` — with the key and IP both accepted, the
+     API still returns no data until **every admin on the business account
+     holds AwardWallet Plus**. That is a paid subscription and a decision for
+     the account owner, so nothing here works around it.
+  Until then balances fall back to the hardcoded list, health reports
+  `degraded` with the vendor's own remediation URLs, and the radar is
+  unaffected — AwardWallet only answers "can I afford this", never "is this a
+  deal".
 - **Validate without spending**: `npm run providers` then
   `npm run observer:dry-run`. A minimal live check is one manual
   `npm run observer:run -- PRG-BKK` — on an award run this issues 4 award

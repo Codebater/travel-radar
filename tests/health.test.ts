@@ -204,6 +204,16 @@ describe("provider failures over time", () => {
     expect(classifyFailure("session expired")).toBe("auth")
     expect(classifyFailure("IP_DENIED")).toBe("auth")
     expect(classifyFailure("BUSINESS_ADMINS_REQUIRE_PLUS")).toBe("auth")
+    // Live validation caught this: the provider translated the vendor code into
+    // a readable sentence, and the sentence alone was filed as a transient
+    // server error - so an account-level lockout would have looked like a blip.
+    expect(classifyFailure(
+      "BUSINESS_ADMINS_REQUIRE_PLUS: AwardWallet accepts this key and this IP, but every admin " +
+      "on the business account must hold AwardWallet Plus",
+    )).toBe("auth")
+    expect(classifyFailure(
+      "IP_DENIED: IP not whitelisted for this AwardWallet key",
+    )).toBe("auth")
     expect(classifyFailure("monthly quota exhausted")).toBe("quota")
     expect(classifyFailure("429 rate limit")).toBe("quota")
     expect(classifyFailure("socket hang up")).toBe("error")
