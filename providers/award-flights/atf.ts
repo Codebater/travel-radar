@@ -23,7 +23,7 @@ import path from "path"
 import os from "os"
 import {
   searchATF, buildATFBookingUrl, ATF_AIRLINE_META, ATF_AIRLINES,
-  type ATFResult,
+  type ATFResult, type ATFAirline,
 } from "../../atf-scraper.js"
 import { itineraryHash } from "../../cache/key.js"
 import { findTransferPaths, effectiveRatio } from "../../transfer-partners.js"
@@ -39,7 +39,32 @@ function homeDir(): string {
 }
 
 const CREDENTIALS_PATH = path.join(homeDir(), ".openclaw", "credentials", "awardtravelfinder.json")
-const MONTHLY_LIMIT = 150
+
+/**
+ * Fallback monthly allowance when ATF has not told us its own number yet.
+ * The vendor states the free tier five different ways across its surfaces
+ * (3/day, 5/day, 50/month, and a 5000 example), so this is deliberately the
+ * most conservative published figure: whatever ATF reports in a real response
+ * always overrides it.
+ */
+const MONTHLY_LIMIT = Number(process.env.ATF_MONTHLY_LIMIT) > 0
+  ? Number(process.env.ATF_MONTHLY_LIMIT)
+  : 50
+
+/**
+ * Which airlines a search queries. Each costs one call, and the free tier is a
+ * handful of calls per DAY — so the default is deliberately narrow rather than
+ * all five. Override with ATF_AIRLINES=iberia,qatar_airways.
+ */
+function configuredAirlines(): readonly ATFAirline[] {
+  const raw = (process.env.ATF_AIRLINES || "").trim()
+  if (!raw) return ATF_AIRLINES
+  const wanted = raw.split(",").map(a => a.trim().toLowerCase()).filter(Boolean)
+  const valid = wanted.filter((a): a is ATFAirline => (ATF_AIRLINES as readonly string[]).includes(a))
+  const unknown = wanted.filter(a => !(ATF_AIRLINES as readonly string[]).includes(a))
+  if (unknown.length) console.warn(`⚠️ ATF_AIRLINES ignores unknown airline(s): ${unknown.join(", ")}`)
+  return valid.length ? valid : ATF_AIRLINES
+}
 
 const VALID_CABINS: CabinClass[] = ["economy", "premium_economy", "business", "first"]
 
@@ -56,7 +81,12 @@ function transferOptionsFor(programKey: string): TransferOption[] {
 export class ATFAwardProvider implements AwardFlightProvider {
   readonly name = "atf"
   readonly confidence = "medium" as const
-  readonly callsPerSearch = ATF_AIRLINES.length   // 5
+
+  /** One call per configured airline — read at call time, since the list is
+   *  configurable and the orchestrator pre-records this many attempts. */
+  get callsPerSearch(): number {
+    return configuredAirlines().length
+  }
 
   isEnabled(): boolean {
     return (process.env.ENABLE_ATF ?? "true") !== "false"
@@ -79,7 +109,7 @@ export class ATFAwardProvider implements AwardFlightProvider {
       estimatedUsed: usage.attempted,
       budget: MONTHLY_LIMIT,
       reserve: 0,
-      automationRemaining: Math.max(0, MONTHLY_LIMIT - usage.attempted),
+      automationRemaining: Math.max(0, (usage.reportedLimit ?? MONTHLY_LIMIT) - usage.attempted),
       reportedRemaining: usage.reportedRemaining,
       reportedLimit: usage.reportedLimit,
       reportedAt: usage.reportedAt,
@@ -99,12 +129,14 @@ export class ATFAwardProvider implements AwardFlightProvider {
     }
     const quota = this.quota()
     const remaining = quota.reportedRemaining ?? quota.automationRemaining
-    // Deliberately no network call — a health probe must never spend one of
-    // the 150 monthly requests.
+    const airlines = configuredAirlines()
+    // Deliberately no network call — a health probe must never spend one of a
+    // very small allowance.
     return {
       provider: this.name, status: "ok", latencyMs: null, checkedAt, quota,
       detail: `configured; ~${remaining} of ${quota.reportedLimit ?? MONTHLY_LIMIT} calls remaining ` +
-              `(each search costs ${this.callsPerSearch}); covers ${ATF_AIRLINES.length} programs`,
+              `(each search costs ${airlines.length}: ${airlines.join(", ")}). ` +
+              `Free tier is economy-only and only a few calls per day — keep ATF for targeted checks.`,
     }
   }
 
@@ -120,13 +152,14 @@ export class ATFAwardProvider implements AwardFlightProvider {
     // Budget guard (mirrors SerpAPI's): a search costs 5 of ~150 monthly calls,
     // so refuse before spending when the allowance is exhausted. The reported
     // limit from ATF wins over the documented default when known.
+    const airlines = configuredAirlines()
     const quota = this.quota()
     const limit = quota.reportedLimit ?? MONTHLY_LIMIT
     // estimatedUsed may already include THIS search (the orchestrator
     // pre-records attempts); subtract that before projecting.
     const usedBefore = quota.estimatedUsed - (options.quotaPreRecorded ?? 0)
-    if (usedBefore + ATF_AIRLINES.length > limit) {
-      const message = `ATF monthly allowance exhausted (${usedBefore}/${limit}, next search needs ${ATF_AIRLINES.length})`
+    if (usedBefore + airlines.length > limit) {
+      const message = `ATF monthly allowance exhausted (${usedBefore}/${limit}, next search needs ${airlines.length})`
       console.warn(`ATF SKIPPED quota guard — ${message}`)
       return {
         provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs: 0,
@@ -135,7 +168,7 @@ export class ATFAwardProvider implements AwardFlightProvider {
     }
 
     try {
-      const results = await searchATF(query.origin, query.destination, query.departureDate)
+      const results = await searchATF(query.origin, query.destination, query.departureDate, airlines)
       const latencyMs = Date.now() - started
       const flights = this.normalise(results, query)
 
@@ -146,7 +179,7 @@ export class ATFAwardProvider implements AwardFlightProvider {
         const failed = results.filter(r => r.error || !r.response?.success)
         const allFailed = failed.length === results.length
         return {
-          provider: this.name, ok: false, flights: [], callsSpent: ATF_AIRLINES.length, latencyMs,
+          provider: this.name, ok: false, flights: [], callsSpent: airlines.length, latencyMs,
           completionPct: null,
           reason: allFailed ? "provider-error" : "no-results",
           error: allFailed
@@ -168,14 +201,14 @@ export class ATFAwardProvider implements AwardFlightProvider {
       const partial = failedAirlines.length > 0
 
       return {
-        provider: this.name, ok: true, flights, callsSpent: ATF_AIRLINES.length, latencyMs,
-        completionPct: Math.round(((ATF_AIRLINES.length - failedAirlines.length) / ATF_AIRLINES.length) * 100),
+        provider: this.name, ok: true, flights, callsSpent: airlines.length, latencyMs,
+        completionPct: Math.round(((airlines.length - failedAirlines.length) / airlines.length) * 100),
         ...(reported ? { reportedQuota: reported } : {}),
         ...(partial ? { partial: true, error: `airline check(s) failed: ${failedAirlines.join(", ")}` } : {}),
       }
     } catch (err) {
       return {
-        provider: this.name, ok: false, flights: [], callsSpent: ATF_AIRLINES.length,
+        provider: this.name, ok: false, flights: [], callsSpent: airlines.length,
         latencyMs: Date.now() - started, completionPct: null,
         reason: "provider-error", error: (err as Error).message,
       }

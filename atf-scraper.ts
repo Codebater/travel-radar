@@ -73,6 +73,8 @@ interface ATFUsage {
   tier: string
   remaining_calls: number
   monthly_limit: number
+  /** When the allowance resets — vendor-documented alongside the counters. */
+  reset_at?: string
 }
 
 interface ATFResponse {
@@ -118,6 +120,22 @@ function loadApiKey(): string {
 
 // ─── API Client ──────────────────────────────────────────────────────────────
 
+const REQUEST_TIMEOUT_MS = 40_000
+
+/**
+ * One airline availability lookup.
+ *
+ * Uses the key-enforced per-airline REST surface, which is the only one that
+ * returns the usage/quota block — the /api/v1/chatgpt/* namespace answers
+ * without validating the key and carries no quota, so it is unusable for an
+ * accounted radar.
+ *
+ * Two documented traps are handled here: an upstream airline search can time
+ * out and report the failure INSIDE a 200 response, and the payload can carry
+ * `success: true` while `data.error` describes a failed search. Reading either
+ * as "no availability" would silently turn a broken source into a confident
+ * "no seats", so both are surfaced as errors.
+ */
 async function fetchATFAirline(
   apiKey: string,
   airline: ATFAirline,
@@ -127,16 +145,17 @@ async function fetchATFAirline(
 ): Promise<ATFResult> {
   const url = `${ATF_BASE_URL}/${airline}/availability?departure_code=${origin}&arrival_code=${destination}&date=${date}`
 
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS)
   try {
     const resp = await fetch(url, {
-      headers: {
-        "X-API-Key": apiKey,
-        "Accept": "application/json",
-      },
+      headers: { "X-API-Key": apiKey, Accept: "application/json" },
+      signal: controller.signal,
     })
 
     if (!resp.ok) {
       const body = await resp.text().catch(() => "")
+      // 401 here means the key is wrong or lacks API access — never retried.
       return {
         airline, origin, destination, date,
         response: null as any,
@@ -144,44 +163,61 @@ async function fetchATFAirline(
       }
     }
 
-    const data = await resp.json() as ATFResponse
+    const data = await resp.json() as ATFResponse & { data?: { error?: string } }
 
-    // Warn loudly if running low on monthly budget
+    // A failed upstream search wrapped in a successful HTTP response.
+    const innerError = (data as any)?.data?.error
+    if (innerError) {
+      return {
+        airline, origin, destination, date,
+        response: null as any,
+        error: `upstream search failed: ${String(innerError).slice(0, 160)}`,
+      }
+    }
+
+    // Warn loudly if running low on the monthly allowance.
     if (data.usage?.remaining_calls !== undefined && data.usage.remaining_calls < WARN_AT_REMAINING) {
       process.stderr.write(
-        `⚠️  ATF API WARNING: only ${data.usage.remaining_calls}/${data.usage.monthly_limit} calls remaining this month!\n`
+        `⚠️  ATF API WARNING: only ${data.usage.remaining_calls}/${data.usage.monthly_limit} calls remaining` +
+        `${data.usage.reset_at ? ` (resets ${data.usage.reset_at})` : ""}\n`
       )
     }
 
     return { airline, origin, destination, date, response: data }
   } catch (err) {
+    const aborted = (err as Error).name === "AbortError"
     return {
       airline, origin, destination, date,
       response: null as any,
-      error: (err as Error).message,
+      error: aborted ? `request timed out after ${REQUEST_TIMEOUT_MS}ms` : (err as Error).message,
     }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
 // ─── Main Search ─────────────────────────────────────────────────────────────
 
 /**
- * Search all 5 ATF airlines in parallel for a single route + date.
- * Consumes 5 API calls (one per airline). Budget: 150/month = 30 full searches.
+ * Search ATF airlines in parallel for a single route + date. ONE CALL PER
+ * AIRLINE — with a free tier measured in a handful of calls per day, querying
+ * all five every time is usually the wrong default, so callers may pass a
+ * subset (see ATF_AIRLINES env / the provider's configured list).
  */
 export async function searchATF(
   origin: string,
   destination: string,
   date: string,
+  airlines: readonly ATFAirline[] = ATF_AIRLINES,
 ): Promise<ATFResult[]> {
   const apiKey = loadApiKey()
 
   process.stderr.write(
-    `🔍 ATF: ${origin}→${destination} ${date} (${ATF_AIRLINES.length} airlines = ${ATF_AIRLINES.length} calls)\n`
+    `🔍 ATF: ${origin}→${destination} ${date} (${airlines.length} airline${airlines.length === 1 ? "" : "s"} = ${airlines.length} call${airlines.length === 1 ? "" : "s"})\n`
   )
 
   const results = await Promise.all(
-    ATF_AIRLINES.map(airline => fetchATFAirline(apiKey, airline, origin, destination, date))
+    airlines.map(airline => fetchATFAirline(apiKey, airline, origin, destination, date))
   )
 
   const successful = results.filter(r => !r.error && r.response?.success)
@@ -190,7 +226,7 @@ export async function searchATF(
   for (const f of failed) {
     process.stderr.write(`  ❌ ATF ${f.airline}: ${f.error || "API returned success=false"}\n`)
   }
-  process.stderr.write(`  ✅ ATF: ${successful.length}/${ATF_AIRLINES.length} airlines responded\n`)
+  process.stderr.write(`  ✅ ATF: ${successful.length}/${airlines.length} airlines responded\n`)
 
   // Report current usage from last successful response
   const lastUsage = successful[successful.length - 1]?.response?.usage
