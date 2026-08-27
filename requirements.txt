@@ -7,10 +7,11 @@
 #
 # search.ts auto-detects .venv (both layouts) and falls back to python on PATH.
 
-# scripts/search-google-flights.py — primary Google Flights cash source, no API key.
-# Pinned to 2.2: fast-flights 3.x dropped FlightData/get_flights_from_filter, which
-# the script imports. Moving to the 3.x API is a rewrite, not a Phase 1 fix.
-fast-flights==2.2
+# scripts/google-flights.py — primary Google Flights cash source, no API key.
+# Pinned to 3.1.0: 3.x returns a structured payload (integer prices, per-leg
+# airports/datetimes/durations/aircraft) where 2.2 scraped HTML and frequently
+# left airline, times and duration empty. See DEVELOPMENT.md "Cash providers".
+fast-flights==3.1.0
 # fast-flights imports typing_extensions but does not declare it as a dependency
 typing_extensions>=4.9
 
