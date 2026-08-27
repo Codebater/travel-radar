@@ -7,6 +7,7 @@
 
 import crypto from "crypto"
 import type { CashFlightQuery } from "../providers/cash-flights/types.js"
+import type { AwardFlightQuery } from "../providers/award-flights/types.js"
 
 /**
  * Cache key for a provider search.
@@ -27,6 +28,28 @@ export function cacheKey(query: CashFlightQuery, provider: string): string {
     query.returnDate ? part(query.returnDate) : "oneway",
     part(query.cabin),
     String(Math.max(1, Math.trunc(query.adults || 1))),
+    part(provider),
+  ].join(":")
+}
+
+/**
+ * Cache key for an award provider search. Same shape and guarantees as the cash
+ * key; the cabin slot carries Roame's search class (ECON/PREM/both) because
+ * that is the granularity award providers search at. Flex days are part of the
+ * key — a ±1d search is a different result set than an exact-date one.
+ *
+ *   PRG:BKK:2026-11-10:oneway:PREM:1:f0:roame
+ */
+export function awardCacheKey(query: AwardFlightQuery, provider: string): string {
+  const part = (v: string) => v.replace(/[^A-Za-z0-9_-]/g, "_")
+  return [
+    part(query.origin.toUpperCase()),
+    part(query.destination.toUpperCase()),
+    part(query.departureDate),
+    query.returnDate ? part(query.returnDate) : "oneway",
+    part(query.searchClass),
+    String(Math.max(1, Math.trunc(query.adults || 1))),
+    `f${query.flexDays || 0}`,
     part(provider),
   ].join(":")
 }

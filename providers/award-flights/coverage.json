@@ -1,0 +1,115 @@
+{
+  "description": "Verified loyalty-program coverage of this application's award providers. Populated only from evidence — never from alliance-membership inference. Evidence classes: 'observed' = seen in a real API response captured by this project; 'vendor-documented' = the vendor's own site/docs; 'secondary' = reputable third-party reporting; 'code' = what this codebase's integration actually requests.",
+  "updated": "2026-08-27",
+  "notes": [
+    "'integrated' means THIS application's provider wrapper can return the program today. Roame is searched with mileagePrograms:[ALL], so its integrated coverage equals whatever Roame's backend searches; the vendor documents 26 programs.",
+    "The ATF integration calls 5 fixed airline endpoints (british_airways, qatar_airways, cathay_pacific, virgin_atlantic, iberia). The vendor now documents 14+ programs including flying-blue and aeroplan — expanding the integration is a known, unimplemented option.",
+    "Flying Blue is currently degraded industry-wide after its May 2025 login-wall: seats.aero reports 'Outage' and PointsYeah 'Temporary Unavailable' (both 2026-08-27). Roame still lists it as supported (re-confirmed by AwardWallet, 2026-08-02).",
+    "Lufthansa-group FIRST class partner awards ended ~2026-06-01 (secondary reporting): LH F space is now effectively Miles & More-only, so a M&M-capable source is REQUIRED for Austrian/LH/Swiss First."
+  ],
+  "programs": {
+    "MILES_AND_MORE": {
+      "displayName": "Lufthansa Miles & More",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Lufthansa Miles & More'; roame.travel/guides/lufthansa-miles-more: 'Roame now searches Lufthansa Miles & More!' (First & Business, Star Alliance partners). Not yet observed in this project's captures (no live session since the feature's addition).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "no", "integrated": false, "evidence": "vendor-documented: absent from awardtravelfinder.com/airlines and from the vendor README's 14-program table.", "dateChecked": "2026-08-27" },
+      "otherCandidates": "seats.aero (source 'lufthansa', Y/J/F, live+cached, Partner API with Pro $9.99/mo, 1000 calls/day non-commercial); PointsYeah (live, commercial API by partnership); AwardTool ($10.99/mo). No official Lufthansa award API; direct scraping needs member login + 7,000-mile minimum balance."
+    },
+    "FLYING_BLUE": {
+      "displayName": "Air France/KLM Flying Blue",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Air France/KLM Flying Blue'; help.roame.travel supported-programs article (dated 2024-12-17) lists AF+KLM Flying Blue; AwardWallet review re-confirmed 2026-08-02. Also noted in this repo's CLAUDE.md as observed in Feb 2026 searches. CAVEAT: Flying Blue login-walled award search in May 2025 and is currently degraded at seats.aero and PointsYeah — treat Roame FB results with suspicion until observed live.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-yes-not-integrated", "integrated": false, "evidence": "vendor-documented: ATF README lists slug 'flying-blue' among its 14 programs; our integration does not call it.", "dateChecked": "2026-08-27" },
+      "otherCandidates": "Promo Rewards are public per-market pages (no login) — a future scrape target; AwardFares mirrors them. seats.aero source 'flyingblue' exists but is in outage (2026-08-27)."
+    },
+    "IBERIA": {
+      "displayName": "Iberia Plus (now 'Iberia Club')",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Iberia Plus'; help-center list includes 'Iberia Plus Avios'; AwardWallet (2026-08-02) lists 'Iberia Club'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "yes", "integrated": true, "evidence": "code + vendor-documented: our integration calls /api/v1/iberia/availability; vendor README puts Iberia in the full-availability set (availability + monthly calendars).", "dateChecked": "2026-08-27" },
+      "otherCandidates": "seats.aero Iberia is BETA and broken as of 2026-08-27 (zero results, 'temporary issues'); PointsYeah dropped Iberia from its status page."
+    },
+    "BRITISH_AIRWAYS": {
+      "displayName": "British Airways Club (Avios)",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'British Airways Executive Club'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "yes", "integrated": true, "evidence": "code + vendor-documented: integrated endpoint; vendor full-availability set.", "dateChecked": "2026-08-27" }
+    },
+    "QATAR": {
+      "displayName": "Qatar Airways Privilege Club (Avios)",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Qatar Airways Privilege Club'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "yes", "integrated": true, "evidence": "code + vendor-documented: integrated endpoint; vendor full-availability set.", "dateChecked": "2026-08-27" }
+    },
+    "AEROPLAN": {
+      "displayName": "Air Canada Aeroplan",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Air Canada Aeroplan'. Also noted as found in this repo's Feb 2026 usage (CLAUDE.md).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-yes-not-integrated", "integrated": false, "evidence": "vendor-documented: ATF README lists slug 'aeroplan'; our integration does not call it.", "dateChecked": "2026-08-27" }
+    },
+    "LIFEMILES": {
+      "displayName": "Avianca LifeMiles",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 2 LifeMiles fares (program key 'LIFEMILES') in this project's real Roame capture, LAX-DXB 2026-02-17 (results-dxb-outbound.json). Also vendor-documented on roame.travel/programs.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "no", "integrated": false, "evidence": "vendor-documented: zero occurrences of 'lifemiles'/'avianca' across ATF's site, OpenAPI schema and README.", "dateChecked": "2026-08-27" }
+    },
+    "UNITED": {
+      "displayName": "United MileagePlus",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 16-21 United fares in this project's real Roame captures (LAX-DXB both directions, 2026-02-17). Also vendor-documented.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "conflicting-not-integrated", "integrated": false, "evidence": "vendor sources conflict: awardtravelfinder.com/airlines has a /airlines/united page, but the README's supported list omits United. Not integrated here either way.", "dateChecked": "2026-08-27" }
+    },
+    "SINGAPORE": {
+      "displayName": "Singapore KrisFlyer",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Singapore KrisFlyer'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-yes-not-integrated", "integrated": false, "evidence": "vendor-documented: README slug 'singapore-airlines'; not integrated here.", "dateChecked": "2026-08-27" }
+    },
+    "FINNAIR": {
+      "displayName": "Finnair Plus (Avios)",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Finnair Plus'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "no", "integrated": false, "evidence": "vendor-documented: zero occurrences of 'finnair' across ATF's surfaces.", "dateChecked": "2026-08-27" }
+    },
+    "AMERICAN": {
+      "displayName": "American AAdvantage",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 32-41 AA fares in this project's real Roame captures (2026-02-17).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-partial-not-integrated", "integrated": false, "evidence": "vendor-documented: /airlines/american-airlines exists; README marks AA outside the full-availability set ('rates + tips' depth).", "dateChecked": "2026-08-27" }
+    },
+    "ALASKA": {
+      "displayName": "Alaska Atmos Rewards (ex Mileage Plan)",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 13-20 Alaska fares in this project's real Roame captures (2026-02-17); vendor lists 'Alaska Atmos Rewards'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-partial-not-integrated", "integrated": false, "evidence": "vendor-documented: /airlines/alaska-airlines exists; outside the full-availability set.", "dateChecked": "2026-08-27" }
+    },
+    "DELTA": {
+      "displayName": "Delta SkyMiles",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 2 Delta fares in this project's real Roame capture (2026-02-17).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-partial-not-integrated", "integrated": false, "evidence": "vendor-documented: /airlines/delta exists; outside the full-availability set.", "dateChecked": "2026-08-27" }
+    },
+    "VIRGIN_ATLANTIC": {
+      "displayName": "Virgin Atlantic Flying Club",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 1 Virgin Atlantic fare in this project's real Roame capture (2026-02-17).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "yes", "integrated": true, "evidence": "code + vendor-documented: integrated endpoint; vendor full-availability set.", "dateChecked": "2026-08-27" }
+    },
+    "CATHAY": {
+      "displayName": "Cathay Pacific Asia Miles",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Cathay Pacific Asia Miles'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "yes", "integrated": true, "evidence": "code + vendor-documented: integrated endpoint; vendor full-availability set.", "dateChecked": "2026-08-27" }
+    },
+    "QANTAS": {
+      "displayName": "Qantas Frequent Flyer",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 2-21 Qantas fares in this project's real Roame captures (2026-02-17).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-yes-not-integrated", "integrated": false, "evidence": "vendor-documented: README puts Qantas in the full-availability set; not integrated here.", "dateChecked": "2026-08-27" }
+    },
+    "TURKISH": {
+      "displayName": "Turkish Miles&Smiles",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Turkish Airlines Miles & Smiles'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-yes-not-integrated", "integrated": false, "evidence": "vendor-documented: README slug 'turkish-airlines'; not integrated here.", "dateChecked": "2026-08-27" }
+    },
+    "EMIRATES": {
+      "displayName": "Emirates Skywards",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "vendor-documented: roame.travel/programs lists 'Emirates Skywards'.", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-yes-not-integrated", "integrated": false, "evidence": "vendor-documented: README lists Emirates; not integrated here.", "dateChecked": "2026-08-27" }
+    },
+    "JETBLUE": {
+      "displayName": "JetBlue TrueBlue",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 2 JetBlue fares in this project's real Roame capture (2026-02-17).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "vendor-yes-not-integrated", "integrated": false, "evidence": "vendor-documented: README lists JetBlue; not integrated here.", "dateChecked": "2026-08-27" }
+    },
+    "VIRGIN_AUSTRALIA": {
+      "displayName": "Velocity Frequent Flyer",
+      "roame": { "covered": "yes", "integrated": true, "evidence": "observed: 5 Virgin Australia fares in this project's real Roame capture (2026-02-17).", "dateChecked": "2026-08-27" },
+      "atf": { "covered": "no", "integrated": false, "evidence": "not present in ATF's documented programs.", "dateChecked": "2026-08-27" }
+    }
+  }
+}

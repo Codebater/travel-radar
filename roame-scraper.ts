@@ -98,15 +98,25 @@ export interface UnifiedFlightResult {
   fareClass: string
   travelDate?: string       // YYYY-MM-DD
   direction?: "outbound" | "return"
-  // ── Phase 2 provenance (cash results only) ────────────────────────────────
-  /** Which cash provider produced this, e.g. "fast_flights" | "serpapi". */
+  // ── Phase 2/3 provenance ──────────────────────────────────────────────────
+  /** Which provider produced this, e.g. "fast_flights" | "serpapi" | "roame" | "atf". */
   provider?: string
-  /** cached = replayed from our store, discovered = free provider, verified = metered. */
-  verificationLevel?: "cached" | "discovered" | "verified"
+  /** cached = replayed from our store; discovered = one provider; verified =
+   *  metered cash provider; cross-verified = two independent award providers. */
+  verificationLevel?: "cached" | "discovered" | "verified" | "cross-verified"
   providerConfidence?: "high" | "medium" | "low"
   fetchedAt?: string
   /** Age of the cached payload in minutes, when served from cache. */
   cacheAgeMinutes?: number | null
+  /** Physical-flight identity, shared by every program pricing the same flight. */
+  itineraryHash?: string
+  /** Loyalty program display name (award results). The program KEY is pointsProgram. */
+  loyaltyProgramName?: string
+  // ── Hidden-city metadata ──────────────────────────────────────────────────
+  /** True when this is a hidden-city construct, NOT an ordinary ticket. */
+  hiddenCity?: boolean
+  hiddenCityWarnings?: string[]
+  hiddenCityRisk?: "low" | "medium" | "high"
 }
 
 // ─── Credentials ─────────────────────────────────────────────────────────────
@@ -382,7 +392,8 @@ export async function searchRoame(
   const { fares, percentCompleted } = await pollResults(
     jobUUID, 90000,
     verbose ? (pct, count) => process.stdout.write(`\r  Progress: ${pct}% | ${count} fares`) : undefined,
-    creds
+    creds,
+    signal,
   )
   if (verbose) process.stdout.write("\n")
   

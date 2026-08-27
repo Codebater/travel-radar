@@ -13,12 +13,15 @@ import type {
   NormalizedCashFlight,
   ProviderStatus,
 } from "../providers/cash-flights/types.js"
+import type { NormalizedAwardFlight } from "../providers/award-flights/types.js"
 
 // ─── search_requests ─────────────────────────────────────────────────────────
 
 export function recordSearchRequest(
   db: DB,
-  query: CashFlightQuery,
+  // Structurally a CashFlightQuery, but `cabin` is widened: the unified search
+  // row also records award search classes ("ECON"/"PREM"/"both").
+  query: Omit<CashFlightQuery, "cabin"> & { cabin: string },
   source: "api" | "cli" | "test" = "api",
 ): number {
   const info = db.prepare(`
@@ -33,21 +36,33 @@ export function recordSearchRequest(
 
 // ─── search_cache ────────────────────────────────────────────────────────────
 
-export interface CacheEntry {
+/** What the cache row records about the originating query. Cash and award
+ *  searches both satisfy this; `cabin` carries the award search class for
+ *  award entries. */
+export interface CacheQueryMeta {
+  origin: string
+  destination: string
+  departureDate: string
+  returnDate?: string | null
+  cabin: string
+  adults: number
+}
+
+export interface CacheEntry<T = NormalizedCashFlight> {
   cacheKey: string
   provider: string
-  flights: NormalizedCashFlight[]
+  flights: T[]
   createdAt: string
   expiresAt: string
   isExpired: boolean
   ageMinutes: number
 }
 
-export function readCache(db: DB, cacheKey: string, at: Date = new Date()): CacheEntry | null {
+export function readCache<T = NormalizedCashFlight>(db: DB, cacheKey: string, at: Date = new Date()): CacheEntry<T> | null {
   const row = db.prepare(`SELECT * FROM search_cache WHERE cache_key = ?`).get(cacheKey) as any
   if (!row) return null
 
-  let flights: NormalizedCashFlight[]
+  let flights: T[]
   try {
     flights = JSON.parse(row.payload)
   } catch {
@@ -72,8 +87,8 @@ export function writeCache(
   db: DB,
   cacheKey: string,
   provider: string,
-  query: CashFlightQuery,
-  flights: NormalizedCashFlight[],
+  query: CacheQueryMeta,
+  flights: unknown[],
   expiresAt: string,
 ): void {
   db.prepare(`
@@ -264,13 +279,13 @@ export function readUsage(db: DB, provider: string, period = currentPeriod()): U
  * success or a failure. Attempted is the conservative number the budget guard
  * uses, so a failed call can never be silently reclaimed as free.
  */
-export function recordCallAttempt(db: DB, provider: string, period = currentPeriod()): number {
+export function recordCallAttempt(db: DB, provider: string, period = currentPeriod(), count = 1): number {
   const tx = db.transaction(() => {
     ensureUsageRow(db, provider, period)
     db.prepare(`
-      UPDATE provider_usage SET attempted = attempted + 1, last_call_at = ?
+      UPDATE provider_usage SET attempted = attempted + ?, last_call_at = ?
       WHERE provider = ? AND period = ?
-    `).run(nowIso(), provider, period)
+    `).run(Math.max(1, count), nowIso(), provider, period)
     return (db.prepare(
       `SELECT attempted FROM provider_usage WHERE provider = ? AND period = ?`
     ).get(provider, period) as any).attempted as number
@@ -344,4 +359,214 @@ export function recordHealth(
       status = excluded.status, detail = excluded.detail,
       checked_at = excluded.checked_at, latency_ms = excluded.latency_ms
   `).run(provider, status, detail.slice(0, 300), nowIso(), latencyMs)
+}
+
+// ─── award_prices (append-only history) ──────────────────────────────────────
+
+/**
+ * Append award observations — "points observed by this radar", not market data.
+ * Never updates: the same flight priced by four programs is four rows, and the
+ * same program observed on two days is two rows. That accumulation is the
+ * entire point.
+ */
+export function recordAwardObservations(
+  db: DB,
+  flights: NormalizedAwardFlight[],
+  opts: { rawRef?: string | null; searchRequestId?: number | null } = {},
+): number {
+  if (flights.length === 0) return 0
+
+  const stmt = db.prepare(`
+    INSERT INTO award_prices (
+      itinerary_hash, origin, destination, departure_date, return_date,
+      departure_time, arrival_time, airline, operating_airlines, flight_numbers,
+      stops, duration_minutes, cabin, loyalty_program, points,
+      taxes_amount, taxes_currency, available_seats, booking_url,
+      provider, verification_level, provider_confidence, raw_ref, fetched_at,
+      search_request_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `)
+
+  const tx = db.transaction((rows: NormalizedAwardFlight[]) => {
+    for (const f of rows) {
+      stmt.run(
+        f.itineraryHash, f.origin, f.destination, f.departureDate, f.returnDate,
+        f.departureTime, f.arrivalTime, f.airline,
+        f.operatingAirlines.join(",") || null, f.flightNumbers.join(",") || null,
+        f.stops, f.durationMinutes, f.cabin, f.loyaltyProgram, f.points,
+        f.taxes?.amount ?? null, f.taxes?.currency ?? null, f.availableSeats,
+        f.bookingUrl, f.provider, f.verificationLevel, f.providerConfidence,
+        opts.rawRef ?? null, f.fetchedAt, opts.searchRequestId ?? null,
+      )
+    }
+  })
+  tx(flights)
+  return flights.length
+}
+
+export interface AwardPriceStats {
+  loyaltyProgram: string
+  cabin: string
+  observations: number
+  minPoints: number
+  maxPoints: number
+  medianPoints: number
+  averagePoints: number
+  latestPoints: number
+  latestAt: string
+  firstAt: string
+  /** Lowest surcharge observed, per its currency. Null when never reported. */
+  minTaxes: number | null
+  minTaxesCurrency: string | null
+}
+
+/**
+ * Points observed BY THIS RADAR for a route, grouped by loyalty program and
+ * cabin. Not market-wide history — only what our own searches have seen.
+ */
+export function awardPriceHistory(
+  db: DB,
+  filter: {
+    origin: string
+    destination: string
+    departureDate?: string
+    cabin?: string
+    loyaltyProgram?: string
+    provider?: string
+    since?: string
+  },
+): AwardPriceStats[] {
+  const where: string[] = ["origin = ?", "destination = ?"]
+  const params: any[] = [filter.origin.toUpperCase(), filter.destination.toUpperCase()]
+
+  if (filter.departureDate)  { where.push("departure_date = ?");  params.push(filter.departureDate) }
+  if (filter.cabin)          { where.push("cabin = ?");           params.push(filter.cabin) }
+  if (filter.loyaltyProgram) { where.push("loyalty_program = ?"); params.push(filter.loyaltyProgram) }
+  if (filter.provider)       { where.push("provider = ?");        params.push(filter.provider) }
+  if (filter.since)          { where.push("fetched_at >= ?");     params.push(filter.since) }
+
+  const rows = db.prepare(`
+    SELECT loyalty_program, cabin, points, taxes_amount, taxes_currency, fetched_at
+    FROM award_prices
+    WHERE ${where.join(" AND ")}
+    ORDER BY fetched_at ASC
+  `).all(...params) as {
+    loyalty_program: string; cabin: string; points: number
+    taxes_amount: number | null; taxes_currency: string | null; fetched_at: string
+  }[]
+
+  const groups = new Map<string, typeof rows>()
+  for (const r of rows) {
+    const key = `${r.loyalty_program}|${r.cabin}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(r)
+  }
+
+  const out: AwardPriceStats[] = []
+  for (const [key, group] of groups) {
+    const [loyaltyProgram, cabin] = key.split("|") as [string, string]
+    const points = group.map(g => g.points).sort((a, b) => a - b)
+    const mid = Math.floor(points.length / 2)
+    const median = points.length % 2 === 0 ? (points[mid - 1]! + points[mid]!) / 2 : points[mid]!
+    const last = group[group.length - 1]!
+
+    // Lowest taxes tracked within a single currency — never compared across.
+    let minTaxes: number | null = null
+    let minTaxesCurrency: string | null = null
+    for (const g of group) {
+      if (g.taxes_amount === null) continue
+      if (minTaxes === null || (g.taxes_currency === minTaxesCurrency && g.taxes_amount < minTaxes)) {
+        minTaxes = g.taxes_amount
+        minTaxesCurrency = g.taxes_currency
+      }
+    }
+
+    out.push({
+      loyaltyProgram, cabin,
+      observations: group.length,
+      minPoints: points[0]!,
+      maxPoints: points[points.length - 1]!,
+      medianPoints: Math.round(median),
+      averagePoints: Math.round(points.reduce((a, b) => a + b, 0) / points.length),
+      latestPoints: last.points,
+      latestAt: last.fetched_at,
+      firstAt: group[0]!.fetched_at,
+      minTaxes, minTaxesCurrency,
+    })
+  }
+  return out.sort((a, b) => b.observations - a.observations)
+}
+
+// ─── balance_snapshots ───────────────────────────────────────────────────────
+
+export interface BalanceRow {
+  program: string
+  programKey: string
+  balance: number
+}
+
+/** Append one snapshot batch. Only real fetches are recorded, never fallbacks. */
+export function saveBalanceSnapshot(db: DB, balances: BalanceRow[], source: string): string {
+  const fetchedAt = nowIso()
+  const stmt = db.prepare(`
+    INSERT INTO balance_snapshots (program, program_key, balance, source, fetched_at)
+    VALUES (?, ?, ?, ?, ?)
+  `)
+  const tx = db.transaction(() => {
+    for (const b of balances) stmt.run(b.program, b.programKey, b.balance, source, fetchedAt)
+  })
+  tx()
+  return fetchedAt
+}
+
+/**
+ * The most recent snapshot batch, with its age. Null when nothing was ever
+ * snapshotted (or nothing young enough when maxAgeHours is given).
+ */
+export function latestBalanceSnapshot(
+  db: DB,
+  opts: { maxAgeHours?: number } = {},
+): { balances: BalanceRow[]; fetchedAt: string; ageMinutes: number } | null {
+  const latest = db.prepare(
+    `SELECT MAX(fetched_at) m FROM balance_snapshots`
+  ).get() as { m: string | null }
+  if (!latest.m) return null
+
+  const ageMinutes = Math.max(0, Math.round((Date.now() - new Date(latest.m).getTime()) / 60_000))
+  if (opts.maxAgeHours !== undefined && ageMinutes > opts.maxAgeHours * 60) return null
+
+  const rows = db.prepare(
+    `SELECT program, program_key, balance FROM balance_snapshots WHERE fetched_at = ? ORDER BY balance DESC`
+  ).all(latest.m) as { program: string; program_key: string; balance: number }[]
+
+  return {
+    balances: rows.map(r => ({ program: r.program, programKey: r.program_key, balance: r.balance })),
+    fetchedAt: latest.m,
+    ageMinutes,
+  }
+}
+
+// ─── search_results (persisted result payloads) ──────────────────────────────
+
+/** Persist the full result payload for a search — the dashboard's state. */
+export function saveSearchResult(db: DB, searchRequestId: number, payload: unknown): void {
+  db.prepare(`
+    INSERT INTO search_results (search_request_id, payload, created_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(search_request_id) DO UPDATE SET
+      payload = excluded.payload, created_at = excluded.created_at
+  `).run(searchRequestId, JSON.stringify(payload), nowIso())
+}
+
+/** The most recent persisted search result, or null when none exists yet. */
+export function latestSearchResult(db: DB): { searchRequestId: number; payload: unknown; createdAt: string } | null {
+  const row = db.prepare(
+    `SELECT search_request_id, payload, created_at FROM search_results ORDER BY created_at DESC, search_request_id DESC LIMIT 1`
+  ).get() as { search_request_id: number; payload: string; created_at: string } | undefined
+  if (!row) return null
+  try {
+    return { searchRequestId: row.search_request_id, payload: JSON.parse(row.payload), createdAt: row.created_at }
+  } catch {
+    return null
+  }
 }

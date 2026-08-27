@@ -12,9 +12,33 @@ export interface TransferPartner {
   fromName: string      // Display name
   to: string            // Destination program key  
   toName: string        // Display name
-  ratio: number         // 1.0 = 1:1, 0.5 = 2:1 (bad), 1.5 = 1:1.5 (bonus)
+  ratio: number         // STANDARD published ratio: 1.0 = 1:1, 2.0 = 1:2
   transferTime: string  // "instant" | "1-2 days" | "3-5 days"
   notes?: string
+  /**
+   * Temporary promotional bonus. Only populated from an explicit, dated
+   * source — a temporary bonus hardcoded as a permanent fact would poison
+   * every CPP calculation after it expires. No reliable structured feed for
+   * these exists today, so entries below carry no bonus; the field is the
+   * architecture for when one does.
+   */
+  bonus?: {
+    ratio: number       // effective ratio during the promotion
+    startDate: string   // YYYY-MM-DD inclusive
+    endDate: string     // YYYY-MM-DD inclusive
+    source: string      // where this was announced
+  }
+}
+
+/**
+ * The ratio in effect on a given date: the promotional ratio inside the bonus
+ * window, the standard ratio outside it.
+ */
+export function effectiveRatio(partner: TransferPartner, on: Date = new Date()): number {
+  if (!partner.bonus) return partner.ratio
+  const day = on.toISOString().slice(0, 10)
+  if (day >= partner.bonus.startDate && day <= partner.bonus.endDate) return partner.bonus.ratio
+  return partner.ratio
 }
 
 // ─── Transfer Partner Data ───────────────────────────────────────────────────
@@ -126,9 +150,10 @@ export function findFundingPaths(
   for (const tp of transferPaths) {
     const sourceBalance = balances.find(b => b.programKey === tp.from)
     if (!sourceBalance || sourceBalance.balance <= 0) continue
-    
-    const milesFromTransfer = Math.floor(sourceBalance.balance * tp.ratio)
-    const pointsNeededFromSource = Math.ceil(amountNeeded / tp.ratio)
+
+    const ratio = effectiveRatio(tp)
+    const milesFromTransfer = Math.floor(sourceBalance.balance * ratio)
+    const pointsNeededFromSource = Math.ceil(amountNeeded / ratio)
     
     paths.push({
       source: tp.from,
@@ -136,7 +161,7 @@ export function findFundingPaths(
       sourceBalance: sourceBalance.balance,
       pointsToTransfer: Math.min(pointsNeededFromSource, sourceBalance.balance),
       milesReceived: Math.min(milesFromTransfer, amountNeeded),
-      ratio: tp.ratio,
+      ratio,
       transferTime: tp.transferTime,
       covers: milesFromTransfer >= amountNeeded || (directBalance?.balance || 0) + milesFromTransfer >= amountNeeded,
       notes: tp.notes,
@@ -160,11 +185,13 @@ export function canAfford(
   toProgramKey: string,
   amountNeeded: number,
   balances: { programKey: string; program: string; balance: number }[]
-): { affordable: boolean; bestPath: string; details: string } {
+): { affordable: boolean; bestPath: string; details: string; totalAvailable: number; shortfall: number } {
   const paths = findFundingPaths(toProgramKey, amountNeeded, balances)
-  
+  const totalAvailable = paths.reduce((sum, p) => sum + p.milesReceived, 0)
+  const shortfall = Math.max(0, amountNeeded - totalAvailable)
+
   if (paths.length === 0) {
-    return { affordable: false, bestPath: "none", details: "No balance or transfer path available" }
+    return { affordable: false, bestPath: "none", details: "No balance or transfer path available", totalAvailable: 0, shortfall: amountNeeded }
   }
   
   // Direct balance covers it
@@ -173,7 +200,8 @@ export function canAfford(
     return { 
       affordable: true, 
       bestPath: "direct",
-      details: `Have ${direct.sourceBalance.toLocaleString()} ${direct.sourceName} (need ${amountNeeded.toLocaleString()})` 
+      details: `Have ${direct.sourceBalance.toLocaleString()} ${direct.sourceName} (need ${amountNeeded.toLocaleString()})`,
+      totalAvailable, shortfall: 0,
     }
   }
   
@@ -184,22 +212,24 @@ export function canAfford(
       affordable: true,
       bestPath: "transfer",
       details: `Transfer ${singleTransfer.pointsToTransfer.toLocaleString()} ${singleTransfer.sourceName} → ${amountNeeded.toLocaleString()} miles (${singleTransfer.transferTime})`,
+      totalAvailable, shortfall: 0,
     }
   }
   
   // Combination might work
-  const totalAvailable = paths.reduce((sum, p) => sum + p.milesReceived, 0)
   if (totalAvailable >= amountNeeded) {
     return {
       affordable: true,
       bestPath: "combination",
       details: `Combine multiple sources (${totalAvailable.toLocaleString()} available across ${paths.length} sources)`,
+      totalAvailable, shortfall: 0,
     }
   }
-  
+
   return {
     affordable: false,
     bestPath: "insufficient",
     details: `Only ${totalAvailable.toLocaleString()} available, need ${amountNeeded.toLocaleString()}`,
+    totalAvailable, shortfall,
   }
 }

@@ -216,7 +216,7 @@ export const ATF_AIRLINE_META: Record<ATFAirline, { name: string; programKey: st
 
 // ─── Booking URLs ─────────────────────────────────────────────────────────────
 
-function buildATFBookingUrl(
+export function buildATFBookingUrl(
   airline: ATFAirline,
   origin: string,
   destination: string,
