@@ -12,7 +12,7 @@ import Database from "better-sqlite3"
 import { createMemoryDb, migrate, type DB } from "../db/index.js"
 import {
   saveBalanceSnapshot, latestBalanceSnapshot, saveSearchResult, latestSearchResult,
-  recordSearchRequest, readUsage,
+  recordSearchRequest, readUsage, recordCallOutcome,
 } from "../db/repositories.js"
 import { effectiveRatio, canAfford, findFundingPaths, type TransferPartner } from "../transfer-partners.js"
 import { scoreFlights } from "../value-engine.js"
@@ -63,6 +63,88 @@ describe("loyalty balance snapshots", () => {
     expect(latestBalanceSnapshot(db, { maxAgeHours: 12 })).toBeNull()
     // But without a TTL constraint the stale batch is still retrievable.
     expect(latestBalanceSnapshot(db)).not.toBeNull()
+  })
+})
+
+describe("balances degrade without ever inventing a number", () => {
+  /**
+   * Loads the balances provider against a throwaway home directory, so the
+   * developer's real AwardWallet credentials are never touched and the module
+   * constant that points at them is recomputed per test.
+   */
+  async function loadWithHome(home: string, credentials?: object) {
+    if (credentials) {
+      const dir = path.join(home, ".openclaw", "credentials")
+      fs.mkdirSync(dir, { recursive: true })
+      fs.writeFileSync(path.join(dir, "awardwallet.json"), JSON.stringify(credentials))
+    }
+    process.env.USERPROFILE = home
+    process.env.HOME = home
+    vi.resetModules()
+    return import("../providers/balances/index.js")
+  }
+
+  let home: string
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "radar-home-"))
+  })
+
+  afterEach(() => {
+    fs.rmSync(home, { recursive: true, force: true })
+  })
+
+  it("serves a fresh snapshot without going near the network", async () => {
+    const { getBalances } = await loadWithHome(home, { apiKey: "synthetic", userId: "1" })
+    const fetchSpy = vi.spyOn(globalThis, "fetch")
+    saveBalanceSnapshot(db, syntheticBalances(), "awardwallet")
+
+    const result = await getBalances({ db })
+    expect(result.source).toBe("awardwallet-cached")
+    expect(result.balances).toHaveLength(syntheticBalances().length)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it("prefers a STALE snapshot over hardcoded numbers when the fetch fails", async () => {
+    // The important one: real-but-old beats plausible-but-invented. A stale
+    // balance is still the user's balance; the fallback list is somebody else's.
+    process.env.LOYALTY_BALANCE_TTL_HOURS = "0"
+    const { getBalances } = await loadWithHome(home, { apiKey: "synthetic", userId: "1" })
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"))
+
+    saveBalanceSnapshot(db, syntheticBalances(), "awardwallet")
+    const result = await getBalances({ db, forceRefresh: true })
+
+    expect(result.source).toBe("awardwallet-cached")
+    expect(result.balances).toHaveLength(syntheticBalances().length)
+    expect(result.fetchedAt).not.toBeNull()
+  })
+
+  it("falls back to the hardcoded list only when there is no snapshot at all", async () => {
+    const { getBalances } = await loadWithHome(home, { apiKey: "synthetic", userId: "1" })
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"))
+
+    const result = await getBalances({ db, forceRefresh: true })
+    expect(result.source).toBe("fallback")
+    expect(result.fetchedAt).toBeNull()
+  })
+
+  it("says unconfigured rather than degraded when no credentials exist", async () => {
+    const { balancesHealth } = await loadWithHome(home)
+    const health = balancesHealth(db)
+    expect(health.status).toBe("unconfigured")
+    expect(health.detail).toMatch(/no credentials/)
+  })
+
+  it("reports the real reason once a configured key has failed", async () => {
+    const { balancesHealth } = await loadWithHome(home, { apiKey: "synthetic" })
+    recordCallOutcome(db, "awardwallet", {
+      ok: false,
+      error: "BUSINESS_ADMINS_REQUIRE_PLUS: every admin must hold AwardWallet Plus",
+    })
+    const health = balancesHealth(db)
+    expect(health.status).toBe("degraded")
+    expect(health.detail).toMatch(/REQUIRE_PLUS/)
   })
 })
 
