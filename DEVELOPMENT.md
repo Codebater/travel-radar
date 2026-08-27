@@ -383,9 +383,21 @@ oame.json`:
   `{ "session": "…", "csrfSecret": "…", "sessionExpiresAt": <cookie expiry, ms epoch> }`.
   Refreshing an expired session is the same procedure. Verify with
   `npm run providers` (shows the expiry date, no network call).
-- **ATF**: `ATF_API_KEY` in `.env` (or the credentials file). ATF also
-  documents agent self-registration (`POST /api/v1/agent/register`) — run that
-  yourself if you want a fresh key; the app never creates accounts.
+- **ATF**: `npm run atf:register` provisions an anonymous free-tier agent
+  credential in one call (`--dry-run` shows the request first; `--force`
+  re-registers). The key is written to
+  `~/.openclaw/credentials/awardtravelfinder.json`, shown once by the vendor,
+  and never printed — only a `atf_…abcd` fingerprint. An existing
+  `ATF_API_KEY` in `.env` still works.
+  **MCP is not usable here**: `mcp.awardtravelfinder.com` is OAuth 2.1 whose
+  authorization server offers no `client_credentials` grant, so no token can be
+  minted without a human consent screen. The REST API with `X-API-Key` is the
+  supported unattended path — and the only surface that returns quota fields.
+  **Budget carefully**: one call per airline per search, free tier is
+  economy-only and only a few calls per day. Set `ATF_AIRLINES=iberia` (or
+  another short list) so a single search does not exhaust a day.
+  ATF answers "nothing available" with HTTP 400 — the client treats that as a
+  cacheable empty result, not an error, so repeats cost nothing.
 - **AwardWallet** (optional): `awardwallet.json` with `apiKey` + `userId`.
 - **Validate without spending**: `npm run providers` then
   `npm run observer:dry-run`. A minimal live check is one manual
