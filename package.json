@@ -2,13 +2,19 @@
   "type": "module",
   "scripts": {
     "prepare": "husky install",
+    "start": "tsx serve.ts",
+    "dev": "tsx serve.ts",
+    "search": "tsx search.ts",
+    "roame": "tsx roame-scraper.ts",
+    "atf": "tsx atf-scraper.ts",
     "build": "tsc",
-    "dev": "vite-node --watch awardwiz-scrapers/main-debug.ts",
-    "test": "vitest",
-    "lint": "eslint . --ext .ts,.tsx",
-    "search": "npx tsx cli.ts search",
-    "balances": "npx tsx cli.ts balances",
-    "setup": "npx tsx cli.ts setup"
+    "typecheck": "tsc",
+    "lint": "eslint search.ts serve.ts roame-scraper.ts atf-scraper.ts value-engine.ts sweet-spots.ts transfer-partners.ts tests",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:scrapers": "vitest run --config awardwiz-scrapers/vite.config.ts awardwiz-scrapers/scrapers.test.ts",
+    "dev:scrapers": "vite-node --watch awardwiz-scrapers/main-debug.ts",
+    "legacy:cli": "tsx cli.ts"
   },
   "name": "awardwiz",
   "engines": {
@@ -50,6 +56,7 @@
     "nodemailer": "^6.8.0",
     "npm-check": "^6.0.1",
     "rollup-plugin-visualizer": "^5.8.3",
+    "tsx": "^4.23.12",
     "typescript": "^5.6.3",
     "typescript-json-schema": "^0.58.1",
     "unplugin-icons": "^0.16.3",
