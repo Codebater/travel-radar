@@ -320,8 +320,16 @@ export function atfToUnified(atfResults: ATFResult[]): UnifiedFlightResult[] {
     for (const [cabinKey, cabin] of cabinEntries) {
       if (!cabin.available || !cabin.points) continue
 
-      // Normalize taxes: ATF returns taxes in GBP for BA/VA/IB routes
-      // Convert to USD at approximate 1.27 rate
+      // LEGACY PATH ONLY - this export feeds the standalone `--unified` CLI,
+      // whose UnifiedFlightResult carries a bare `taxes` number with nowhere to
+      // put a currency, so a single assumed currency is the least-bad option
+      // here. The rate is an approximation frozen in Phase 1 and is NOT
+      // trustworthy arithmetic.
+      //
+      // The accounted path (providers/award-flights/atf.ts, which feeds the
+      // database, the observer and the anomaly engine) deliberately does NOT
+      // convert: it records the currency ATF actually quoted, and the layers
+      // above refuse to mix currencies rather than inventing a rate.
       let taxesUSD = cabin.taxes || 0
       if (cabin.taxes_currency === "GBP") {
         taxesUSD = Math.round((cabin.taxes || 0) * 1.27)

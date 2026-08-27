@@ -29,12 +29,17 @@ tailwind.config = { theme: { extend: { colors: {
   <div class="flex items-center justify-between mb-6">
     <div>
       <h1 class="text-2xl font-extrabold text-white">📡 Observer</h1>
-      <p class="text-sm text-gray-400">Baseline observation collection — statistics are <span class="text-gray-300">prices observed by this radar</span>, not market data. No deal scoring yet.</p>
+      <p class="text-sm text-gray-400">Baseline observation collection — statistics are <span class="text-gray-300">prices observed by this radar</span>, not market data. Deal scoring runs in <span class="text-gold">shadow mode</span>: decisions are recorded, never sent.</p>
     </div>
     <a href="/" class="text-sm text-accent hover:underline">← Search dashboard</a>
   </div>
 
   <div id="schedulerBanner" class="mb-6"></div>
+
+  <h2 class="text-lg font-bold text-white mb-2">Observer Health <span class="text-xs text-gray-500 font-normal">(is unattended collection actually working?)</span></h2>
+  <div id="healthWarnings" class="mb-3"></div>
+  <div class="grid md:grid-cols-4 gap-4 mb-4" id="healthCards"></div>
+  <div class="bg-card rounded-xl p-4 mb-8 text-sm" id="healthDetail"></div>
 
   <div class="grid md:grid-cols-4 gap-4 mb-8" id="statCards"></div>
 
@@ -58,6 +63,27 @@ tailwind.config = { theme: { extend: { colors: {
       </thead>
       <tbody id="runsBody"></tbody>
     </table>
+  </div>
+
+  <div class="mb-8">
+    <div class="flex items-center justify-between mb-2">
+      <h2 class="text-lg font-bold text-white">Shadow Deals</h2>
+      <span class="badge-yellow text-[11px] font-bold px-2 py-1 rounded-full tracking-wider">EXPERIMENTAL &mdash; NO ALERTS</span>
+    </div>
+    <p class="text-xs text-gray-500 mb-2">
+      What the engine <span class="text-gray-300">thinks</span> is exceptional, measured against prices this radar has observed before.
+      Scores are an untested opinion, not a recommendation. Nothing here was sent anywhere.
+      Your verdict is stored locally so the algorithm can be checked against human judgment.
+    </p>
+    <div class="bg-card rounded-xl overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="text-left text-gray-400 border-b border-gray-700">
+          <tr><th>Score</th><th>Route</th><th>Cabin</th><th>Dates</th><th>Price / points</th><th>Observed median</th><th>Diff</th><th>Sample</th><th>Reasons</th><th>Source</th><th>Verdict</th></tr>
+        </thead>
+        <tbody id="shadowBody"></tbody>
+      </table>
+    </div>
+    <p class="text-xs text-gray-500 mt-1" id="shadowMeta"></p>
   </div>
 
   <div class="grid md:grid-cols-2 gap-6">
@@ -99,6 +125,118 @@ function statusBadge(s) {
   const cls = s === 'success' ? 'badge-green' : (s === 'partial' || s === 'skipped_auth') ? 'badge-yellow'
             : s === 'dry-run' ? 'badge-blue' : 'badge-red';
   return `<span class="${cls} text-[10px] px-1.5 py-0.5 rounded-full">${esc(s)}</span>`;
+}
+
+function bytes(n) {
+  if (!n) return '0 MB';
+  return (n / 1e6).toFixed(1) + ' MB';
+}
+function dur(sec) {
+  if (sec === null || sec === undefined) return '—';
+  if (sec < 3600) return Math.round(sec / 60) + 'm';
+  if (sec < 86400) return (sec / 3600).toFixed(1) + 'h';
+  return (sec / 86400).toFixed(1) + 'd';
+}
+function stamp(iso) {
+  return iso ? esc(iso.replace('T', ' ').slice(0, 16)) + ' UTC' : '—';
+}
+
+async function loadHealth() {
+  const h = await (await fetch('./api/observer/health')).json();
+  const s = h.scheduler;
+
+  document.getElementById('healthWarnings').innerHTML = h.warnings.length
+    ? h.warnings.map(w => `<div class="badge-yellow rounded-lg px-4 py-2 text-sm mb-1">${esc(w)}</div>`).join('')
+    : '<div class="badge-green rounded-lg px-4 py-2 text-sm">No warnings — unattended collection looks healthy.</div>';
+
+  const state = !s.running ? ['STOPPED', 'text-warn'] : s.stale ? ['STALE', 'text-gold'] : ['RUNNING', 'text-emerald'];
+  document.getElementById('healthCards').innerHTML = [
+    ['SCHEDULER', `<span class="${state[1]}">${state[0]}</span>`, s.running ? `up ${dur(s.uptimeSeconds)}` : 'npm run observer:start'],
+    ['LAST HEARTBEAT', s.running ? `${s.heartbeatAgeSeconds}s` : '—', s.running ? `${s.ticks ?? 0} ticks · ${bytes(s.rssBytes)} RSS` : 'no lease held'],
+    ['RUNS 24H / 7D', `${h.runs.last24h.total}<span class="text-base text-gray-500"> / ${h.runs.last7d.total}</span>`,
+      `${h.runs.last7d.success} ok · ${h.runs.last7d.partial} partial · ${h.runs.last7d.failed} failed`],
+    ['CACHE HIT RATE', h.runs.last7d.cacheHitRate === null ? '—' : h.runs.last7d.cacheHitRate + '%',
+      `${h.runs.last7d.providerCalls} live calls in 7d`],
+  ].map(([t, v, sub]) => `<div class="bg-card rounded-xl p-4">
+      <div class="text-[11px] text-gray-500 font-semibold tracking-wider">${t}</div>
+      <div class="text-2xl font-extrabold text-white mt-1">${v}</div>
+      <div class="text-[11px] text-gray-500 mt-1">${sub}</div>
+    </div>`).join('');
+
+  const failures = [...h.authFailures24h, ...h.providerFailures24h];
+  document.getElementById('healthDetail').innerHTML = `
+    <div class="grid md:grid-cols-3 gap-4">
+      <div>
+        <div class="text-gray-500 text-xs font-semibold tracking-wider mb-1">OBSERVATION</div>
+        <div>Last successful: <span class="text-gray-300">${stamp(h.observation.lastSuccessfulAt)}</span>${h.observation.lastSuccessfulJob ? ` <span class="text-gray-500">(${esc(h.observation.lastSuccessfulJob)})</span>` : ''}</div>
+        <div>Next scheduled: <span class="text-gray-300">${stamp(h.observation.nextScheduledAt)}</span>${h.observation.nextScheduledJob ? ` <span class="text-gray-500">(${esc(h.observation.nextScheduledJob)})</span>` : ''}</div>
+        <div>Total: <span class="text-gray-300">${h.observation.totals.cash.toLocaleString()} cash + ${h.observation.totals.award.toLocaleString()} award</span></div>
+        <div class="text-gray-500">24h +${h.observation.last24h.cash}/+${h.observation.last24h.award} · 7d +${h.observation.last7d.cash}/+${h.observation.last7d.award}</div>
+      </div>
+      <div>
+        <div class="text-gray-500 text-xs font-semibold tracking-wider mb-1">SCHEDULE QUALITY</div>
+        <div>Missed runs: <span class="${h.missedRuns.length ? 'text-gold' : 'text-gray-300'}">${h.missedRuns.length}</span>${h.missedRuns.length ? ` <span class="text-gray-500">(${esc(h.missedRuns.map(m => m.job + ' ' + m.overdueHours + 'h').join(', '))})</span>` : ''}</div>
+        <div>Delayed runs (7d): <span class="text-gray-300">${h.delayedRuns.length}</span></div>
+        <div>Backoff active: <span class="${h.backoff.length ? 'text-gold' : 'text-gray-300'}">${h.backoff.length ? esc(h.backoff.map(b => b.job + ' x' + b.multiplier).join(', ')) : 'none'}</span></div>
+        <div>Provider failures (24h): <span class="${failures.length ? 'text-gold' : 'text-gray-300'}">${failures.length ? esc(failures.map(f => f.provider + ' ' + f.kind + ' x' + f.count).join(', ')) : 'none'}</span></div>
+      </div>
+      <div>
+        <div class="text-gray-500 text-xs font-semibold tracking-wider mb-1">RESOURCES</div>
+        <div>Database: <span class="text-gray-300">${bytes(h.resources.dbTotalBytes)}</span> <span class="text-gray-500">(${bytes(h.resources.dbWalBytes)} WAL)</span></div>
+        <div>Backups: <span class="text-gray-300">${h.resources.backupCount}</span> <span class="text-gray-500">kept ${h.resources.backupRetention}, every ${h.resources.backupIntervalHours}h</span></div>
+        <div class="text-gray-500">newest ${stamp(h.resources.backupNewestAt)} · ${bytes(h.resources.backupBytes)}</div>
+        <div>Scheduler process: <span class="text-gray-300">${s.rssBytes ? bytes(s.rssBytes) : '—'}</span> <span class="text-gray-500">${s.cpuSeconds !== null ? s.cpuSeconds + 's CPU' : ''}</span></div>
+      </div>
+    </div>`;
+}
+
+async function loadShadow() {
+  const d = await (await fetch('./api/anomaly/candidates?limit=25')).json();
+  const rows = d.candidates || [];
+  document.getElementById('shadowMeta').textContent =
+    `${rows.length} candidate(s) at or above ${d.threshold}/100 · engine ${d.engineVersion}, weights ${d.weightsVersion} · alerts ${d.alertsEnabled ? 'ON' : 'OFF'}`;
+
+  document.getElementById('shadowBody').innerHTML = rows.map(c => {
+    const value = c.type === 'cash'
+      ? `${c.priceAmount} ${esc(c.priceCurrency || '')}`
+      : `${(c.points || 0).toLocaleString()} pts${c.taxesAmount !== null ? ` + ${c.taxesAmount} ${esc(c.taxesCurrency || '')}` : ''}`;
+    const median = c.type === 'cash'
+      ? `${c.baseline.median} ${esc(c.priceCurrency || '')}`
+      : `${(c.baseline.median || 0).toLocaleString()} pts`;
+    const thin = ['INSUFFICIENT', 'VERY_LOW', 'LOW'].includes(c.baseline.confidence);
+    const verdict = c.feedback
+      ? `<span class="badge-blue text-[10px] px-1.5 py-0.5 rounded-full">${esc(c.feedback.verdict)}</span>`
+      : ['GOOD_DEAL', 'NORMAL', 'BAD_SIGNAL'].map(v =>
+          `<button onclick="sendFeedback(${c.id}, '${v}')" class="text-[10px] px-1.5 py-0.5 rounded-full border border-gray-600 text-gray-400 hover:text-white hover:border-accent mr-1">${esc(v.replace('_', ' '))}</button>`
+        ).join('');
+    return `<tr class="border-b border-gray-800">
+      <td class="font-extrabold text-white">${c.score}</td>
+      <td class="font-semibold">${esc(c.route)}</td>
+      <td class="text-gray-400">${esc(c.cabin)}</td>
+      <td class="text-gray-400">${esc(c.departureDate)}${c.returnDate ? ' ↩ ' + esc(c.returnDate) : ''}</td>
+      <td class="font-semibold">${value}${c.loyaltyProgram ? ` <span class="text-gray-500">${esc(c.loyaltyProgram)}</span>` : ''}</td>
+      <td class="text-gray-400">${median}</td>
+      <td class="text-emerald">-${c.baseline.percentBelowMedian}%</td>
+      <td class="${thin ? 'text-gold' : 'text-gray-400'}">${c.baseline.count} · ${esc(c.baseline.confidence)}</td>
+      <td class="text-gray-500 text-[11px]">${esc(c.reasons.map(r => r.code).join(' '))}</td>
+      <td class="text-gray-500 text-[11px]">${esc(c.provider)} · ${esc(c.verificationLevel)}${c.cpp && c.cpp.cpp !== null ? ` · ${c.cpp.cpp}c/pt` : ''}</td>
+      <td>${verdict}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="11" class="text-gray-500 py-4">No shadow candidates yet — the engine needs a baseline of at least a few comparable observations before it will say anything.</td></tr>';
+}
+
+async function sendFeedback(id, verdict) {
+  try {
+    const resp = await fetch('./api/anomaly/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidateId: id, verdict }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
+    await loadShadow();
+  } catch (err) {
+    alert('Could not record feedback: ' + err.message);
+  }
 }
 
 async function load() {
@@ -199,8 +337,13 @@ async function showRoute(from, to) {
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-load();
-setInterval(load, 30000);
+function loadAll() {
+  load().catch(err => console.error('status', err));
+  loadHealth().catch(err => console.error('health', err));
+  loadShadow().catch(err => console.error('shadow', err));
+}
+loadAll();
+setInterval(loadAll, 30000);
 </script>
 </body>
 </html>

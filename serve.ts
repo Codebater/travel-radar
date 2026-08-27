@@ -24,6 +24,10 @@ import { getDb } from "./db/index.js"
 import { allUsage, priceHistory, awardPriceHistory, latestSearchResult, saveSearchResult } from "./db/repositories.js"
 import { listJobs, listRuns, readLease } from "./observer/store.js"
 import { projectMonthlyBudget } from "./observer/budget.js"
+import { observerHealth } from "./observer/health.js"
+import { listCandidates, getCandidate, recordFeedback } from "./anomaly/store.js"
+import { buildReport } from "./anomaly/report.js"
+import { loadAnomalyConfig } from "./anomaly/config.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
@@ -157,6 +161,126 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
+    return
+  }
+
+  // Route: /api/observer/health — §C/§D unattended-operation health.
+  // Read-only and cheap: pure SQL over tables the system already writes.
+  if (url.pathname === "/api/observer/health") {
+    try {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(observerHealth(getDb()), null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/anomaly/candidates — §V the shadow deal list.
+  // EXPERIMENTAL. These are stored decisions, not alerts: nothing was sent to
+  // anybody, and this endpoint is the only way to see them.
+  if (url.pathname === "/api/anomaly/candidates") {
+    try {
+      const db = getDb()
+      const config = loadAnomalyConfig()
+      const min = Number(url.searchParams.get("min") ?? config.candidateThreshold)
+      const limitRaw = Number(url.searchParams.get("limit") ?? 25)
+      const typeRaw = url.searchParams.get("type")
+      if (typeRaw && !["cash", "award"].includes(typeRaw)) throw new BadRequest("type must be cash or award")
+      const candidates = listCandidates(db, {
+        minScore: Number.isFinite(min) ? min : config.candidateThreshold,
+        limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 25,
+        type: (typeRaw as "cash" | "award") ?? undefined,
+        status: "candidate",
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        mode: "shadow",
+        alertsEnabled: false,
+        disclaimer: "EXPERIMENTAL — scores are this radar's own opinion of its own observations. No alerts are sent.",
+        threshold: config.candidateThreshold,
+        engineVersion: config.engineVersion,
+        weightsVersion: config.weightsVersion,
+        candidates,
+      }, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/anomaly/report — §X false-positive analysis.
+  if (url.pathname === "/api/anomaly/report") {
+    try {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(buildReport(getDb(), { since: url.searchParams.get("since") || undefined }), null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: POST /api/anomaly/feedback — §W the ONLY write endpoint on this
+  // server, and deliberately the narrowest one possible: it records a verdict
+  // from a fixed vocabulary against an existing candidate. It cannot start,
+  // stop or schedule anything; scheduler control stays CLI-only.
+  //
+  // Three gates, because a browser tab on this machine is a real attacker:
+  //   1. loopback only  — nothing on the LAN can reach it
+  //   2. JSON only      — blocks the form POST that needs no CORS preflight
+  //   3. POST is never advertised in Allow-Methods, so a cross-origin fetch
+  //      fails its preflight before the request is ever made
+  if (url.pathname === "/api/anomaly/feedback") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" })
+      res.end(JSON.stringify({ error: "POST only" }))
+      return
+    }
+    const remote = req.socket.remoteAddress || ""
+    const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1"
+    if (!isLoopback) {
+      console.warn(`⚠️ Blocked non-loopback feedback write from ${remote}`)
+      res.writeHead(403, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "feedback may only be recorded from this machine" }))
+      return
+    }
+    if (!(req.headers["content-type"] || "").includes("application/json")) {
+      res.writeHead(415, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "Content-Type must be application/json" }))
+      return
+    }
+
+    let body = ""
+    let tooLarge = false
+    req.on("data", chunk => {
+      body += chunk
+      if (body.length > 4096) { tooLarge = true; req.destroy() }
+    })
+    req.on("end", () => {
+      if (tooLarge) return
+      try {
+        const payload = JSON.parse(body || "{}")
+        const id = Number(payload.candidateId)
+        const verdict = String(payload.verdict || "")
+        if (!Number.isInteger(id) || id <= 0) throw new BadRequest("candidateId must be a positive integer")
+        if (!["GOOD_DEAL", "NORMAL", "BAD_SIGNAL"].includes(verdict)) {
+          throw new BadRequest("verdict must be GOOD_DEAL, NORMAL or BAD_SIGNAL")
+        }
+        const note = typeof payload.note === "string" ? payload.note.slice(0, 500) : null
+        recordFeedback(getDb(), id, verdict as any, { note, source: "ui" })
+        const updated = getCandidate(getDb(), id)
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ ok: true, candidateId: id, verdict, feedback: updated?.feedback ?? null }))
+      } catch (err) {
+        const status = err instanceof BadRequest ? 400 : 500
+        res.writeHead(status, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: (err as Error).message }))
+      }
+    })
     return
   }
 

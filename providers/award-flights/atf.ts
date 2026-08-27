@@ -238,14 +238,23 @@ export class ATFAwardProvider implements AwardFlightProvider {
         if (!cabin?.available || !cabin.points) continue
         if (!VALID_CABINS.includes(cabinKey as CabinClass)) continue
 
-        // GBP taxes converted at an approximate fixed rate — same behaviour as
-        // the Phase 2 pipeline; kept until a real FX layer exists.
-        let taxesAmount = cabin.taxes ?? null
-        let taxesCurrency = cabin.taxes_currency || "USD"
-        if (taxesAmount !== null && taxesCurrency === "GBP") {
-          taxesAmount = Math.round(taxesAmount * 1.27)
-          taxesCurrency = "USD"
-        }
+        // The surcharge is recorded in the currency ATF actually quoted.
+        //
+        // This used to convert GBP to USD at a hardcoded 1.27, inherited from
+        // the Phase 1 script. That rate is a guess frozen at the moment it was
+        // typed, and Phase 5 does arithmetic on these numbers: award taxes feed
+        // a baseline, a score component, and a CPP that SUBTRACTS them from a
+        // cash fare. A stale invented rate would corrupt all three silently and
+        // still look like data.
+        //
+        // Everything downstream already handles multiple currencies honestly —
+        // award history groups surcharges per currency, the anomaly baseline
+        // uses the dominant one, and the CPP calculation refuses to mix them
+        // and returns no CPP rather than a plausible wrong one. Losing CPP on
+        // a GBP-priced award until a real FX layer exists is the correct
+        // trade: a missing number beats a fabricated one.
+        const taxesAmount = cabin.taxes ?? null
+        const taxesCurrency = cabin.taxes_currency || "USD"
 
         out.push({
           // ATF has no times or flight numbers, so this identity is

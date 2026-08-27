@@ -3,9 +3,11 @@
   "updated": "2026-08-27",
   "notes": [
     "'integrated' means THIS application's provider wrapper can return the program today. Roame is searched with mileagePrograms:[ALL]; the programs it actually returns are route-dependent.",
-    "The ATF integration calls 5 fixed airline endpoints (british_airways, qatar_airways, cathay_pacific, virgin_atlantic, iberia) and is NOT YET CONFIGURED in this installation — no ATF program has been observed live here.",
+    "The ATF integration calls fixed per-airline endpoints (british_airways, qatar_airways, cathay_pacific, virgin_atlantic, iberia). It IS configured here since 2026-08-27 via an autonomous-agent REST key. The free tier is economy-only (the API reports cabin_access: 'economy_only') with a 50-call monthly allowance, so ATF cannot answer any business or first question on this account, and the airline subset is configurable via ATF_AIRLINES (default 'iberia') because each airline is a separate call.",
     "Absence on a route is NOT proof a program is unsupported: award inventory is route- and date-specific. Only MILES_AND_MORE was probed directly by program key and found empty.",
-    "Lufthansa-group FIRST partner awards ended ~2026-06-01 (secondary reporting), and our probes confirm zero LH-group First through partner programs. A Miles & More source is REQUIRED for Austrian/Lufthansa/Swiss First."
+    "Lufthansa-group FIRST partner awards ended ~2026-06-01 (secondary reporting), and our probes confirm zero LH-group First through partner programs. A Miles & More source is REQUIRED for Austrian/Lufthansa/Swiss First.",
+    "ATF does not appear to charge for a 'no availability' answer: after 8 empty Iberia probes the provider still reported 50/50 remaining, and only a call that returned data decremented it. Our local accounting still counts every attempt, which is the conservative direction.",
+    "ATF Iberia returned NO availability on 10 consecutive probes (MAD-MEX x3, MAD-CUN x3, MAD-LHR x2, MAD-JFK, plus one earlier MAD-LHR), including short-haul MAD-LHR where Avios space is normally plentiful, and MAD-JFK on the very date BA LHR-JFK returned 6 economy seats. Iberia calls also take ~13s against BA's ~0.7s. That pattern points at ATF's Iberia SOURCE, not at Iberia's inventory."
   ],
   "programs": {
     "MILES_AND_MORE": {
@@ -46,39 +48,38 @@
       "observedLive": "2026-08-27: returns fresh results on all three probed routes but THIN — 4 fares VIE→BKK (from 342,000, poor value), 1 VIE→CUN (68,500+$402 on KL), 3 VIE→MEX (from 76,000+$402 on KL). Classification: WORKING but sparse; the May-2025 login-wall degradation reported industry-wide is NOT blocking Roame's access."
     },
     "IBERIA": {
-      "displayName": "Iberia Plus (now 'Iberia Club')",
+      "displayName": "Iberia Plus (Avios)",
       "roame": {
-        "covered": "yes",
+        "covered": "unknown",
         "integrated": true,
-        "evidence": "vendor-documented: roame.travel/programs lists 'Iberia Plus'; help-center list includes 'Iberia Plus Avios'; AwardWallet (2026-08-02) lists 'Iberia Club'.",
+        "evidence": "not separately probed by program key; Roame searches with mileagePrograms:[ALL] and has not returned an IBERIA-keyed fare on our routes.",
         "dateChecked": "2026-08-27"
       },
       "atf": {
-        "covered": "yes",
+        "covered": "documented",
         "integrated": true,
-        "evidence": "code + vendor-documented: our integration calls /api/v1/iberia/availability; vendor README puts Iberia in the full-availability set (availability + monthly calendars).",
+        "evidence": "vendor lists iberia among its airline endpoints and the endpoint answers, but see observedLive: every probe came back empty.",
         "dateChecked": "2026-08-27"
       },
-      "otherCandidates": "seats.aero Iberia is BETA and broken as of 2026-08-27 (zero results, 'temporary issues'); PointsYeah dropped Iberia from its status page.",
-      "status": "DOCUMENTED_ONLY",
-      "observedLive": "Not returned on VIE→BKK, VIE→CUN or VIE→MEX (2026-08-27). These are not natural Iberia routings; ATF — which covers Iberia in its full-availability set — is not yet configured, so Iberia remains unproven in this installation."
+      "status": "DEGRADED",
+      "observedLive": "2026-08-27, 10 probes, ZERO availability: MAD-MEX (2026-11-12, 2027-02-03, 2026-11-18, 2027-03-10 not reached), MAD-CUN (2027-02-04, 2027-01-20), MAD-LHR (2026-10-21, 2026-11-18), MAD-JFK (2026-11-18). Each answered HTTP 400 'No availability found'. Two things make 'Iberia simply has no seats' the weaker explanation: MAD-LHR short-haul essentially always carries Avios economy space, and MAD-JFK was empty on the SAME DATE that BA LHR-JFK returned 6 seats through the same API and key. Iberia calls also consistently take ~13 seconds versus ~0.7s for BA, which looks like an upstream search timing out and being reported as an empty result. Treated as DEGRADED - the integration works, the data does not. Not retried on a schedule."
     },
     "BRITISH_AIRWAYS": {
-      "displayName": "British Airways Club (Avios)",
+      "displayName": "British Airways Executive Club (Avios)",
       "roame": {
         "covered": "yes",
         "integrated": true,
-        "evidence": "vendor-documented: roame.travel/programs lists 'British Airways Executive Club'.",
+        "evidence": "observed live in this project's Phase 3/4 captures (BA/WY metal priced by AMERICAN and BRITISH_AIRWAYS keys).",
         "dateChecked": "2026-08-27"
       },
       "atf": {
         "covered": "yes",
         "integrated": true,
-        "evidence": "code + vendor-documented: integrated endpoint; vendor full-availability set.",
+        "evidence": "OBSERVED LIVE 2026-08-27: GET /api/v1/british_airways/availability LHR->JFK 2026-11-18 returned HTTP 200 with economy available, 6 seats, 27,500 Avios, 75 GBP surcharge, response_type 'calendar', data_window 2026-08-28..2026-11-27 (72 dates). Normalised, persisted to award_prices and cached end to end through the provider layer; the identical repeat cost 0 calls (715ms -> 0ms).",
         "dateChecked": "2026-08-27"
       },
-      "status": "DOCUMENTED_ONLY",
-      "observedLive": "Not returned on the three probed routes (2026-08-27); BA metal appeared but priced by AMERICAN, not by BA Avios."
+      "status": "OBSERVED_LIVE",
+      "observedLive": "2026-08-27 via ATF. This is the first and so far only ATF program observed returning real fares in this installation, and it is what proves ATF normalisation, taxes/currency handling, persistence and caching actually work."
     },
     "QATAR": {
       "displayName": "Qatar Airways Privilege Club (Avios)",
