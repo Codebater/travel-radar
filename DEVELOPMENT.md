@@ -371,6 +371,11 @@ npm run observer:status
 
 ### Credentials for live award validation
 
+- **Roame program keys**: Roame's identifier for Miles & More is `LUFTHANSA`
+  (`MILES_AND_MORE` is rejected as an invalid MileageProgram). GraphQL
+  introspection is disabled, so the enum can only be probed one value at a
+  time. As of 2026-08-27 the key is accepted but returns no fares — see
+  `providers/award-flights/coverage.json`.
 - **Roame**: log in at roame.travel → DevTools → Application → Cookies → copy
   the `session` and `csrfSecret` values into
   `%USERPROFILE%\.openclaw\credentials
