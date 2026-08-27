@@ -24,6 +24,8 @@ import { planRun, DEFAULT_DATE_STRATEGY } from "./sampling.js"
 import { projectMonthlyBudget } from "./budget.js"
 import { executeJob, awardProviderPreflight } from "./engine.js"
 import { runScheduler } from "./scheduler.js"
+import { observerHealth } from "./health.js"
+import { backupDatabase, listBackups } from "../db/backup.js"
 import type { DateStrategy, ObservationJob } from "./types.js"
 import type { CabinClass } from "../providers/cash-flights/types.js"
 
@@ -207,6 +209,77 @@ async function main() {
       break
     }
 
+    case "health": {
+      const h = observerHealth(db)
+      const mb = (n: number) => `${(n / 1e6).toFixed(1)} MB`
+      const dur = (sec: number | null) => sec === null ? "—"
+        : sec < 3600 ? `${Math.round(sec / 60)}m`
+        : sec < 86400 ? `${(sec / 3600).toFixed(1)}h` : `${(sec / 86400).toFixed(1)}d`
+
+      console.log("Observer health\n")
+      const s = h.scheduler
+      console.log(`Scheduler          ${s.running ? (s.stale ? "STALE (lease held, heartbeat dead)" : "RUNNING") : "STOPPED"}`)
+      if (s.running) {
+        console.log(`  holder           ${s.holder}`)
+        console.log(`  uptime           ${dur(s.uptimeSeconds)}  (${s.ticks ?? 0} ticks)`)
+        console.log(`  last heartbeat   ${s.heartbeatAgeSeconds}s ago${s.stopRequested ? "  — STOP REQUESTED" : ""}`)
+        console.log(`  footprint        ${s.rssBytes ? mb(s.rssBytes) : "—"} RSS, ${s.cpuSeconds ?? "—"}s CPU`)
+      }
+
+      const o = h.observation
+      console.log(`\nLast observation   ${o.lastSuccessfulAt ?? "never"}${o.lastSuccessfulJob ? ` (${o.lastSuccessfulJob})` : ""}`)
+      console.log(`Next scheduled     ${o.nextScheduledAt ?? "—"}${o.nextScheduledJob ? ` (${o.nextScheduledJob})` : ""}`)
+      console.log(`Observations       ${o.totals.cash} cash + ${o.totals.award} award  |  24h: +${o.last24h.cash}/+${o.last24h.award}  7d: +${o.last7d.cash}/+${o.last7d.award}`)
+
+      for (const [label, w] of [["24h", h.runs.last24h], ["7d", h.runs.last7d]] as const) {
+        console.log(
+          `Runs ${label.padEnd(15)}${w.total} (${w.success} ok, ${w.partial} partial, ${w.failed} failed, ${w.skippedAuth} auth-skipped)` +
+          `  cache hit rate ${w.cacheHitRate === null ? "n/a" : w.cacheHitRate + "%"}  live calls ${w.providerCalls}`,
+        )
+      }
+
+      if (h.missedRuns.length) {
+        console.log(`\n⚠ Missed runs:`)
+        for (const m of h.missedRuns) console.log(`   ${m.job} due ${m.dueAt} (${m.overdueHours}h overdue)`)
+      }
+      if (h.delayedRuns.length) {
+        console.log(`\nDelayed runs (last 7d):`)
+        for (const d of h.delayedRuns.slice(0, 5)) console.log(`   ${d.job} ran ${d.delayMinutes}m after ${d.scheduledFor}`)
+      }
+      if (h.backoff.length) {
+        console.log(`\nBackoff active:`)
+        for (const b of h.backoff) console.log(`   ${b.job}: ${b.consecutiveFailures} consecutive failures → interval x${b.multiplier}`)
+      }
+      if (h.authFailures24h.length || h.providerFailures24h.length) {
+        console.log(`\nProvider problems (24h):`)
+        for (const e of [...h.authFailures24h, ...h.providerFailures24h]) {
+          console.log(`   ${e.provider.padEnd(13)} ${e.kind.padEnd(8)} x${e.count}  ${(e.lastDetail ?? "").slice(0, 90)}`)
+        }
+      }
+
+      const r = h.resources
+      console.log(`\nDatabase           ${mb(r.dbTotalBytes)} (${mb(r.dbBytes)} + ${mb(r.dbWalBytes)} WAL)`)
+      console.log(`Backups            ${r.backupCount} kept (retain ${r.backupRetention}, every ${r.backupIntervalHours}h), newest ${r.backupNewestAt ?? "none"}, ${mb(r.backupBytes)} total`)
+      console.log(`This process       ${mb(r.processRssBytes)} RSS, ${r.processCpuSeconds}s CPU, up ${dur(r.processUptimeSeconds)}`)
+
+      if (h.warnings.length) {
+        console.log(`\nWarnings:`)
+        for (const warning of h.warnings) console.log(`   ⚠ ${warning}`)
+      } else {
+        console.log(`\n✅ No warnings.`)
+      }
+      break
+    }
+
+    case "backup": {
+      const result = await backupDatabase(db)
+      console.log(`✅ ${result.path}`)
+      console.log(`   ${(result.bytes / 1e6).toFixed(1)} MB in ${result.durationMs}ms`)
+      if (result.pruned.length) console.log(`   pruned ${result.pruned.length} old backup(s) beyond retention`)
+      console.log(`   ${listBackups().length} backup(s) on disk`)
+      break
+    }
+
     case "enable":
     case "disable": {
       const name = args[0]
@@ -222,6 +295,8 @@ async function main() {
 Commands:
   seed        create/update jobs from config/travel-profile.json
   status      jobs, lease, recent runs, usage, budget projection
+  health      unattended-operation health: uptime, missed/delayed runs, failures, resources
+  backup      take a timestamped SQLite backup now and apply retention
   dry-run     plans + expected cost, ZERO external calls
   run [name] [--force]  execute due jobs (or one job) once
   start       run the scheduler loop (blocks; Ctrl+C or observer:stop to end)

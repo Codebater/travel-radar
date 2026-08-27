@@ -11,6 +11,10 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 
+# Phase 5 backups. Full copies of the database, so they carry the same
+# sensitive content (loyalty balance snapshots) and must never be committed.
+data/backups/
+
 # Generated search output and caches
 results*.json
 roame-results*.json

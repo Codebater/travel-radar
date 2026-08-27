@@ -166,11 +166,13 @@ function rowToRun(r: any): ObservationRun {
   }
 }
 
-export function startRun(db: DB, jobId: number, trigger: ObservationRun["trigger"]): number {
+export function startRun(
+  db: DB, jobId: number, trigger: ObservationRun["trigger"], scheduledFor?: string | null,
+): number {
   const info = db.prepare(`
-    INSERT INTO observation_runs (job_id, started_at, status, trigger)
-    VALUES (?, ?, 'running', ?)
-  `).run(jobId, nowIso(), trigger)
+    INSERT INTO observation_runs (job_id, started_at, status, trigger, scheduled_for)
+    VALUES (?, ?, 'running', ?, ?)
+  `).run(jobId, nowIso(), trigger, scheduledFor ?? null)
   return Number(info.lastInsertRowid)
 }
 
@@ -179,10 +181,12 @@ export function startRun(db: DB, jobId: number, trigger: ObservationRun["trigger
  * insert share one immediate transaction, so a concurrent manual run and a
  * scheduler tick cannot both slip past the guard. Returns null when refused.
  */
-export function tryStartRun(db: DB, jobId: number, trigger: ObservationRun["trigger"]): number | null {
+export function tryStartRun(
+  db: DB, jobId: number, trigger: ObservationRun["trigger"], scheduledFor?: string | null,
+): number | null {
   const tx = db.transaction((): number | null => {
     if (hasRunningRun(db, jobId)) return null
-    return startRun(db, jobId, trigger)
+    return startRun(db, jobId, trigger, scheduledFor)
   })
   return tx.immediate()
 }
@@ -295,11 +299,25 @@ export function acquireLease(db: DB, holder: string, ttlSeconds: number, at: Dat
  *  heartbeat is refreshed even while a stop is pending — the holder remains
  *  the owner until it actually releases, so a stop-then-restart can never
  *  produce two live schedulers via a "stale" takeover. */
-export function heartbeatLease(db: DB, holder: string, at: Date = new Date()): { ok: boolean; stopRequested: boolean } {
+export function heartbeatLease(
+  db: DB,
+  holder: string,
+  at: Date = new Date(),
+  metrics?: { rssBytes: number; cpuSeconds: number; ticks: number },
+): { ok: boolean; stopRequested: boolean } {
   const lease = readLease(db)
   if (!lease || lease.holder !== holder) return { ok: false, stopRequested: false }
-  db.prepare(`UPDATE scheduler_state SET heartbeat_at = ? WHERE id = 1 AND holder = ?`)
-    .run(at.toISOString(), holder)
+  // §AD the scheduler's own footprint rides along on the heartbeat, so the
+  // numbers are as fresh as the liveness signal and cost no extra write.
+  if (metrics) {
+    db.prepare(`
+      UPDATE scheduler_state SET heartbeat_at = ?, rss_bytes = ?, cpu_seconds = ?, ticks = ?
+      WHERE id = 1 AND holder = ?
+    `).run(at.toISOString(), metrics.rssBytes, metrics.cpuSeconds, metrics.ticks, holder)
+  } else {
+    db.prepare(`UPDATE scheduler_state SET heartbeat_at = ? WHERE id = 1 AND holder = ?`)
+      .run(at.toISOString(), holder)
+  }
   return { ok: true, stopRequested: lease.stopRequested }
 }
 

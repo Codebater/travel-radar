@@ -15,6 +15,8 @@ import {
 } from "./store.js"
 import { executeJob } from "./engine.js"
 import { projectMonthlyBudget } from "./budget.js"
+import { backupIfDue } from "../db/backup.js"
+import { evaluateNewObservations } from "../anomaly/engine.js"
 
 function envInt(name: string, fallback: number): number {
   const raw = Number(process.env[name])
@@ -63,16 +65,23 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
   // its result feeds the flags the job loop acts on.
   let leaseLost = false
   let stopViaDb = false
+  let ticks = 0
   const beatMs = Math.max(5, Math.floor(leaseTtl / 3)) * 1000
   const beatTimer = setInterval(() => {
-    const beat = heartbeatLease(db, holder)
+    // §AD the heartbeat carries the process footprint, so the health page can
+    // answer "will this fit on the DS723+" without a metrics daemon.
+    const cpu = process.cpuUsage()
+    const beat = heartbeatLease(db, holder, new Date(), {
+      rssBytes: process.memoryUsage().rss,
+      cpuSeconds: Math.round(((cpu.user + cpu.system) / 1e6) * 100) / 100,
+      ticks,
+    })
     if (!beat.ok) leaseLost = true
     else if (beat.stopRequested) stopViaDb = true
   }, beatMs)
 
   const shouldContinue = () => !stopping && !leaseLost && !stopViaDb
 
-  let ticks = 0
   let exitReason = "stopped"
   try {
     for (;;) {
@@ -102,6 +111,30 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
       }
       if (leaseLost) { exitReason = "lease lost to another scheduler"; break }
       if (stopViaDb) { exitReason = "stop requested via observer:stop"; break }
+
+      // §I evaluate what was just collected. Database-only: it contacts no
+      // provider, spends no budget, and notifies nobody - decisions are
+      // written to deal_candidates and left there for review.
+      try {
+        evaluateNewObservations({ db, quiet: false })
+      } catch (err) {
+        console.warn(`⚠️ anomaly evaluation failed (observation collection is unaffected): ${(err as Error).message}`)
+      }
+
+      // §AC a rolling local backup, taken by whoever holds the lease. Cheap
+      // (one online snapshot per day) and the only thing standing between a
+      // corrupt page and a year of irreplaceable history.
+      try {
+        const backup = await backupIfDue(db)
+        if (backup) {
+          console.log(
+            `OBSERVER BACKUP ${backup.path} (${(backup.bytes / 1e6).toFixed(1)} MB, ${backup.durationMs}ms` +
+            `${backup.pruned.length ? `, pruned ${backup.pruned.length} old` : ""})`,
+          )
+        }
+      } catch (err) {
+        console.warn(`⚠️ backup failed: ${(err as Error).message}`)
+      }
 
       ticks++
       if (options.maxTicks !== undefined && ticks >= options.maxTicks) { exitReason = "maxTicks"; break }

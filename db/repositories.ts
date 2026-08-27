@@ -320,13 +320,60 @@ export function recordCallOutcome(
         WHERE provider = ? AND period = ?
       `).run(nowIso(), provider, period)
     } else {
+      const detail = (outcome.error || "unknown").slice(0, 300)
       db.prepare(`
         UPDATE provider_usage SET failed = failed + 1, last_error = ?
         WHERE provider = ? AND period = ?
-      `).run((outcome.error || "unknown").slice(0, 300), provider, period)
+      `).run(detail, provider, period)
+      // The monthly counter can say "4 failures this month" but never "in the
+      // last 24 hours", which is the question an unattended run actually
+      // raises. Failures are rare, so one row each keeps the table small.
+      recordProviderEvent(db, provider, classifyFailure(detail), detail)
     }
   })
   tx()
+}
+
+// ─── provider_events (time-bucketed failures) ────────────────────────────────
+
+export type ProviderEventKind = "error" | "auth" | "quota" | "skipped"
+
+/** An expired session and a 500 need different responses, so they are labelled
+ *  apart at the moment of failure rather than guessed at read time. */
+export function classifyFailure(error: string): ProviderEventKind {
+  if (/unauthor|401|403|session|expired|api[ _-]?key|credential|IP_DENIED|REQUIRE_PLUS|token/i.test(error)) return "auth"
+  if (/quota|budget|rate limit|429|exhaust/i.test(error)) return "quota"
+  return "error"
+}
+
+export function recordProviderEvent(
+  db: DB, provider: string, kind: ProviderEventKind, detail: string | null,
+): void {
+  db.prepare(`
+    INSERT INTO provider_events (provider, kind, detail, occurred_at) VALUES (?, ?, ?, ?)
+  `).run(provider, kind, detail ? detail.slice(0, 300) : null, nowIso())
+}
+
+export interface ProviderEventSummary {
+  provider: string
+  kind: ProviderEventKind
+  count: number
+  lastAt: string
+  lastDetail: string | null
+}
+
+/** Failures grouped by provider and kind since `since`. */
+export function providerEventsSince(db: DB, since: string): ProviderEventSummary[] {
+  return db.prepare(`
+    SELECT provider, kind, COUNT(*) count, MAX(occurred_at) lastAt,
+           (SELECT detail FROM provider_events e2
+             WHERE e2.provider = e1.provider AND e2.kind = e1.kind
+             ORDER BY e2.occurred_at DESC LIMIT 1) lastDetail
+    FROM provider_events e1
+    WHERE occurred_at >= ?
+    GROUP BY provider, kind
+    ORDER BY count DESC
+  `).all(since) as ProviderEventSummary[]
 }
 
 /**

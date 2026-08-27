@@ -11,7 +11,7 @@
  */
 
 import { getDb, type DB } from "../db/index.js"
-import { recordSearchRequest } from "../db/repositories.js"
+import { recordSearchRequest, recordProviderEvent } from "../db/repositories.js"
 import { searchCashFlights } from "../providers/cash-flights/index.js"
 import { searchAwardFlights, getAwardProviders } from "../providers/award-flights/index.js"
 import {
@@ -105,7 +105,9 @@ export async function executeJob(
 
   // Duplicate-run guard: check + insert in one immediate transaction, so a
   // concurrent manual run and a scheduler tick cannot both start.
-  const runId = tryStartRun(db, job.id, trigger)
+  // The scheduled time is recorded on the run so "was this late?" is
+  // answerable afterwards; started_at alone cannot tell.
+  const runId = tryStartRun(db, job.id, trigger, trigger === "schedule" ? job.nextRunAt : null)
   if (runId === null) {
     return {
       runId: null, status: "failed", plan, searchesRun: 0, providerCalls: 0,
@@ -124,6 +126,9 @@ export async function executeJob(
     : { usable: [], skipped: [] as { provider: string; reason: string }[] }
   for (const s of preflight.skipped) {
     errors.push(`SKIPPED_AUTH ${s.provider}: ${s.reason}`)
+    // Recorded as an event too: a provider skipped every night for a week is
+    // invisible in a monthly counter but obvious on the health page.
+    recordProviderEvent(db, s.provider, "skipped", `${job.name}: ${s.reason}`)
     console.log(`OBSERVER SKIPPED_AUTH ${job.name} ${s.provider} (${s.reason.slice(0, 80)})`)
   }
 

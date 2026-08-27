@@ -554,7 +554,11 @@ describe("Phase 4 migration", () => {
                    VALUES ('Synthetic','synthetic',12345,'awardwallet','2026-08-27T09:00:00Z')`).run()
 
       const applied = migrate(raw as never)
-      expect(applied).toEqual(["003_observer.sql"])
+      // Everything after 002 is applied, in order. Asserting the exact list
+      // would make this test fail on every future migration; what matters is
+      // that 003 ran and the Phase 3 history below survived it.
+      expect(applied[0]).toBe("003_observer.sql")
+      expect(applied).toContain("004_anomaly.sql")
       expect((raw.prepare("SELECT COUNT(*) c FROM flight_prices").get() as any).c).toBe(1)
       expect((raw.prepare("SELECT COUNT(*) c FROM award_prices").get() as any).c).toBe(1)
       expect((raw.prepare("SELECT COUNT(*) c FROM balance_snapshots").get() as any).c).toBe(1)
