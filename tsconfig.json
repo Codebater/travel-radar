@@ -3,7 +3,10 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
@@ -11,7 +14,9 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
   "//": "Scoped to the live search path. arkalis/ and awardwiz-scrapers/ are inherited AwardWiz code that is not on the search.ts/serve.ts path and is not typechecked here.",
   "include": [
@@ -22,6 +27,9 @@
     "value-engine.ts",
     "sweet-spots.ts",
     "transfer-partners.ts",
+    "db/**/*.ts",
+    "cache/**/*.ts",
+    "providers/**/*.ts",
     "tests/**/*.ts"
   ]
 }

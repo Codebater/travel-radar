@@ -1,0 +1,229 @@
+/**
+ * Regression tests for the Phase 1 security fixes.
+ *
+ * These boot the real serve.ts as a child process on an ephemeral port and
+ * exercise it over HTTP, so they fail if a later refactor quietly removes a
+ * protection. No provider is contacted: every request either gets rejected
+ * before a search starts, or asks for a static file.
+ */
+
+import { describe, it, expect, beforeAll, afterAll } from "vitest"
+import { spawn, type ChildProcess } from "child_process"
+import fs from "fs"
+import net from "net"
+import os from "os"
+import path from "path"
+import { fileURLToPath } from "url"
+
+const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
+const CANARY = "phase1-regression-canary-value"
+
+let server: ChildProcess
+let base: string
+let port: number
+let createdEnv = false
+
+async function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const srv = net.createServer()
+    srv.once("error", reject)
+    srv.listen(0, "127.0.0.1", () => {
+      const addr = srv.address()
+      const p = typeof addr === "object" && addr ? addr.port : 0
+      srv.close(() => resolve(p))
+    })
+  })
+}
+
+beforeAll(async () => {
+  // A .env with a canary value, so "the server must not serve .env" is testable.
+  const envPath = path.join(ROOT, ".env")
+  if (!fs.existsSync(envPath)) {
+    fs.writeFileSync(envPath, `SERP_API_KEY=${CANARY}\n`)
+    createdEnv = true
+  }
+
+  port = await freePort()
+  base = `http://127.0.0.1:${port}`
+
+  server = spawn(
+    process.execPath,
+    [path.join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), path.join(ROOT, "serve.ts"), "--port", String(port)],
+    {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        // No credentials: a request that slips past validation cannot spend money.
+        SERP_API_KEY: "", ATF_API_KEY: "",
+        DATABASE_PATH: path.join(os.tmpdir(), `travel-radar-sec-${process.pid}.db`),
+      },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  )
+
+  // Wait for the listener rather than sleeping a fixed amount.
+  const deadline = Date.now() + 45_000
+  for (;;) {
+    try {
+      await fetch(`${base}/dashboard.html`)
+      break
+    } catch {
+      if (Date.now() > deadline) throw new Error("serve.ts did not start within 45s")
+      await new Promise(r => setTimeout(r, 250))
+    }
+  }
+}, 60_000)
+
+afterAll(() => {
+  server?.kill()
+  if (createdEnv) fs.rmSync(path.join(ROOT, ".env"), { force: true })
+})
+
+describe("secrets are not downloadable", () => {
+  it("refuses .env and does not leak its contents", async () => {
+    const res = await fetch(`${base}/.env`)
+    expect(res.status).toBe(403)
+    expect(await res.text()).not.toContain(CANARY)
+  })
+
+  it("refuses a percent-encoded dotfile", async () => {
+    expect((await fetch(`${base}/%2Eenv`)).status).toBe(403)
+  })
+
+  it("refuses dot-directories such as .git", async () => {
+    expect((await fetch(`${base}/.git/config`)).status).toBe(403)
+    expect((await fetch(`${base}/.npmrc`)).status).toBe(403)
+  })
+
+  it("refuses file types the dashboard never loads", async () => {
+    for (const p of ["/search.ts", "/requirements.txt", "/serve.ts"]) {
+      expect((await fetch(`${base}${p}`)).status).toBe(403)
+    }
+  })
+})
+
+describe("path containment", () => {
+  it("refuses traversal outside the project root", async () => {
+    for (const p of ["/../../../Windows/win.ini", "/..%2f..%2f..%2fetc%2fpasswd", "/....//....//package.json"]) {
+      const res = await fetch(`${base}${p}`)
+      expect([403, 404]).toContain(res.status)
+    }
+  })
+
+  it("still serves the files the dashboard needs", async () => {
+    expect((await fetch(`${base}/`)).status).toBe(200)
+    expect((await fetch(`${base}/dashboard.html`)).status).toBe(200)
+    expect((await fetch(`${base}/data/hub-connections.json`)).status).toBe(200)
+  })
+})
+
+describe("input validation on /api/search", () => {
+  const cases: [string, string][] = [
+    ["shell metacharacters in origin", "from=LAX%3Bcalc&to=CDG&date=2026-11-10"],
+    ["command substitution attempt", "from=%24%28whoami%29&to=CDG&date=2026-11-10"],
+    ["pipe in destination", "from=LAX&to=CDG%7Cls&date=2026-11-10"],
+    ["short IATA code", "from=LA&to=CDG&date=2026-11-10"],
+    ["long IATA code", "from=LAXX&to=CDG&date=2026-11-10"],
+    ["malformed date", "from=LAX&to=CDG&date=not-a-date"],
+    ["impossible date", "from=LAX&to=CDG&date=2026-13-45"],
+    ["injected date argument", "from=LAX&to=CDG&date=2026-11-10%20--evil"],
+    ["unknown cabin class", "from=LAX&to=CDG&date=2026-11-10&class=hax"],
+    ["unknown source", "from=LAX&to=CDG&date=2026-11-10&sources=evil"],
+    ["malformed return date", "from=LAX&to=CDG&date=2026-11-10&return=nope"],
+  ]
+
+  for (const [name, qs] of cases) {
+    it(`rejects ${name} with 400`, async () => {
+      const res = await fetch(`${base}/api/search?${qs}`)
+      expect(res.status).toBe(400)
+      const body = await res.json() as { error?: string }
+      expect(body.error).toBeTruthy()
+    })
+  }
+
+  it("does not echo the rejected value back as HTML", async () => {
+    const res = await fetch(`${base}/api/search?from=%3Cscript%3E&to=CDG&date=2026-11-10`)
+    expect(res.headers.get("content-type")).toContain("application/json")
+  })
+})
+
+describe("cross-origin protection", () => {
+  it("refuses an API call from another origin", async () => {
+    const res = await fetch(`${base}/api/search?from=LAX&to=CDG&date=2026-11-10`, {
+      headers: { Origin: "https://evil.example" },
+    })
+    expect(res.status).toBe(403)
+  })
+
+  it("refuses cross-origin calls to the new Phase 2 endpoints too", async () => {
+    for (const p of ["/api/providers", "/api/price-history?from=PRG&to=BKK"]) {
+      const res = await fetch(`${base}${p}`, { headers: { Origin: "https://evil.example" } })
+      expect(res.status).toBe(403)
+    }
+  })
+
+  it("allows the dashboard's own origin", async () => {
+    const res = await fetch(`${base}/api/providers`, { headers: { Origin: base } })
+    expect(res.status).toBe(200)
+  })
+})
+
+describe("network binding", () => {
+  it("listens on loopback only by default", async () => {
+    // Binding to the same port on a non-loopback address must still be possible,
+    // which it would not be had serve.ts bound 0.0.0.0.
+    const probe = net.createServer()
+    const bound = await new Promise<boolean>(resolve => {
+      probe.once("error", () => resolve(false))
+      probe.listen(port, "0.0.0.0", () => resolve(true))
+    })
+    probe.close()
+    expect(bound).toBe(true)
+  })
+})
+
+describe("duplicate request collapsing", () => {
+  it("collapses concurrent identical searches into one", async () => {
+    // A double-clicked "Refresh live price" must not issue two provider calls.
+    // Without credentials nothing is billable here, but the server must still
+    // report all four as one shared search.
+    const url = `${base}/api/search?from=PRG&to=SIN&date=2026-11-14&class=ECON&sources=google&refresh=1`
+    const started = Date.now()
+    const responses = await Promise.all([0, 1, 2, 3].map(() => fetch(url)))
+    const elapsed = Date.now() - started
+
+    for (const r of responses) expect(r.status).toBe(200)
+    const bodies = await Promise.all(responses.map(r => r.json() as Promise<any>))
+    // All four must be the same search result, not four independent ones.
+    const stamps = new Set(bodies.map(b => b.meta.searchedAt))
+    expect(stamps.size).toBe(1)
+    // Four sequential searches would take far longer than one.
+    expect(elapsed).toBeLessThan(40_000)
+  }, 60_000)
+})
+
+describe("provider endpoints do not spend money", () => {
+  it("reports health without performing a billable call", async () => {
+    const res = await fetch(`${base}/api/providers`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as any
+
+    const serp = body.providers.find((p: any) => p.provider === "serpapi")
+    expect(serp).toBeTruthy()
+    expect(["ok", "unconfigured", "degraded"]).toContain(serp.status)
+
+    // The point of the assertion: checking health must never consume quota.
+    const usage = body.usage.find((u: any) => u.provider === "serpapi")
+    expect(usage?.attempted ?? 0).toBe(0)
+    expect(serp.quota?.estimatedUsed ?? 0).toBe(0)
+    // And the reserve must still be held back.
+    expect(serp.quota?.reserve ?? 0).toBeGreaterThan(0)
+  })
+
+  it("checking health twice still spends nothing", async () => {
+    await fetch(`${base}/api/providers`)
+    const body = await (await fetch(`${base}/api/providers`)).json() as any
+    const usage = body.usage.find((u: any) => u.provider === "serpapi")
+    expect(usage?.attempted ?? 0).toBe(0)
+  })
+})
