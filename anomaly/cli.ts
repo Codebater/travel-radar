@@ -19,6 +19,7 @@ import { loadAnomalyConfig } from "./config.js"
 import { evaluateNewObservations, recomputeHistory } from "./engine.js"
 import { listCandidates, getCandidate, recordFeedback } from "./store.js"
 import { buildReport } from "./report.js"
+import { rebuildClusters } from "./clustering.js"
 import type { FeedbackVerdict } from "./types.js"
 
 const [command, ...args] = process.argv.slice(2)
@@ -52,6 +53,10 @@ function main() {
           : "Judging observations recorded since the last evaluation.",
       )
       const summary = fromScratch ? recomputeHistory({ db, config }) : evaluateNewObservations({ db, config })
+      // Scores just changed, so the families that present them are stale.
+      // Rebuilding here keeps the feed's stored "best member" honest without
+      // anybody having to remember a second command.
+      const clustered = rebuildClusters(db, { minScore: 0 })
       console.log(`\nEvaluated          ${summary.evaluated} (cash ${summary.byType.cash}, award ${summary.byType.award})`)
       console.log(`Candidates >= ${config.candidateThreshold}   ${summary.candidates}`)
       console.log(`Below threshold    ${summary.belowThreshold}${config.storeBelowThreshold ? " (stored for review)" : " (not stored)"}`)
@@ -59,6 +64,7 @@ function main() {
       console.log(`Skipped, no data   ${summary.skippedNoBaseline}`)
       console.log(`Top score          ${summary.topScore ?? "n/a"}`)
       console.log(`Duration           ${summary.durationMs}ms`)
+      console.log(`Clusters rebuilt    ${clustered.clusters} families from ${clustered.candidatesClustered} candidates`)
       console.log(`\nEXPERIMENTAL - decisions stored, nothing sent. Alerts are off by design.`)
       break
     }

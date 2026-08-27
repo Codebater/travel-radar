@@ -479,6 +479,121 @@ npm run anomaly:backfill
 Everything in `anomaly/` is pure database work: it contacts no provider and
 cannot spend a single API call, so evaluating a year of history is free.
 
+### Discovery — finding trips I did not think to search (Phase 6)
+
+The observer answers *"what does this route usually cost?"* for six routes I already
+knew I wanted. Discovery answers a different question: *"where should I be going
+that I would never have thought to search?"*
+
+```bash
+npm run discovery:seed
+```
+```bash
+npm run discovery:dry-run
+```
+```bash
+npm run discovery:run -- discover-thailand
+```
+```bash
+npm run discovery:openjaw -- BKK
+```
+```bash
+npm run discovery:positioning -- BKK
+```
+```bash
+npm run discovery:clusters -- --min 75
+```
+```bash
+npm run discovery:pool
+```
+
+Discovery jobs live in `discovery_jobs` and run on the **same scheduler and the same
+lease** as the observer, so the two engines can never overlap and there is one process
+to supervise. Observation jobs go first: they are the long comparable series that
+everything else is judged against, and a discovery cycle must never delay them.
+
+**The cost problem, and the answer.** The naive reading of "search flexible dates
+across a horizon" is a cross product. For the configured scope that is 5 origins ×
+15 destinations × 180 days × 7 trip lengths × 2 cabins = **189,000 searches per
+cycle**. So the engine never asks the whole question at once:
+
+| Stage | What it buys | Cost class | When |
+| --- | --- | --- | --- |
+| **1 · sparse** | breadth — 4 departures per route at one trip length | free provider only | every cycle |
+| **2 · dense** | resolution — the neighbouring days and more trip lengths | free provider only | only around a stage-1 sample that came back low **relative to its own route** |
+| **3 · confirm** | certainty — award expansion, then metered verification | award / metered | only for a window that already scored well |
+
+Two details do most of the work:
+
+- **The stage-2 trigger is relative.** A sample must be 20% under the median of *its
+  own route's* sparse scan. An absolute trigger would fire constantly on structurally
+  cheap routes and never on expensive ones, so the engine would spend its whole budget
+  re-measuring what it already knew.
+- **Successive runs rotate between the previous run's dates.** A week of daily runs
+  covers the horizon far more finely than any single run does, at a quarter of the
+  per-run cost. That is why `datesPerRoute` is 4 and not 40.
+
+Measured: a scope whose cross product is 100,800 searches produces a plan of 60. A test
+asserts that ratio stays under 0.2%.
+
+**Money discipline.** Stage 1 and 2 pass `allowMeteredFallback: false` on every search,
+so no amount of enthusiasm turns a broad scan into a SerpAPI bill. A metered
+confirmation needs a candidate to clear score ≥82, ≥30% below median and a baseline of
+at least MEDIUM confidence, *and* the discovery pool to have room. That pool is a share
+of the automation ceiling, which already has the operator's manual reserve subtracted —
+so the reserve is unreachable from an automated path by construction, not by care.
+`npm run discovery:pool` shows all four numbers.
+
+**Positioning** (`discovery/positioning.ts`) produces two figures, deliberately kept
+apart:
+
+- **TRUE TRIP START COST** = the fare + getting there + a hotel when a long transfer
+  meets an early departure. Nothing hidden.
+- **A 0–1 penalty** for what money cannot express: the separate ticket, the overnight,
+  the airport change, the hours on a train, and whether the positioning fare is an
+  observed price or an estimate.
+
+Collapsing those into one "adjusted price" would let a big enough discount bury an
+overnight bus to a 6am departure. The penalty is applied as a visible subtraction from
+the score, so a reader always sees what it cost. A positioning trip also has to clear a
+saving floor (12% and 130 USD) before it counts as worthwhile at all.
+
+**Open jaws** cost nothing to discover. Since Phase 5 the radar collects one-way cash
+observations, so every PRG-out/VIE-back combination is already in `flight_prices`
+waiting to be added up — pure SQL, no provider call. `discovery:openjaw` prints the
+arithmetic even when nothing qualifies, because "none found" on its own cannot
+distinguish "no legs stored" from "the sums came out against it".
+
+**Absolute price rules** (`config/anomaly.json` → `absolute`) are a second axis,
+independent of history. History alone has a blind spot that discovery makes serious: a
+wildcard destination has no history *by definition*, so a genuinely remarkable fare
+there scored nothing. A fare can be 60% below a route's median and still be an ordinary
+price, or bang on the median and still be extraordinary. Only using both stops each
+one's blind spot. These thresholds are **judgement, not measurement** — that is exactly
+why they live in config, and why the tier that fired is recorded on every candidate.
+
+A decision resting on absolute price alone is capped at `noHistoryScoreCap` (85).
+Dropping the four history components concentrates the surviving weights, and without a
+cap an unevidenced fare would outrank one backed by sixty observations making the same
+claim. **Evidence outranks assertion.**
+
+**Sanity** (`anomaly/sanity.ts`) flags the impossible — a €12 business fare to Bangkok
+is a bug, not the find of the decade — and **stores it with the reason** rather than
+dropping it, because a silent drop hides a provider that has started returning
+nonsense. The floors are calibrated to catch the *impossible*, not the merely
+remarkable: a €600 business fare to Bangkok is a legendary mistake fare and passes.
+
+**Clustering** turns three consecutive cheap days into one line. Storage keeps every
+candidate individually scored and individually judgeable; only the presentation
+collapses.
+
+**The feed** is at `/deals.html` — sections for EXTREME, BUSINESS, AWARDS, WILDCARD and
+POSITIONING, a **TAKE ME ANYWHERE** box, a score breakdown behind every card, and
+GOOD DEAL / NORMAL / BAD SIGNAL / **WOULD BOOK** on each. It is read-only over decisions
+that already exist: no endpoint on this server can trigger a search that spends budget,
+and TAKE ME ANYWHERE is answered from stored data precisely because fanning out live
+across every wildcard destination is the brute force the engine exists to avoid.
+
 ### Credentials for live award validation
 
 - **Roame program keys**: Roame's identifier for Miles & More is `LUFTHANSA`

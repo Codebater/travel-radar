@@ -137,6 +137,11 @@ export function buildFeed(
     // A suspicious observation never reaches the feed; it stays visible in the
     // candidate table with its diagnostic reason instead.
     .filter(c => c.sanity === "ok")
+    // Sorted by the CANDIDATE's current score, not the cluster's stored one.
+    // A re-evaluation changes scores without rebuilding clusters, so the stored
+    // figure goes stale - and a feed whose top card is not its highest score is
+    // worse than useless.
+    .sort((a, b) => b.score - a.score)
 
   const sections: Record<FeedSection, DealCard[]> = {
     extreme: cards
@@ -322,6 +327,7 @@ export function takeMeAnywhere(db: DB, query: AnywhereQuery): {
   const clusters = listClusters(db, { minScore: query.minScore, limit: 300 })
   let cards = clusters.map(c => toCard(db, c)).filter((c): c is DealCard => c !== null)
     .filter(c => c.sanity === "ok")
+    .sort((a, b) => b.score - a.score)
     .filter(c => query.origins.length === 0 || query.origins.includes(c.origin))
     .filter(c => c.earliestDeparture >= today && c.earliestDeparture <= horizon)
 
