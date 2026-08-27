@@ -190,7 +190,8 @@ export interface DealDetail {
   history: {
     observations: number
     min: number
-    median: number
+    /** Null when the decision had no comparable history to take a median of. */
+    median: number | null
     max: number
     firstAt: string
     lastAt: string
@@ -283,10 +284,13 @@ export function dealDetail(db: DB, candidateId: number): DealDetail | null {
       discoveredBy: cluster.discovered_by,
     } : null,
     siblings,
+    // The median comes from the candidate's baseline, which is a ZEROED
+    // stand-in when there is no history. Printing it beside a real min and max
+    // would invent a number, which is the one thing this panel exists not to do.
     history: history?.observations > 0 ? {
       observations: history.observations,
       min: history.min,
-      median: candidate.baseline.median,
+      median: candidate.baseline.count > 0 ? candidate.baseline.median : null,
       max: history.max,
       firstAt: history.firstAt,
       lastAt: history.lastAt,

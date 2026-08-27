@@ -132,9 +132,16 @@ function extraParts(
   const status = extras?.verificationStatus ?? null
   return {
     absolutePrice: {
-      raw: extras?.absolute ? extras.absolute.score : null,
+      // A rule that did not MATCH is not a rule that says "bad price". When no
+      // threshold exists for this group and cabin, the component is dropped and
+      // the remaining weights renormalise - scoring it zero would penalise a
+      // route for a gap in OUR config, which is the same mistake the CPP
+      // component was explicitly designed to avoid.
+      raw: extras?.absolute && extras.absolute.tier !== null ? extras.absolute.score : null,
       weight: weights.absolutePrice ?? 0,
-      detail: extras?.absolute?.detail ?? "no absolute rule for this route and cabin",
+      detail: extras?.absolute?.tier
+        ? extras.absolute.detail
+        : (extras?.absolute?.detail ?? "no absolute rule for this route and cabin"),
     },
     routeDesirability: {
       raw: extras?.routeDesirability ?? null,

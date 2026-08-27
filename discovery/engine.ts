@@ -207,53 +207,17 @@ export async function executeDiscoveryJob(
   const result = emptyResult()
   result.routesSampled = plan.routes.length
 
-  // ── Stage 1: sparse scan, free provider only ─────────────────────────────
-  const stage1Targets = plan.stage1.filter(() => canSpend(budget, job, "free"))
-  const sparseOutcomes = await inBatches(
-    stage1Targets,
-    config.concurrency.maxConcurrentFreeSearches,
-    async target => {
-      if (!canSpend(budget, job, "free")) return null
-      const outcome = await runCashSearch(db, target, runId, method, errors)
-      if (!outcome.fromCache) spend(budget, "free", outcome.callsSpent)
-      return outcome
-    },
-  )
+  // Everything below runs inside a try/finally. A throw used to leave the run
+  // row marked 'running' forever, which blocks the job's next cycle until the
+  // reaper notices, and left next_run_at untouched - so the job came due again
+  // on the very next tick and re-spent its entire budget, over and over.
+  try {
 
-  const sparse: SparseObservation[] = []
-  for (const outcome of sparseOutcomes) {
-    if (!outcome) continue
-    result.stage1Searches++
-    result.datePairsSampled++
-    if (outcome.fromCache) result.cacheHits++
-    else result.freeCalls += outcome.callsSpent
-    if (outcome.error) errors.push(`stage1 ${outcome.target.route.origin}-${outcome.target.route.destination}: ${outcome.error}`)
-    if (outcome.cheapest !== null) {
-      sparse.push({
-        route: outcome.target.route,
-        departureDate: outcome.target.departureDate,
-        cabin: outcome.target.cabin,
-        tripLengthNights: outcome.target.tripLengthNights ?? 0,
-        price: outcome.cheapest,
-        currency: outcome.currency,
-      })
-    }
-  }
-
-  // ── Stage 2: resolve only where stage 1 found something ──────────────────
-  const windows = options.shouldContinue && !options.shouldContinue()
-    ? []
-    : selectStage2Windows(sparse, config)
-
-  for (const window of windows) {
-    if (!canSpend(budget, job, "free")) break
-    if (options.shouldContinue && !options.shouldContinue()) {
-      errors.push("aborted: scheduler asked the run to stop")
-      break
-    }
-    const targets = planStage2(window.observation, job, config)
-    const outcomes = await inBatches(
-      targets, config.concurrency.maxConcurrentFreeSearches,
+    // ── Stage 1: sparse scan, free provider only ─────────────────────────────
+    const stage1Targets = plan.stage1.filter(() => canSpend(budget, job, "free"))
+    const sparseOutcomes = await inBatches(
+      stage1Targets,
+      config.concurrency.maxConcurrentFreeSearches,
       async target => {
         if (!canSpend(budget, job, "free")) return null
         const outcome = await runCashSearch(db, target, runId, method, errors)
@@ -261,85 +225,148 @@ export async function executeDiscoveryJob(
         return outcome
       },
     )
-    for (const outcome of outcomes) {
+
+    const sparse: SparseObservation[] = []
+    for (const outcome of sparseOutcomes) {
       if (!outcome) continue
-      result.stage2Searches++
+      result.stage1Searches++
       result.datePairsSampled++
       if (outcome.fromCache) result.cacheHits++
       else result.freeCalls += outcome.callsSpent
-    }
-  }
-
-  // ── Evaluate what was collected, so stage 3 has scores to gate on ────────
-  const anomalyConfig = loadAnomalyConfig()
-  let evaluation = evaluateNewObservations({ db, config: anomalyConfig, quiet: true })
-  result.candidatesProduced = evaluation.candidates
-
-  // ── Stage 3a: award expansion on promising windows only (§16) ────────────
-  if (!options.cashOnly && job.tripLengths.length > 0) {
-    const promising = db.prepare(`
-      SELECT DISTINCT origin, destination, departure_date, return_date
-      FROM deal_candidates
-      WHERE discovery_run_id = ? AND type = 'cash' AND sanity = 'ok' AND score >= ?
-      ORDER BY score DESC LIMIT ?
-    `).all(
-      runId, config.sampling.stage3.awardExpansionMinScore,
-      config.sampling.stage3.maxAwardWindowsPerRun,
-    ) as { origin: string; destination: string; departure_date: string; return_date: string | null }[]
-
-    const usableAward = await usableAwardProviders()
-    for (const window of promising) {
-      if (usableAward.length === 0) break
-      if (!canSpend(budget, job, "award")) break
-      try {
-        const searchRequestId = recordSearchRequest(db, {
-          origin: window.origin, destination: window.destination,
-          departureDate: window.departure_date, returnDate: null,
-          cabin: "both", adults: 1, currency: CASH_CURRENCY,
-        }, "discovery", { discoveryMethod: method, discoveryRunId: runId, discoveryStage: 3 })
-
-        const outcome = await searchAwardFlights({
-          origin: window.origin, destination: window.destination,
-          departureDate: window.departure_date, returnDate: null,
-          searchClass: "both", adults: 1, flexDays: 0,
-        }, { providers: usableAward, searchRequestId, db })
-
-        result.awardSearches++
-        result.awardCalls += outcome.callsSpent
-        spend(budget, "award", Math.max(1, outcome.callsSpent))
-        errors.push(...outcome.warnings.map(w => `award: ${w}`))
-      } catch (err) {
-        errors.push(`award ${window.origin}-${window.destination}: ${(err as Error).message}`)
+      if (outcome.error) errors.push(`stage1 ${outcome.target.route.origin}-${outcome.target.route.destination}: ${outcome.error}`)
+      if (outcome.cheapest !== null) {
+        sparse.push({
+          route: outcome.target.route,
+          departureDate: outcome.target.departureDate,
+          cabin: outcome.target.cabin,
+          tripLengthNights: outcome.target.tripLengthNights ?? 0,
+          price: outcome.cheapest,
+          currency: outcome.currency,
+        })
       }
     }
-    if (result.awardSearches > 0) {
-      evaluation = evaluateNewObservations({ db, config: anomalyConfig, quiet: true })
-      result.candidatesProduced += evaluation.candidates
+
+    // ── Stage 2: resolve only where stage 1 found something ──────────────────
+    const windows = options.shouldContinue && !options.shouldContinue()
+      ? []
+      : selectStage2Windows(sparse, config)
+
+    for (const window of windows) {
+      if (!canSpend(budget, job, "free")) break
+      if (options.shouldContinue && !options.shouldContinue()) {
+        errors.push("aborted: scheduler asked the run to stop")
+        break
+      }
+      const targets = planStage2(window.observation, job, config)
+      const outcomes = await inBatches(
+        targets, config.concurrency.maxConcurrentFreeSearches,
+        async target => {
+          if (!canSpend(budget, job, "free")) return null
+          const outcome = await runCashSearch(db, target, runId, method, errors)
+          if (!outcome.fromCache) spend(budget, "free", outcome.callsSpent)
+          return outcome
+        },
+      )
+      for (const outcome of outcomes) {
+        if (!outcome) continue
+        result.stage2Searches++
+        result.datePairsSampled++
+        if (outcome.fromCache) result.cacheHits++
+        else result.freeCalls += outcome.callsSpent
+      }
     }
-  }
 
-  // ── Stage 3b: metered verification, gated twice (§14/§15) ────────────────
-  if (!options.cashOnly) {
-    const verification = await maybeVerify(db, runId, job, budget, config)
-    result.verificationCalls = verification.calls
-    result.meteredCalls = verification.calls
-    errors.push(...verification.errors)
-  }
+    // ── Evaluate what was collected, so stage 3 has scores to gate on ────────
+    const anomalyConfig = loadAnomalyConfig()
+    let evaluation = evaluateNewObservations({ db, config: anomalyConfig, quiet: true })
+    result.candidatesProduced = evaluation.candidates
 
-  // ── Present the result as families rather than rows (§27) ────────────────
-  try {
-    rebuildClusters(db, { minScore: 0 })
+    // ── Stage 3a: award expansion on promising windows only (§16) ────────────
+    // A stopped scheduler must stop here too: award searches are the slowest and
+    // most quota-bound thing the engine does, and continuing to spend them after
+    // the operator asked it to stop is the worst possible moment to keep going.
+    const stillRunning = !options.shouldContinue || options.shouldContinue()
+    if (stillRunning && !options.cashOnly && job.tripLengths.length > 0) {
+      const promising = db.prepare(`
+        SELECT DISTINCT origin, destination, departure_date, return_date
+        FROM deal_candidates
+        WHERE discovery_run_id = ? AND type = 'cash' AND sanity = 'ok' AND score >= ?
+        ORDER BY score DESC LIMIT ?
+      `).all(
+        runId, config.sampling.stage3.awardExpansionMinScore,
+        config.sampling.stage3.maxAwardWindowsPerRun,
+      ) as { origin: string; destination: string; departure_date: string; return_date: string | null }[]
+
+      const usableAward = await usableAwardProviders()
+      for (const window of promising) {
+        if (usableAward.length === 0) break
+        if (options.shouldContinue && !options.shouldContinue()) break
+        if (!canSpend(budget, job, "award")) break
+        // An award "search" costs one call PER PROVIDER, so a single
+        // authorisation could overrun the ceiling by the width of the provider
+        // list. Only start one while there is room for what it will actually cost.
+        const roomLeft = job.budget.maxAwardCallsPerRun - budget.awardCalls
+        if (roomLeft < usableAward.length) {
+          note(budget, `award-call ceiling ${job.budget.maxAwardCallsPerRun} would be exceeded by the next search`)
+          break
+        }
+        try {
+          const searchRequestId = recordSearchRequest(db, {
+            origin: window.origin, destination: window.destination,
+            departureDate: window.departure_date, returnDate: null,
+            cabin: "both", adults: 1, currency: CASH_CURRENCY,
+          }, "discovery", { discoveryMethod: method, discoveryRunId: runId, discoveryStage: 3 })
+
+          const outcome = await searchAwardFlights({
+            origin: window.origin, destination: window.destination,
+            departureDate: window.departure_date, returnDate: null,
+            searchClass: "both", adults: 1, flexDays: 0,
+          }, { providers: usableAward, searchRequestId, db })
+
+          result.awardSearches++
+          result.awardCalls += outcome.callsSpent
+          spend(budget, "award", Math.max(1, outcome.callsSpent))
+          errors.push(...outcome.warnings.map(w => `award: ${w}`))
+        } catch (err) {
+          errors.push(`award ${window.origin}-${window.destination}: ${(err as Error).message}`)
+        }
+      }
+      if (result.awardSearches > 0) {
+        evaluation = evaluateNewObservations({ db, config: anomalyConfig, quiet: true })
+        result.candidatesProduced += evaluation.candidates
+      }
+    }
+
+    // ── Stage 3b: metered verification, gated twice (§14/§15) ────────────────
+    if (stillRunning && !options.cashOnly && (!options.shouldContinue || options.shouldContinue())) {
+      const verification = await maybeVerify(db, runId, job, budget, config)
+      result.verificationCalls = verification.calls
+      result.meteredCalls = verification.calls
+      errors.push(...verification.errors)
+    }
+
+    // ── Present the result as families rather than rows (§27) ────────────────
+    try {
+      rebuildClusters(db, { minScore: 0 })
+    } catch (err) {
+      errors.push(`clustering: ${(err as Error).message}`)
+    }
+
+    result.observationsAdded = countObservations(db, runId)
+    result.scopeReduced = budget.scopeReduced.length ? budget.scopeReduced.join("; ") : null
+    result.errors = errors
+    result.durationMs = Date.now() - started
+    result.status = result.stage1Searches === 0
+      ? (budget.scopeReduced.length ? "skipped_budget" : "failed")
+      : errors.filter(e => !e.startsWith("award:")).length > 0 ? "partial" : "success"
+
   } catch (err) {
-    errors.push(`clustering: ${(err as Error).message}`)
+    // An unexpected failure is still a completed cycle as far as bookkeeping
+    // goes: recorded, backed off and rescheduled rather than retried forever.
+    result.status = "failed"
+    result.errors.push(`run aborted: ${(err as Error).message}`)
+    result.durationMs = Date.now() - started
   }
-
-  result.observationsAdded = countObservations(db, runId)
-  result.scopeReduced = budget.scopeReduced.length ? budget.scopeReduced.join("; ") : null
-  result.errors = errors
-  result.durationMs = Date.now() - started
-  result.status = result.stage1Searches === 0
-    ? (budget.scopeReduced.length ? "skipped_budget" : "failed")
-    : errors.filter(e => !e.startsWith("award:")).length > 0 ? "partial" : "success"
 
   finishDiscoveryRun(db, runId, result)
   completeDiscoveryRun(db, job.id, {

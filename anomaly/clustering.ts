@@ -91,6 +91,10 @@ function clusterKeyFor(row: CandidateRow, anchorDate: string, anchorValue: numbe
   const bucket = Math.round(anchorValue)
   return [
     row.type, row.route, row.cabin, row.loyalty_program ?? "-",
+    // Currency is identity, exactly as it is in the grouping itself: 410 EUR
+    // and 410 USD are two families, and without this they collided on one key,
+    // where the upsert silently overwrote one with the other.
+    row.price_currency ?? "-",
     style, anchorDate, bucket,
   ].join("|")
 }
@@ -170,7 +174,12 @@ export function rebuildClusters(
     // Rebuilt wholesale rather than patched: a candidate's score can change on
     // re-evaluation, which can change which member should represent a family,
     // and incremental patching of that is far more error-prone than redoing it.
-    db.prepare(`UPDATE deal_candidates SET cluster_id = NULL WHERE observed_at >= ?`).run(since)
+    //
+    // EVERY reference is cleared, not just those inside the `since` window.
+    // candidate_clusters is about to be emptied, and a row outside the window
+    // still pointing at a deleted cluster is a foreign-key violation that
+    // aborts the whole rebuild.
+    db.prepare(`UPDATE deal_candidates SET cluster_id = NULL`).run()
     db.prepare(`DELETE FROM candidate_clusters`).run()
 
     for (const family of families) {
@@ -198,8 +207,13 @@ export function rebuildClusters(
         family.members.length, seed.id, seed.score, seed.price_amount, seed.price_currency,
         seed.points, seed.discovered_by, now, now,
       )
-      const clusterId = Number(info.lastInsertRowid) ||
-        (db.prepare(`SELECT id FROM candidate_clusters WHERE cluster_key = ?`).get(key) as any).id
+      // NOT lastInsertRowid: SQLite leaves it untouched when an upsert takes
+      // the UPDATE branch, so it hands back a stale id from an earlier insert
+      // and the members get filed into somebody else's family.
+      void info
+      const clusterId = (db.prepare(
+        `SELECT id FROM candidate_clusters WHERE cluster_key = ?`,
+      ).get(key) as { id: number }).id
 
       const update = db.prepare(`UPDATE deal_candidates SET cluster_id = ? WHERE id = ?`)
       for (const member of family.members) update.run(clusterId, member.id)

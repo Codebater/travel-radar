@@ -347,13 +347,19 @@ export function evaluateAwardObservation(
     taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
   }, config)
 
-  const positioning = ctx.requiresPositioning && row.taxes_amount !== null
+  // An award's out-of-pocket cost is its surcharge, and comparing THAT against
+  // a cash fare from home would be arithmetic between two different things -
+  // it made every positioning award look like a spectacular saving. The
+  // positioning COST and PENALTY are still real and still apply, so the
+  // assessment runs with the comparison suppressed rather than being skipped.
+  const positioning = ctx.requiresPositioning
     ? assessPositioning(db, {
         positioningAirport: row.origin, destination: row.destination,
         departureDate: row.departure_date, departureTime: row.departure_time,
-        cabin: row.cabin, mainFare: row.taxes_amount,
+        cabin: row.cabin, mainFare: row.taxes_amount ?? 0,
         currency: row.taxes_currency ?? "USD",
         asOf, tripType: row.return_date ? "return" : "oneway",
+        compareAgainstHome: false,
       })
     : null
 

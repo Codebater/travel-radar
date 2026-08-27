@@ -28,6 +28,7 @@ import { projectDiscoveryBudget, discoveryVerificationPool, newRunBudget, canSpe
 import { selectForVerification } from "../discovery/verification.js"
 import { loadAnomalyConfig } from "../anomaly/config.js"
 import { assessCashAbsolute, assessAwardAbsolute, routeDesirability } from "../anomaly/absolute.js"
+import { scoreCash } from "../anomaly/scoring.js"
 import { checkCashSanity, checkAwardSanity, checkComparabilityGuards } from "../anomaly/sanity.js"
 import { rebuildClusters, listClusters } from "../anomaly/clustering.js"
 import { evaluateNewObservations } from "../anomaly/engine.js"
@@ -556,6 +557,44 @@ describe("absolute price rules", () => {
     expect(a.tier).not.toBeNull()
   })
 
+  it("drops the absolute component when no rule matches, rather than scoring it zero", () => {
+    // A rule that did not MATCH is not a rule saying "bad price". Scoring it
+    // zero penalised a route for a gap in our own config - the same mistake
+    // the CPP component was explicitly designed to avoid.
+    const baseline = {
+      key: "k", scope: "strict", count: 30, min: 900, max: 3000, median: 1850,
+      percentile: 10, percentBelowMedian: 20, differenceFromMinimum: 100,
+      firstAt: at(-30), lastAt: at(-1), ageDays: 1,
+      confidence: "MEDIUM" as const, confidenceValue: 0.75,
+      medianTaxes: null, taxesCurrency: null, isNewObservedLow: false,
+    }
+    const input = {
+      price: 1500, currency: "USD", stops: 1,
+      providerConfidence: "medium", verificationLevel: "discovered", baseline,
+    }
+    const noRule = scoreCash(input, loadAnomalyConfig(true), {
+      absolute: { tier: null, score: 0, thresholdUsed: null, rulePath: "none", detail: "no rule" },
+    })
+    // Dropped: zero weight, and the remaining components renormalise around it.
+    expect(noRule.components.absolutePrice!.weight).toBe(0)
+    expect(noRule.components.absolutePrice!.points).toBe(0)
+    const applied = Object.values(noRule.effectiveWeights).reduce((a, b) => a + b, 0)
+    expect(applied).toBeCloseTo(1, 2)
+
+    // With a rule that DID match, the component carries real weight - and it
+    // cuts both ways: a strong absolute price raises the score, a mediocre one
+    // lowers it, which is exactly what a real signal should do.
+    const strong = scoreCash(input, loadAnomalyConfig(true), {
+      absolute: { tier: "wtf", score: 1, thresholdUsed: 1090, rulePath: "cash.thailand.business", detail: "matched" },
+    })
+    const mediocre = scoreCash(input, loadAnomalyConfig(true), {
+      absolute: { tier: "interesting", score: 0.1, thresholdUsed: 1630, rulePath: "cash.thailand.business", detail: "matched" },
+    })
+    expect(strong.components.absolutePrice!.weight).toBeGreaterThan(0)
+    expect(strong.score).toBeGreaterThan(noRule.score)
+    expect(mediocre.score).toBeLessThan(noRule.score)
+  })
+
   it("scores desirability per airport", () => {
     const c = anomalyConfig()
     expect(routeDesirability("BKK", "thailand", c)).toBeGreaterThan(routeDesirability("DOH", "wildcard", c))
@@ -640,6 +679,36 @@ describe("false-positive guards", () => {
     expect(row.sanity).toBe("SUSPICIOUS_DATA")
     expect(row.status).toBe("below-threshold")
     expect(listCandidates(db, { status: "candidate" }).some(c => c.priceAmount === 9)).toBe(false)
+  })
+
+  it("keeps a suspicious observation out of every later baseline", () => {
+    // A 9 USD business fare correctly refused as a candidate would otherwise go
+    // on dragging the median down for every honest observation after it -
+    // quietly turning one bad row into a permanently distorted route.
+    for (let i = 0; i < 20; i++) {
+      recordPriceObservations(db, [makeFlight({
+        origin: "VIE", destination: "BKK", cabin: "business", returnDate: null,
+        price: { amount: 2000, currency: "USD" }, fetchedAt: at(-40 + i),
+      })], { adults: 1 })
+    }
+    recordPriceObservations(db, [makeFlight({
+      origin: "VIE", destination: "BKK", cabin: "business", returnDate: null,
+      price: { amount: 9, currency: "USD" }, fetchedAt: at(-2),
+    })], { adults: 1 })
+    evaluateNewObservations({ db, quiet: true })
+
+    // A later honest observation must be judged against the 2000s alone.
+    recordPriceObservations(db, [makeFlight({
+      origin: "VIE", destination: "BKK", cabin: "business", returnDate: null,
+      price: { amount: 1400, currency: "USD" }, fetchedAt: at(0),
+    })], { adults: 1 })
+    evaluateNewObservations({ db, quiet: true })
+
+    const later = db.prepare(
+      `SELECT observed_median, observed_minimum FROM deal_candidates WHERE price_amount = 1400`,
+    ).get() as any
+    expect(later.observed_minimum).toBe(2000)
+    expect(later.observed_median).toBe(2000)
   })
 
   it("asserts the whole comparability guard set in one place", () => {
@@ -1045,6 +1114,55 @@ describe("a discovery cycle end to end (mocked providers)", () => {
     const execution = await executeDiscoveryJob(j, { db, trigger: "manual", cashOnly: true, config })
     expect(execution.runId).toBeNull()
     expect(execution.result.errors.join(" ")).toMatch(/already has a run in progress/)
+  })
+
+  it("closes the run and reschedules the job even when a stage throws", async () => {
+    // A throw used to leave the run row marked 'running' forever: the job's
+    // next cycle was blocked until the reaper noticed, and next_run_at was
+    // never advanced - so the job came due again on the very next tick and
+    // re-spent its whole budget, over and over.
+    const exploding = new MockProvider({ name: "free_mock", throws: true })
+    setProviders([exploding])
+    const j = job({ name: "throws", budget: {
+      maxFreeCallsPerRun: 4, maxAwardCallsPerRun: 0, maxMeteredCallsPerRun: 0,
+      maxRuntimeMs: 60_000, maxDestinations: 1, datesPerRoute: 1,
+    } as any })
+
+    const execution = await executeDiscoveryJob(j, { db, trigger: "manual", cashOnly: true, config })
+
+    const runs = listDiscoveryRuns(db, { jobId: j.id })
+    expect(runs).toHaveLength(1)
+    expect(runs[0]!.status).not.toBe("running")
+    expect(runs[0]!.completedAt).toBeTruthy()
+    void execution
+
+    const after = db.prepare(`SELECT next_run_at FROM discovery_jobs WHERE id = ?`).get(j.id) as any
+    expect(after.next_run_at).toBeTruthy()
+    expect(new Date(after.next_run_at).getTime()).toBeGreaterThan(Date.now())
+  })
+
+  it("stops before the award stage when the scheduler has been asked to stop", async () => {
+    setProviders([new MockProvider({ name: "free_mock", flights: [makeFlight()] })])
+    const award = new MockAwardProvider({ name: "roame", flights: [makeAwardFlight()] })
+    setAwardProviders([award])
+
+    const j = job({ name: "stopping", budget: {
+      maxFreeCallsPerRun: 4, maxAwardCallsPerRun: 8, maxMeteredCallsPerRun: 0,
+      maxRuntimeMs: 60_000, maxDestinations: 1, datesPerRoute: 1,
+    } as any })
+
+    // Stage 1 runs, then the operator stops the scheduler. Award searches are
+    // the slowest and most quota-bound thing here; continuing to spend them
+    // after being asked to stop is the worst moment to keep going.
+    let calls = 0
+    await executeDiscoveryJob(j, {
+      db, trigger: "manual", config,
+      shouldContinue: () => { calls += 1; return calls <= 1 },
+    })
+
+    expect(award.calls.length).toBe(0)
+    const runs = listDiscoveryRuns(db, { jobId: j.id })
+    expect(runs[0]!.awardSearches).toBe(0)
   })
 
   it("keeps the fixed observer's jobs untouched", () => {

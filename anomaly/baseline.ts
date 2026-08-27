@@ -15,6 +15,11 @@
  * internal price spread becomes a fabricated "below the observed median".
  * So the search_request_id the rows already carry is excluded explicitly.
  *
+ * Observations already judged SUSPICIOUS_DATA are excluded too. A 12 EUR
+ * business fare that was correctly refused as a candidate would otherwise go on
+ * dragging the median down for every honest observation that followed it -
+ * quietly turning one bad row into a permanently distorted route.
+ *
  * Baselines are per comparability key (§L). When the strict key is too thin the
  * soft dimensions are relaxed in configured order and the scope is recorded, so
  * a reader can always see how wide the comparison had to be drawn.
@@ -68,6 +73,10 @@ export function cashBaselineRows(
       AND (return_date IS NULL) = ?
       AND fetched_at < ? AND fetched_at >= ?
       AND (? IS NULL OR search_request_id IS NULL OR search_request_id <> ?)
+      AND id NOT IN (
+        SELECT source_id FROM deal_candidates
+        WHERE source_table = 'flight_prices' AND sanity != 'ok'
+      )
   `).all(
     key.origin, key.destination, key.cabin, currency,
     key.tripType === "oneway" ? 1 : 0,
@@ -96,6 +105,10 @@ export function awardBaselineRows(
       AND (return_date IS NULL) = ?
       AND fetched_at < ? AND fetched_at >= ?
       AND (? IS NULL OR search_request_id IS NULL OR search_request_id <> ?)
+      AND id NOT IN (
+        SELECT source_id FROM deal_candidates
+        WHERE source_table = 'award_prices' AND sanity != 'ok'
+      )
   `).all(
     key.origin, key.destination, key.cabin, key.loyaltyProgram ?? "",
     key.tripType === "oneway" ? 1 : 0,

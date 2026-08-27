@@ -318,7 +318,7 @@ async function showDetail(id) {
 
       ${d.history ? `<div class="text-xs text-gray-500 mt-4">
         This radar has ${d.history.observations} observations on this route and cabin:
-        min ${d.history.min}, median ${d.history.median}, max ${d.history.max},
+        min ${d.history.min}, ${d.history.median !== null ? `median ${d.history.median}, ` : ''}max ${d.history.max},
         from ${esc(d.history.firstAt.slice(0, 10))} to ${esc(d.history.lastAt.slice(0, 10))}.
       </div>` : ''}
     </div>`;

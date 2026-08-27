@@ -88,6 +88,13 @@ export function assessPositioning(
     asOf: string
     tripType?: "oneway" | "return"
     hasCheckedBaggage?: boolean
+    /**
+     * False when `mainFare` is not a cash fare and so cannot be compared with
+     * one. An award's surcharge is a real cost and still needs the positioning
+     * money and penalty added, but setting it beside a cash home fare would be
+     * arithmetic between two different things.
+     */
+    compareAgainstHome?: boolean
   },
   config: DiscoveryConfig = loadDiscoveryConfig(),
 ): PositioningAssessment {
@@ -194,9 +201,11 @@ export function assessPositioning(
   // Compared against a home fare of the SAME trip type: a one-way positioning
   // fare set beside a home round trip would look like a spectacular saving and
   // be a straightforward category error.
-  const home = bestHomeFare(db, input.destination, input.cabin, input.currency, input.asOf, config, {
-    tripType: isReturn ? "return" : "oneway",
-  })
+  const home = input.compareAgainstHome === false
+    ? null
+    : bestHomeFare(db, input.destination, input.cabin, input.currency, input.asOf, config, {
+        tripType: isReturn ? "return" : "oneway",
+      })
   const savingVsHome = home === null ? null : Math.round((home - trueTripStartCost) * 100) / 100
   const savingPercent = home === null || home <= 0 || savingVsHome === null
     ? null
@@ -229,7 +238,9 @@ export function assessPositioning(
     savingVsHome,
     savingPercent,
     worthwhile,
-    note: home === null
+    note: input.compareAgainstHome === false
+      ? "positioning cost and inconvenience apply; no cash comparison is possible for a redemption"
+      : home === null
       ? "no comparable home-airport fare observed yet, so the saving is unknown"
       : `${trueTripStartCost} ${input.currency} true start cost ` +
         `(${legsNeeded === 2 ? "two positioning legs" : "one positioning leg"}) vs ${home} from home`,
