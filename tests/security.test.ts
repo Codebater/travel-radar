@@ -155,8 +155,8 @@ describe("cross-origin protection", () => {
     expect(res.status).toBe(403)
   })
 
-  it("refuses cross-origin calls to the new Phase 2 endpoints too", async () => {
-    for (const p of ["/api/providers", "/api/price-history?from=PRG&to=BKK"]) {
+  it("refuses cross-origin calls to the new Phase 2/3 endpoints too", async () => {
+    for (const p of ["/api/providers", "/api/price-history?from=PRG&to=BKK", "/api/results/latest"]) {
       const res = await fetch(`${base}${p}`, { headers: { Origin: "https://evil.example" } })
       expect(res.status).toBe(403)
     }
@@ -179,6 +179,41 @@ describe("network binding", () => {
     })
     probe.close()
     expect(bound).toBe(true)
+  })
+})
+
+describe("Phase 3 endpoints", () => {
+  it("serves /api/results/latest from the database (404 on a fresh one)", async () => {
+    // The test server runs against a fresh temp DATABASE_PATH with no search
+    // persisted — a clean 404 proves the endpoint is DB-backed and functional
+    // without any results.json involvement.
+    const res = await fetch(`${base}/api/results/latest`)
+    expect(res.status).toBe(404)
+    const body = await res.json() as { error?: string }
+    expect(body.error).toContain("no search")
+  })
+
+  it("reports award providers and balances in /api/providers without spending", async () => {
+    const res = await fetch(`${base}/api/providers`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as any
+    const awardNames = (body.awards || []).map((p: any) => p.provider)
+    expect(awardNames).toContain("roame")
+    expect(awardNames).toContain("atf")
+    expect(body.balances?.provider).toBe("awardwallet")
+    // Coverage matrix is served alongside, with its audit date.
+    expect(body.coverage?.programs?.MILES_AND_MORE).toBeTruthy()
+    // No award provider health check may consume quota.
+    const atfUsage = (body.usage || []).find((u: any) => u.provider === "atf")
+    expect(atfUsage?.attempted ?? 0).toBe(0)
+  })
+
+  it("returns award stats sections in /api/price-history", async () => {
+    const res = await fetch(`${base}/api/price-history?from=PRG&to=BKK`)
+    expect(res.status).toBe(200)
+    const body = await res.json() as any
+    expect(Array.isArray(body.cash)).toBe(true)
+    expect(Array.isArray(body.awards)).toBe(true)
   })
 })
 
@@ -208,7 +243,7 @@ describe("provider endpoints do not spend money", () => {
     expect(res.status).toBe(200)
     const body = await res.json() as any
 
-    const serp = body.providers.find((p: any) => p.provider === "serpapi")
+    const serp = body.cash.find((p: any) => p.provider === "serpapi")
     expect(serp).toBeTruthy()
     expect(["ok", "unconfigured", "degraded"]).toContain(serp.status)
 

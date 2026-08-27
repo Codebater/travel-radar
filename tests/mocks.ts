@@ -138,3 +138,154 @@ export class MockProvider implements CashFlightProvider {
     }
   }
 }
+
+// ─── Award mocks (Phase 3) ───────────────────────────────────────────────────
+
+import { itineraryHash as hashItinerary } from "../cache/key.js"
+import type {
+  AwardFlightProvider, AwardFlightQuery, AwardSearchOptions, AwardSearchResult,
+  NormalizedAwardFlight,
+} from "../providers/award-flights/types.js"
+
+export function makeAwardQuery(over: Partial<AwardFlightQuery> = {}): AwardFlightQuery {
+  return {
+    origin: "PRG",
+    destination: "BKK",
+    departureDate: "2026-11-10",
+    returnDate: null,
+    searchClass: "PREM",
+    adults: 1,
+    flexDays: 0,
+    ...over,
+  }
+}
+
+/**
+ * A synthetic Austrian-operated VIE→BKK-style award. The itinerary hash derives
+ * from the physical-flight fields, so the same flight priced by two programs
+ * shares a hash — exactly what the multi-program tests need.
+ */
+export function makeAwardFlight(over: Partial<NormalizedAwardFlight> = {}): NormalizedAwardFlight {
+  const base = {
+    origin: "PRG",
+    destination: "BKK",
+    departureDate: "2026-11-10",
+    departureTime: "2026-11-10T10:20",
+    arrivalTime: "2026-11-11T06:15",
+    returnDate: null as string | null,
+    cabin: "business" as const,
+    operatingAirlines: ["OS"],
+    stops: 1,
+    durationMinutes: 715,
+  }
+  const merged = { ...base, ...over }
+  const flight: NormalizedAwardFlight = {
+    itineraryHash: "",
+    origin: merged.origin,
+    destination: merged.destination,
+    departureDate: merged.departureDate,
+    departureTime: merged.departureTime,
+    arrivalTime: merged.arrivalTime,
+    returnDate: merged.returnDate,
+    airline: null,
+    operatingAirlines: merged.operatingAirlines,
+    flightNumbers: ["OS 25"],
+    stops: merged.stops,
+    durationMinutes: merged.durationMinutes,
+    airports: [merged.origin, "VIE", merged.destination],
+    cabin: merged.cabin,
+    equipment: ["77W"],
+    loyaltyProgram: "AEROPLAN",
+    loyaltyProgramName: "Aeroplan",
+    points: 70000,
+    taxes: { amount: 80, currency: "USD" },
+    availableSeats: 2,
+    transferOptions: [],
+    bookingUrl: "https://example.invalid/award",
+    provider: "mock-award",
+    fetchedAt: new Date().toISOString(),
+    verificationLevel: "discovered",
+    providerConfidence: "medium",
+    providerScore: null,
+    raw: null,
+    ...over,
+  }
+  if (!over.itineraryHash) {
+    flight.itineraryHash = hashItinerary({
+      origin: flight.origin, destination: flight.destination,
+      departureDate: flight.departureDate, departureTime: flight.departureTime,
+      arrivalTime: flight.arrivalTime, returnDate: flight.returnDate,
+      cabin: flight.cabin, airlines: flight.operatingAirlines,
+      stops: flight.stops, durationMinutes: flight.durationMinutes,
+    })
+  }
+  return flight
+}
+
+export interface MockAwardOptions {
+  name?: string
+  configured?: boolean
+  enabled?: boolean
+  flights?: NormalizedAwardFlight[]
+  fail?: AwardSearchResult["reason"]
+  throws?: boolean
+  callsPerSearch?: number
+  reportedQuota?: { remaining: number; limit: number }
+  /** Artificial latency, to exercise concurrent-collapse behaviour. */
+  delayMs?: number
+}
+
+export class MockAwardProvider implements AwardFlightProvider {
+  readonly name: string
+  readonly confidence = "medium" as const
+  readonly callsPerSearch: number
+  readonly calls: { query: AwardFlightQuery; options: AwardSearchOptions }[] = []
+
+  constructor(private readonly opts: MockAwardOptions = {}) {
+    this.name = opts.name ?? "mock-award"
+    this.callsPerSearch = opts.callsPerSearch ?? 1
+  }
+
+  isEnabled(): boolean { return this.opts.enabled !== false }
+  isConfigured(): boolean { return this.isEnabled() && this.opts.configured !== false }
+  quota() { return null }
+
+  async health() {
+    return {
+      provider: this.name,
+      status: this.isConfigured() ? "ok" as const : "unconfigured" as const,
+      detail: "mock award provider", latencyMs: 0,
+      checkedAt: new Date().toISOString(), quota: null,
+    }
+  }
+
+  async search(query: AwardFlightQuery, options: AwardSearchOptions = {}): Promise<AwardSearchResult> {
+    this.calls.push({ query, options })
+    if (this.opts.delayMs) await new Promise(r => setTimeout(r, this.opts.delayMs))
+    if (this.opts.throws) throw new Error("mock award provider exploded")
+    if (this.opts.fail) {
+      return {
+        provider: this.name, ok: false, flights: [], callsSpent: this.callsPerSearch,
+        latencyMs: 1, completionPct: null,
+        reason: this.opts.fail, error: `mock failure: ${this.opts.fail}`,
+      }
+    }
+    const flights = (this.opts.flights ?? [makeAwardFlight()]).map(f => ({
+      ...f, provider: this.name, verificationLevel: "discovered" as const,
+    }))
+    return {
+      provider: this.name, ok: true, flights, callsSpent: this.callsPerSearch,
+      latencyMs: 1, completionPct: 100,
+      ...(this.opts.reportedQuota ? { reportedQuota: this.opts.reportedQuota } : {}),
+    }
+  }
+}
+
+/** Synthetic balances for tests — NEVER real figures (see §private balances). */
+export function syntheticBalances() {
+  return [
+    { programKey: "chase-ur", program: "Chase UR (synthetic)", balance: 100000 },
+    { programKey: "AEROPLAN", program: "Aeroplan (synthetic)", balance: 50000 },
+    { programKey: "FLYING_BLUE", program: "Flying Blue (synthetic)", balance: 20000 },
+  ]
+}
