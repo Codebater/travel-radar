@@ -118,7 +118,7 @@ export interface CashSearchOptions extends SearchOptions {
   /** Ask the metered provider to confirm, budget permitting. */
   verify?: boolean
   /** Where the request came from — recorded against search_requests. */
-  source?: "api" | "cli" | "test"
+  source?: "api" | "cli" | "test" | "observer"
   /**
    * Join an existing unified search instead of recording a new one. One user
    * search = one search_requests row; cash, award and hidden-city observations
@@ -216,7 +216,10 @@ export async function searchCashFlights(
   // ── Tier 2: metered verification ─────────────────────────────────────────
   // Only when explicitly requested, or when the free tier produced nothing.
   const freeTierEmpty = collected.length === 0
-  const wantVerification = options.verify === true || options.forceRefresh === true || freeTierEmpty
+  const wantVerification =
+    options.allowMeteredFallback === false
+      ? false   // scheduled observation: cache + free discovery only, never metered
+      : options.verify === true || options.forceRefresh === true || freeTierEmpty
 
   if (wantVerification) {
     for (const provider of metered) {

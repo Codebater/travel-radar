@@ -22,7 +22,7 @@ export function recordSearchRequest(
   // Structurally a CashFlightQuery, but `cabin` is widened: the unified search
   // row also records award search classes ("ECON"/"PREM"/"both").
   query: Omit<CashFlightQuery, "cabin"> & { cabin: string },
-  source: "api" | "cli" | "test" = "api",
+  source: "api" | "cli" | "test" | "observer" = "api",
 ): number {
   const info = db.prepare(`
     INSERT INTO search_requests (origin, destination, departure_date, return_date, cabin, adults, source, created_at)

@@ -150,6 +150,13 @@ export interface SearchOptions {
    * permits spending the reserved metered calls. Automated paths must not set it.
    */
   userInitiated?: boolean
+  /**
+   * false forbids the metered fallback entirely — even when the free tier
+   * returns nothing. Scheduled baseline observation sets this: it must live on
+   * cache + free discovery and never burn SerpAPI quota just because the
+   * scheduler ran. Default true (interactive behaviour is unchanged).
+   */
+  allowMeteredFallback?: boolean
 }
 
 /**

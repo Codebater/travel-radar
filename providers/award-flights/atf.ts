@@ -117,6 +117,20 @@ export class ATFAwardProvider implements AwardFlightProvider {
       return { provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs: 0, completionPct: null, reason: "unconfigured", error: "ATF API key not configured" }
     }
 
+    // Budget guard (mirrors SerpAPI's): a search costs 5 of ~150 monthly calls,
+    // so refuse before spending when the allowance is exhausted. The reported
+    // limit from ATF wins over the documented default when known.
+    const quota = this.quota()
+    const limit = quota.reportedLimit ?? MONTHLY_LIMIT
+    if (quota.estimatedUsed + ATF_AIRLINES.length > limit) {
+      const message = `ATF monthly allowance exhausted (${quota.estimatedUsed}/${limit}, next search needs ${ATF_AIRLINES.length})`
+      console.warn(`ATF SKIPPED quota guard — ${message}`)
+      return {
+        provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs: 0,
+        completionPct: null, reason: "budget-exhausted", error: message,
+      }
+    }
+
     try {
       const results = await searchATF(query.origin, query.destination, query.departureDate)
       const latencyMs = Date.now() - started
