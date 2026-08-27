@@ -55,6 +55,11 @@ const PROGRAM_NAMES: Record<string, string> = {
   JETBLUE: "JetBlue TrueBlue",
   // Keys Roame may use for programs it documents but this project has not yet
   // observed live (display names only — coverage claims live in coverage.json).
+  //
+  // LUFTHANSA is Roame's real identifier for Miles & More: the API rejects
+  // "MILES_AND_MORE" as an invalid MileageProgram but accepts "LUFTHANSA".
+  // Live probing on 2026-08-27 nonetheless returned ZERO Miles & More fares
+  // under that key — see coverage.json.
   LUFTHANSA: "Lufthansa Miles & More",
   MILES_AND_MORE: "Lufthansa Miles & More",
   FINNAIR: "Finnair Plus",
