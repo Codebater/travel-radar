@@ -310,6 +310,81 @@ and prints a warning if run by hand. Hidden-city results carry
 rebooking, contract-of-carriage) — they are informational comparisons, not
 ordinary tickets.
 
+### Observer — scheduled baseline collection (Phase 4)
+
+The observer accumulates price history for the personal route profile. It is
+NOT a deal hunter: no scoring, no alerts — statistics only, labelled "observed
+by this radar".
+
+```bash
+npm run observer:seed
+```
+```bash
+npm run observer:dry-run
+```
+```bash
+npm run observer:run -- PRG-BKK
+```
+```bash
+npm run observer:start
+```
+```bash
+npm run observer:stop
+```
+```bash
+npm run observer:status
+```
+
+- **Profile**: routes/cabins/cadence live in `config/travel-profile.json`, not
+  in code. `observer:seed` upserts jobs from it (idempotent; run bookkeeping is
+  preserved). Wildcard destinations are configuration only.
+- **Cost discipline**: cash goes cache → fast_flights with the metered fallback
+  FORBIDDEN (`allowMeteredFallback: false`) — a scheduled run can never spend
+  SerpAPI. Awards use the per-provider award cache; ATF is excluded from
+  schedules by default (5 calls/search of ~150/month) and now refuses any
+  search that would exceed its allowance.
+- **Sampling**: departures every `stepDays` (14) across a 180-day horizon
+  starting 21 days out, trip lengths 7/10/14/21 rotated across the grid; each
+  run searches only `datesPerRun` (4) pairs and successive runs rotate through
+  the grid. Awards run every `awardEveryNRuns` (2nd) run.
+- **Dry-run** prints the exact dates, expected cold-cache call ceilings and the
+  monthly budget projection — zero external calls. The scheduler REFUSES to
+  start when the projection exceeds any provider budget.
+- **Locking**: a single-row `scheduler_state` lease (holder = pid@host:token,
+  30-60s heartbeats, stale takeover after `OBSERVER_LEASE_TTL_SECONDS`). Two
+  schedulers cannot run jobs twice; `observer:stop` asks the holder to exit via
+  the database. Headless by design — plain Node process, no browser, no OS task
+  scheduler; Docker-ready for the NAS later.
+- **Backoff**: 3+ consecutive failures stretch a job's interval (×2, ×4, up to
+  ×8). Expired/missing award credentials are detected BEFORE searching and
+  recorded as `SKIPPED_AUTH`, which does not count as failure — a dead session
+  is never hammered.
+- **Disable things**: one provider — `ENABLE_ROAME=false` / `ENABLE_ATF=false`,
+  or remove it from the job's `award_providers`; one route —
+  `npx tsx observer/cli.ts disable PRG-MEX`.
+- **Inspect**: the Observer page at http://localhost:8888/observer.html (jobs,
+  runs, provider status, budget projection; click a route for its statistics),
+  `npm run observer:status`, `npm run history -- PRG BKK`, or the read-only
+  APIs `/api/observer/status` and `/api/route-stats?from=PRG&to=BKK`.
+  Scheduler CONTROL is CLI-only on purpose — nothing on the network can start,
+  stop or reconfigure it.
+
+### Credentials for live award validation
+
+- **Roame**: log in at roame.travel → DevTools → Application → Cookies → copy
+  the `session` and `csrfSecret` values into
+  `%USERPROFILE%\.openclaw\credentialsoame.json`:
+  `{ "session": "…", "csrfSecret": "…", "sessionExpiresAt": <cookie expiry, ms epoch> }`.
+  Refreshing an expired session is the same procedure. Verify with
+  `npm run providers` (shows the expiry date, no network call).
+- **ATF**: `ATF_API_KEY` in `.env` (or the credentials file). ATF also
+  documents agent self-registration (`POST /api/v1/agent/register`) — run that
+  yourself if you want a fresh key; the app never creates accounts.
+- **AwardWallet** (optional): `awardwallet.json` with `apiKey` + `userId`.
+- **Validate without spending**: `npm run providers` then
+  `npm run observer:dry-run`. A minimal live check is one manual
+  `npm run observer:run -- PRG-BKK` (roame: ~2 search jobs; ATF stays untouched).
+
 ### Testing a provider
 
 ```bash
@@ -384,6 +459,9 @@ npm run db:status
 | `award_prices` | one row per (itinerary × program × provider × fetch) — "points observed by this radar" | **append-only** |
 | `balance_snapshots` | loyalty balance batches (sensitive, local only) | append-only |
 | `search_results` | full result payload per search — the dashboard's state | one per search |
+| `observation_jobs` | what the observer watches: route, cabins, providers, cadence, backoff state | permanent |
+| `observation_runs` | per-run audit: status, searches, live calls, cache hits, observations, errors, duration | permanent |
+| `scheduler_state` | the single scheduler lease (holder, heartbeat, stop flag) | one row |
 | `schema_migrations` | which migrations have run | permanent |
 
 Back it up by copying `travel-radar.db` **together with** its `-wal` and `-shm`
