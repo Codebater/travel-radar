@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Observer — Flight Radar</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  surface: '#0f172a', card: '#1e293b', cardHover: '#334155',
+  accent: '#38bdf8', gold: '#fbbf24', emerald: '#34d399', warn: '#f87171',
+}}}}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .badge-green  { background: rgba(52,211,153,.15); color:#34d399; border:1px solid rgba(52,211,153,.3); }
+  .badge-yellow { background: rgba(251,191,36,.15); color:#fbbf24; border:1px solid rgba(251,191,36,.3); }
+  .badge-red    { background: rgba(248,113,113,.15); color:#f87171; border:1px solid rgba(248,113,113,.3); }
+  .badge-blue   { background: rgba(56,189,248,.15); color:#38bdf8; border:1px solid rgba(56,189,248,.3); }
+  td, th { padding: .4rem .75rem; }
+  tbody tr:hover { background: rgba(51,65,85,.5); cursor: default; }
+  .route-row:hover { cursor: pointer; background: rgba(56,189,248,.08) !important; }
+</style>
+</head>
+<body class="bg-surface text-gray-200 min-h-screen">
+<div class="max-w-6xl mx-auto px-4 py-8">
+
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-extrabold text-white">📡 Observer</h1>
+      <p class="text-sm text-gray-400">Baseline observation collection — statistics are <span class="text-gray-300">prices observed by this radar</span>, not market data. No deal scoring yet.</p>
+    </div>
+    <a href="/" class="text-sm text-accent hover:underline">← Search dashboard</a>
+  </div>
+
+  <div id="schedulerBanner" class="mb-6"></div>
+
+  <div class="grid md:grid-cols-4 gap-4 mb-8" id="statCards"></div>
+
+  <h2 class="text-lg font-bold text-white mb-2">Active jobs <span class="text-xs text-gray-500 font-normal">(click a route for details — control via <code class="text-gray-400">npm run observer:*</code>, never over HTTP)</span></h2>
+  <div class="bg-card rounded-xl overflow-x-auto mb-8">
+    <table class="w-full text-sm">
+      <thead class="text-left text-gray-400 border-b border-gray-700">
+        <tr><th>Route</th><th>Prio</th><th>Cadence</th><th>Cabins</th><th>Awards</th><th>Last run</th><th>Next run</th><th>Runs</th><th>State</th></tr>
+      </thead>
+      <tbody id="jobsBody"></tbody>
+    </table>
+  </div>
+
+  <div id="routeDetail" class="hidden mb-8"></div>
+
+  <h2 class="text-lg font-bold text-white mb-2">Recent runs</h2>
+  <div class="bg-card rounded-xl overflow-x-auto mb-8">
+    <table class="w-full text-sm">
+      <thead class="text-left text-gray-400 border-b border-gray-700">
+        <tr><th>#</th><th>Job</th><th>Status</th><th>Trigger</th><th>Searches</th><th>Live calls</th><th>Cache hits</th><th>Observations</th><th>Duration</th><th>When</th></tr>
+      </thead>
+      <tbody id="runsBody"></tbody>
+    </table>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-6">
+    <div>
+      <h2 class="text-lg font-bold text-white mb-2">Projected monthly usage</h2>
+      <div class="bg-card rounded-xl overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-left text-gray-400 border-b border-gray-700"><tr><th>Provider</th><th>~Calls/mo</th><th>Budget</th><th></th></tr></thead>
+          <tbody id="projBody"></tbody>
+        </table>
+      </div>
+      <p class="text-xs text-gray-500 mt-1">Cold-cache ceiling — real usage is lower because repeats hit the cache.</p>
+    </div>
+    <div>
+      <h2 class="text-lg font-bold text-white mb-2">API usage this month</h2>
+      <div class="bg-card rounded-xl overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="text-left text-gray-400 border-b border-gray-700"><tr><th>Provider</th><th>Attempted</th><th>OK</th><th>Failed</th></tr></thead>
+          <tbody id="usageBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+function esc(s) { const d = document.createElement('div'); d.textContent = String(s ?? ''); return d.innerHTML; }
+function age(iso) {
+  if (!iso) return '—';
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  const label = m => Math.abs(m) < 60 ? `${Math.abs(m)}m` : Math.abs(m) < 1440 ? `${Math.round(Math.abs(m)/60)}h` : `${Math.round(Math.abs(m)/1440)}d`;
+  return mins >= 0 ? `${label(mins)} ago` : `in ${label(mins)}`;
+}
+function statusBadge(s) {
+  const cls = s === 'success' ? 'badge-green' : (s === 'partial' || s === 'skipped_auth') ? 'badge-yellow'
+            : s === 'dry-run' ? 'badge-blue' : 'badge-red';
+  return `<span class="${cls} text-[10px] px-1.5 py-0.5 rounded-full">${esc(s)}</span>`;
+}
+
+async function load() {
+  const d = await (await fetch('./api/observer/status')).json();
+
+  // Scheduler banner
+  const banner = document.getElementById('schedulerBanner');
+  banner.innerHTML = d.scheduler.running
+    ? `<div class="badge-green rounded-lg px-4 py-2 text-sm">Scheduler running — holder <code>${esc(d.scheduler.holder)}</code>, heartbeat ${esc(age(d.scheduler.heartbeatAt))}${d.scheduler.stopRequested ? ' · stop requested' : ''}</div>`
+    : `<div class="badge-yellow rounded-lg px-4 py-2 text-sm">Scheduler not running — start with <code>npm run observer:start</code> (jobs also run one-shot via <code>npm run observer:run</code>)</div>`;
+
+  // Stat cards
+  const enabledJobs = d.jobs.filter(j => j.enabled).length;
+  const lastRun = d.runs[0];
+  document.getElementById('statCards').innerHTML = [
+    ['ACTIVE JOBS', `${enabledJobs}<span class="text-base text-gray-500">/${d.jobs.length}</span>`],
+    ['CASH OBSERVATIONS', d.observationTotals.cash.toLocaleString()],
+    ['AWARD OBSERVATIONS', d.observationTotals.awards.toLocaleString()],
+    ['LAST RUN', lastRun ? `${esc(age(lastRun.startedAt))}` : 'never'],
+  ].map(([t, v]) => `<div class="bg-card rounded-xl p-4"><div class="text-[11px] text-gray-500 font-semibold tracking-wider">${t}</div><div class="text-2xl font-extrabold text-white mt-1">${v}</div></div>`).join('');
+
+  // Jobs
+  document.getElementById('jobsBody').innerHTML = d.jobs.map(j => `
+    <tr class="route-row border-b border-gray-800" onclick="showRoute('${esc(j.origin)}','${esc(j.destination)}')">
+      <td class="font-semibold text-white">${esc(j.origin)} → ${esc(j.destination)}</td>
+      <td>P${j.priority}</td>
+      <td>every ${j.frequencyHours}h</td>
+      <td class="text-gray-400">${j.cabins.map(esc).join(', ')}</td>
+      <td class="text-gray-400">${j.awardProviders.map(esc).join(', ') || '—'}</td>
+      <td>${esc(age(j.lastRunAt))}</td>
+      <td>${esc(age(j.nextRunAt))}</td>
+      <td>${j.runsCompleted}</td>
+      <td>${j.enabled ? (j.consecutiveFailures >= 3 ? '<span class="badge-yellow text-[10px] px-1.5 py-0.5 rounded-full">backoff ×' + j.consecutiveFailures + '</span>' : '<span class="badge-green text-[10px] px-1.5 py-0.5 rounded-full">enabled</span>') : '<span class="badge-red text-[10px] px-1.5 py-0.5 rounded-full">disabled</span>'}</td>
+    </tr>`).join('') || '<tr><td colspan="9" class="text-gray-500 py-4">No jobs — run: npm run observer:seed</td></tr>';
+
+  // Runs
+  const jobName = id => (d.jobs.find(j => j.id === id) || {}).name || id;
+  document.getElementById('runsBody').innerHTML = d.runs.map(r => `
+    <tr class="border-b border-gray-800">
+      <td class="text-gray-500">#${r.id}</td>
+      <td class="font-semibold">${esc(jobName(r.jobId))}</td>
+      <td>${statusBadge(r.status)}</td>
+      <td class="text-gray-400">${esc(r.trigger)}</td>
+      <td>${r.searchesRun}</td><td>${r.providerCalls}</td><td>${r.cacheHits}</td><td>${r.observationsAdded}</td>
+      <td>${r.durationMs != null ? (r.durationMs/1000).toFixed(1) + 's' : '—'}</td>
+      <td>${esc(age(r.startedAt))}</td>
+    </tr>`).join('') || '<tr><td colspan="10" class="text-gray-500 py-4">No runs yet</td></tr>';
+
+  // Projection + usage
+  document.getElementById('projBody').innerHTML = d.projection.providers.map(p => `
+    <tr class="border-b border-gray-800">
+      <td>${esc(p.provider)}</td><td>~${p.monthlyCalls}</td>
+      <td class="text-gray-400">${p.budget === null ? 'unmetered' : p.budget}</td>
+      <td>${p.withinBudget ? '<span class="badge-green text-[10px] px-1.5 py-0.5 rounded-full">OK</span>' : '<span class="badge-red text-[10px] px-1.5 py-0.5 rounded-full">OVER</span>'}</td>
+    </tr>`).join('');
+  document.getElementById('usageBody').innerHTML = d.usage.map(u => `
+    <tr class="border-b border-gray-800"><td>${esc(u.provider)}</td><td>${u.attempted}</td><td>${u.succeeded}</td><td>${u.failed}</td></tr>
+  `).join('') || '<tr><td colspan="4" class="text-gray-500 py-4">Nothing spent this month</td></tr>';
+}
+
+async function showRoute(from, to) {
+  const el = document.getElementById('routeDetail');
+  el.classList.remove('hidden');
+  el.innerHTML = '<div class="bg-card rounded-xl p-4 text-gray-400 text-sm">Loading…</div>';
+  const d = await (await fetch(`./api/route-stats?from=${from}&to=${to}`)).json();
+
+  const cashStats = d.cashStats.map(s => `
+    <tr class="border-b border-gray-800"><td>${esc(s.currency)}</td><td>${s.observations}</td>
+      <td>${s.min}</td><td>${s.median}</td><td>${s.max}</td><td>${s.latest}</td><td>${esc(age(s.latestAt))}</td></tr>`).join('')
+    || '<tr><td colspan="7" class="text-gray-500 py-3">No cash observations yet</td></tr>';
+
+  const awardStats = d.awardStats.map(s => `
+    <tr class="border-b border-gray-800"><td class="font-semibold">${esc(s.loyaltyProgram)}</td><td>${esc(s.cabin)}</td><td>${s.observations}</td>
+      <td>${s.minPoints.toLocaleString()}</td><td>${s.medianPoints.toLocaleString()}</td><td>${s.maxPoints.toLocaleString()}</td>
+      <td>${s.latestPoints.toLocaleString()}</td><td>${s.minTaxes != null ? s.minTaxes + ' ' + esc(s.minTaxesCurrency || '') : '—'}</td></tr>`).join('')
+    || '<tr><td colspan="8" class="text-gray-500 py-3">No award observations yet</td></tr>';
+
+  const recent = d.recentCash.slice(0, 12).map(r => `
+    <tr class="border-b border-gray-800"><td>${esc(r.departure_date)}${r.return_date ? ' ↩ ' + esc(r.return_date) : ''}</td>
+      <td>${esc(r.cabin)}</td><td class="text-gray-400">${esc(r.airline || '—')}</td>
+      <td class="font-semibold">${r.price_amount} ${esc(r.price_currency)}</td>
+      <td class="text-gray-400">${esc(r.provider)} · ${esc(r.verification_level)}</td><td>${esc(age(r.fetched_at))}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="text-gray-500 py-3">—</td></tr>';
+
+  el.innerHTML = `
+    <div class="bg-card rounded-xl p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-lg font-bold text-white">${esc(d.origin)} → ${esc(d.destination)} — observed by this radar</h3>
+        <button onclick="document.getElementById('routeDetail').classList.add('hidden')" class="text-gray-500 hover:text-white">✕</button>
+      </div>
+      <h4 class="text-sm font-semibold text-gray-300 mb-1">Cash (per currency)</h4>
+      <table class="w-full text-sm mb-4"><thead class="text-left text-gray-500"><tr><th>Cur</th><th>Obs</th><th>Min</th><th>Median</th><th>Max</th><th>Latest</th><th>When</th></tr></thead><tbody>${cashStats}</tbody></table>
+      <h4 class="text-sm font-semibold text-gray-300 mb-1">Awards (per program × cabin)</h4>
+      <table class="w-full text-sm mb-4"><thead class="text-left text-gray-500"><tr><th>Program</th><th>Cabin</th><th>Obs</th><th>Min pts</th><th>Median</th><th>Max</th><th>Latest</th><th>Min taxes</th></tr></thead><tbody>${awardStats}</tbody></table>
+      <h4 class="text-sm font-semibold text-gray-300 mb-1">Latest cash observations</h4>
+      <table class="w-full text-sm"><thead class="text-left text-gray-500"><tr><th>Dates</th><th>Cabin</th><th>Airline</th><th>Price</th><th>Source</th><th>When</th></tr></thead><tbody>${recent}</tbody></table>
+    </div>`;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+load();
+setInterval(load, 30000);
+</script>
+</body>
+</html>

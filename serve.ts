@@ -21,6 +21,8 @@ import { awardProviderHealth } from "./providers/award-flights/index.js"
 import { balancesHealth } from "./providers/balances/index.js"
 import { getDb } from "./db/index.js"
 import { allUsage, priceHistory, awardPriceHistory, latestSearchResult, saveSearchResult } from "./db/repositories.js"
+import { listJobs, listRuns, readLease } from "./observer/store.js"
+import { projectMonthlyBudget } from "./observer/budget.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
@@ -122,6 +124,71 @@ const server = http.createServer(async (req, res) => {
       }, null, 2))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/observer/status — READ-ONLY observer state for the dashboard
+  // page. Control (start/stop/run/seed) is deliberately NOT exposed over HTTP:
+  // those stay CLI-only, so nothing on the network can drive the scheduler.
+  if (url.pathname === "/api/observer/status") {
+    try {
+      const db = getDb()
+      const lease = readLease(db)
+      const jobs = listJobs(db)
+      const runs = listRuns(db, { limit: 20 })
+      const projection = projectMonthlyBudget(db)
+      const usage = allUsage(db)
+      const observationTotals = {
+        cash: (db.prepare("SELECT COUNT(*) c FROM flight_prices").get() as any).c,
+        awards: (db.prepare("SELECT COUNT(*) c FROM award_prices").get() as any).c,
+      }
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        checkedAt: new Date().toISOString(),
+        scheduler: lease
+          ? { running: true, holder: lease.holder, heartbeatAt: lease.heartbeatAt, stopRequested: lease.stopRequested }
+          : { running: false },
+        jobs, runs, projection, usage, observationTotals,
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/route-stats — everything observed for one route: cash stats,
+  // award stats per program, and the most recent raw observations.
+  if (url.pathname === "/api/route-stats") {
+    try {
+      const origin = iata(url.searchParams.get("from") || "", "from")
+      const destination = iata(url.searchParams.get("to") || "", "to")
+      const db = getDb()
+      const cashStats = priceHistory(db, { origin, destination })
+      const awardStats = awardPriceHistory(db, { origin, destination })
+      const recentCash = db.prepare(`
+        SELECT departure_date, return_date, cabin, airline, price_amount, price_currency,
+               provider, verification_level, fetched_at
+        FROM flight_prices WHERE origin = ? AND destination = ?
+        ORDER BY fetched_at DESC LIMIT 40
+      `).all(origin, destination)
+      const recentAwards = db.prepare(`
+        SELECT departure_date, cabin, loyalty_program, points, taxes_amount, taxes_currency,
+               available_seats, provider, verification_level, fetched_at
+        FROM award_prices WHERE origin = ? AND destination = ?
+        ORDER BY fetched_at DESC LIMIT 40
+      `).all(origin, destination)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        origin, destination,
+        note: "statistics are prices observed by this radar, not market-wide history",
+        cashStats, awardStats, recentCash, recentAwards,
+      }, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
     return
