@@ -351,6 +351,12 @@ function formatDuration(min) {
   return `${Math.floor(min/60)}h${min%60}m`;
 }
 
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = String(str == null ? '' : str);
+  return div.innerHTML;
+}
+
 function formatPoints(n) {
   if (!n) return '0';
   if (n >= 1000) return `${Math.round(n/1000)}K`;
@@ -926,26 +932,49 @@ async function handleSearch(event) {
   document.getElementById('loadingText').textContent = `Searching ${from} → ${to}${flexLabel} across all programs...`;
   
   try {
-    const searchUrl = `./api/search?from=${from}&to=${to}&date=${date}&return=${ret}&class=${cls}&flex=${flexDays}`;
-    
+    const params = new URLSearchParams({ from, to, date, return: ret, class: cls, flex: String(flexDays) });
+    const searchUrl = './api/search?' + params.toString();
+
+    let resp;
     try {
-      const resp = await fetch(searchUrl);
+      resp = await fetch(searchUrl);
+    } catch (e) {
+      // The search API is unreachable (dashboard opened as a plain file, or the
+      // server is down). Only in this case do we show whatever was searched last.
+      console.log('Search API not available, loading results.json');
+      resp = null;
+    }
+
+    if (resp) {
       if (resp.ok) {
         dashboardData = await resp.json();
         displayResults();
         return;
       }
-    } catch (e) {
-      console.log('Search API not available, loading results.json');
+      // The server answered and the search failed. Never silently substitute
+      // stale results for a different route — report what actually happened.
+      let detail = `HTTP ${resp.status}`;
+      try {
+        const body = await resp.json();
+        if (body && body.error) detail = body.error;
+      } catch (e) { /* non-JSON error body */ }
+      document.getElementById('loadingText').innerHTML =
+        `<span class="text-warn">Search failed: ${escapeHtml(detail)}</span>` +
+        `<br><span class="text-gray-500 text-sm">Showing no new results. Check the server console for details.</span>`;
+      return;
     }
-    
-    // Fallback: load existing results.json
-    const resp = await fetch('./results.json?t=' + Date.now());
-    if (resp.ok) {
-      dashboardData = await resp.json();
+
+    // Fallback (API unreachable only): load the last saved results.json
+    const fileResp = await fetch('./results.json?t=' + Date.now());
+    if (fileResp.ok) {
+      dashboardData = await fileResp.json();
+      const m = dashboardData.meta || {};
+      if (m.origin !== from || m.destination !== to || m.departureDate !== date) {
+        console.warn(`Search API unreachable — showing cached ${m.origin}→${m.destination} ${m.departureDate}`);
+      }
       displayResults();
     } else {
-      document.getElementById('loadingText').textContent = 
+      document.getElementById('loadingText').textContent =
         'No results.json found. Run: npx tsx search.ts --from ' + from + ' --to ' + to + ' --date ' + date;
     }
   } catch (err) {
