@@ -119,6 +119,12 @@ export interface CashSearchOptions extends SearchOptions {
   verify?: boolean
   /** Where the request came from — recorded against search_requests. */
   source?: "api" | "cli" | "test"
+  /**
+   * Join an existing unified search instead of recording a new one. One user
+   * search = one search_requests row; cash, award and hidden-city observations
+   * all reference it.
+   */
+  searchRequestId?: number
   db?: DB
 }
 
@@ -142,11 +148,13 @@ export async function searchCashFlights(
   const attempts: CashFlightSearchResult[] = []
   let callsSpent = 0
 
-  let searchRequestId: number | null = null
-  try {
-    searchRequestId = recordSearchRequest(db, query, options.source ?? "api")
-  } catch (err) {
-    warnings.push(`could not record search request: ${(err as Error).message}`)
+  let searchRequestId: number | null = options.searchRequestId ?? null
+  if (searchRequestId === null) {
+    try {
+      searchRequestId = recordSearchRequest(db, query, options.source ?? "api")
+    } catch (err) {
+      warnings.push(`could not record search request: ${(err as Error).message}`)
+    }
   }
 
   const providers = getProviders()

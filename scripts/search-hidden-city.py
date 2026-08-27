@@ -1,5 +1,22 @@
 #!/usr/bin/env python3
 """
+DEPRECATED (Phase 3): the application no longer calls this script.
+
+Hidden-city search now lives in providers/cash-flights/hidden-city.ts, where it
+goes through the provider layer — cash cache, SerpAPI budget guard, reserve and
+database-backed accounting. This standalone script calls SerpAPI DIRECTLY and
+counts usage in serpapi-usage.json, which nothing else reads any more: running
+it spends real quota that the application cannot see. Prefer:
+
+    npx tsx search.ts --from PRG --to BKK --date ... --sources hidden-city
+
+Kept only as a reference implementation of the original algorithm.
+"""
+import sys as _sys
+print("WARNING: deprecated standalone script — SerpAPI spend here is invisible "
+      "to the application's budget guard. See providers/cash-flights/hidden-city.ts",
+      file=_sys.stderr)
+_legacy_doc = """
 Hidden City Flight Search Engine — Real SerpAPI Implementation
 
 Finds hidden city ticketing opportunities by searching for flights through
