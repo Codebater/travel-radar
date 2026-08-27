@@ -6,11 +6,17 @@ node_modules/
 # package-lock.json is tracked on purpose: npm install needs .npmrc's
 # legacy-peer-deps plus a pinned tree to resolve reproducibly.
 
+# Local database (Phase 2). Docker-mountable; back it up with the WAL files.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
 # Generated search output and caches
 results*.json
 roame-results*.json
-roame-test.json
 atf-results*.json
+# Superseded by provider_usage in the database; kept ignored so an old copy
+# left over from Phase 1 is never committed.
 serpapi-usage.json
 tmp/
 
