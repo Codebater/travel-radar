@@ -80,7 +80,8 @@ interface ATFUsage {
 interface ATFResponse {
   success: boolean
   data: ATFData
-  usage: ATFUsage
+  /** Present on real API responses; absent on a synthesised empty result. */
+  usage?: ATFUsage
 }
 
 export interface ATFResult {
@@ -155,7 +156,30 @@ async function fetchATFAirline(
 
     if (!resp.ok) {
       const body = await resp.text().catch(() => "")
-      // 401 here means the key is wrong or lacks API access — never retried.
+
+      // ATF signals a legitimate empty result with HTTP 400 and
+      // {"success":false,"error":"No availability found for X -> Y on DATE"}.
+      // That is an ANSWER, not a failure: treating it as an error would refuse
+      // to cache it, and every repeat of a no-availability route would spend
+      // another call from a very small allowance. Normalised here into an
+      // empty-but-successful response so the caller can cache it.
+      if (resp.status === 400 && /no availability found/i.test(body)) {
+        return {
+          airline, origin, destination, date,
+          response: {
+            success: true,
+            data: {
+              route: `${origin}-${destination}`,
+              search_date: date,
+              response_type: "no_availability",
+              availability: { date, cabins: {} },
+            },
+            usage: undefined as unknown as ATFUsage,
+          },
+        }
+      }
+
+      // 401/403 mean the key is wrong or lacks API access — never retried.
       return {
         airline, origin, destination, date,
         response: null as any,

@@ -349,6 +349,26 @@ describe("quota accounting", () => {
     expect(usage.failed).toBe(0)
   })
 
+  it("counts a no-availability answer as a successful call, not a failure", async () => {
+    // ATF signals "nothing available" with HTTP 400; the call itself worked.
+    // Counting it as failed would make a healthy provider look broken.
+    setAwardProviders([new MockAwardProvider({ name: "atf-mock", callsPerSearch: 1, fail: "no-results" })])
+    await searchAwardFlights(makeAwardQuery(), { db })
+    const usage = readUsage(db, "atf-mock")
+    expect(usage.attempted).toBe(1)
+    expect(usage.succeeded).toBe(1)
+    expect(usage.failed).toBe(0)
+    expect(usage.lastError).toBeNull()
+  })
+
+  it("still counts real provider errors as failures", async () => {
+    setAwardProviders([new MockAwardProvider({ name: "roame-mock", fail: "provider-error" })])
+    await searchAwardFlights(makeAwardQuery(), { db })
+    const usage = readUsage(db, "roame-mock")
+    expect(usage.failed).toBe(1)
+    expect(usage.succeeded).toBe(0)
+  })
+
   it("records failures without reclaiming the attempted calls", async () => {
     setAwardProviders([new MockAwardProvider({ name: "atf-mock", callsPerSearch: 5, fail: "provider-error" })])
     await searchAwardFlights(makeAwardQuery(), { db })

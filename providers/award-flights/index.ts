@@ -279,7 +279,15 @@ export async function searchAwardFlights(
     } else if (result.callsSpent < provider.callsPerSearch) {
       revertCallAttempts(db, provider.name, provider.callsPerSearch - result.callsSpent)
     }
-    recordCallOutcome(db, provider.name, { ok: result.ok, error: result.error })
+    // "No availability" is a call that WORKED and found nothing — recording it
+    // as a failure would make a healthy provider look broken in health output
+    // and pollute the failure signal that drives backoff. Only genuine call
+    // failures (auth, timeout, provider error) count against the provider.
+    const callSucceeded = result.ok || result.reason === "no-results"
+    recordCallOutcome(db, provider.name, {
+      ok: callSucceeded,
+      error: callSucceeded ? null : result.error,
+    })
     if (result.reportedQuota) {
       recordReportedQuota(db, provider.name, {
         remaining: result.reportedQuota.remaining, limit: result.reportedQuota.limit,
