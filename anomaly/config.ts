@@ -54,6 +54,13 @@ export interface AnomalyConfig {
       minCashSamples: number
     }
   }
+  openJaw: {
+    weights: Record<string, number>
+    frictionPenaltyWeight: number
+    fullCreditSavingPercent: number
+    highFrictionAt: number
+    strongValuePercent: number
+  }
   providerConfidenceValues: Record<string, number>
   verificationValues: Record<string, number>
   presets: Record<string, any>

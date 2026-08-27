@@ -496,7 +496,14 @@
       "thailand",
       "mexico",
       "wildcard"
-    ]
+    ],
+    "openJaw": {
+      "note": "§14 - the ways two legitimate-looking one-way fares can fail to be a trip. Every one of these has been a real bug in some itinerary builder: a return leg that departs before the outbound, a pair of legs in the same direction, two prices in different currencies added together, or a fare observed six weeks apart from its partner and long since gone.",
+      "minNights": 1,
+      "maxNights": 60,
+      "maxLegAgeSpreadDays": 21,
+      "allowCabinMismatch": false
+    }
   },
   "routeDesirability": {
     "note": "How much I actually want to go there. Keeps a genuinely cheap fare to a place I have no interest in from outranking a merely good one to a place I do. Defaults come from the destination group in config/discovery.json; per-airport entries override.",
@@ -526,5 +533,25 @@
     "suspicious": 0.0
   },
   "noHistoryScoreCap": 85,
-  "noHistoryScoreCapNote": "Ceiling for a decision that rests on absolute price alone. Dropping the four history components concentrates the whole weight on the ones that remain, so an unevidenced fare could otherwise outrank one backed by sixty observations saying the same thing. It can still reach the feed - that is the point of the absolute rules - but evidence outranks assertion."
+  "noHistoryScoreCapNote": "Ceiling for a decision that rests on absolute price alone. Dropping the four history components concentrates the whole weight on the ones that remain, so an unevidenced fare could otherwise outrank one backed by sixty observations saying the same thing. It can still reach the feed - that is the point of the absolute rules - but evidence outranks assertion.",
+  "openJaw": {
+    "note": "§9 - an open jaw is not a round trip with a different label, so it does not reuse the round-trip mix. What matters here is whether splitting the trip actually beat flying in and out of one city, how much of that saving the transfers take back, whether the pairing is a trip somebody would want, and how much trust two independently-observed legs deserve.",
+    "weights": {
+      "savingVsRoundTrip": 0.28,
+      "absolutePrice": 0.15,
+      "priceVsMedian": 0.12,
+      "destinationPairUsefulness": 0.12,
+      "legConfidence": 0.1,
+      "legFreshness": 0.08,
+      "itineraryConvenience": 0.07,
+      "routeDesirability": 0.04,
+      "verification": 0.04
+    },
+    "frictionPenaltyWeight": 0.22,
+    "weightsNote": "Saving against the comparable round trip leads, because without it an open jaw is just a more awkward way to make the same trip. Friction is a PENALTY on the assembled score rather than a component, exactly as positioning is: a big enough discount must not be able to vote away the fact that you land in the wrong country.",
+    "fullCreditSavingPercent": 25,
+    "highFrictionAt": 0.5,
+    "strongValuePercent": 20,
+    "thresholdNote": "fullCreditSavingPercent is where the saving component maxes out; strongValuePercent is where OPEN_JAW_STRONG_VALUE fires; highFrictionAt is where OPEN_JAW_HIGH_FRICTION does. The search-shape numbers (what qualifies, what may be assembled, what it costs to collect) stay in config/discovery.json - a number in both files is a number that will drift."
+  }
 }

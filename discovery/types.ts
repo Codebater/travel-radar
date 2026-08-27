@@ -70,6 +70,9 @@ export interface DiscoveryRun {
   stage1Searches: number
   stage2Searches: number
   awardSearches: number
+  /** §20 the one-way legs collected purely so open jaws can be assembled. */
+  openJawLegSearches: number
+  openJawCandidates: number
   cacheHits: number
   freeCalls: number
   awardCalls: number
@@ -107,12 +110,16 @@ export interface DiscoveryPlan {
   job: DiscoveryJob
   routes: RouteTarget[]
   stage1: SampleTarget[]
+  /** §4 the one-way legs this run will collect so open jaws can be assembled. */
+  openJawLegs: SampleTarget[]
   /** Ceiling assuming every stage-2 window triggers — the pessimistic case. */
   estimatedStage2Max: number
   expected: {
     freeCalls: number
     awardCalls: number
     meteredCalls: number
+    /** §5 the incremental free-search cost of open-jaw support, stated separately. */
+    openJawLegCalls: number
   }
   scopeReduced: string | null
 }
@@ -147,35 +154,92 @@ export interface PositioningAssessment {
   note: string
 }
 
-/** §8 - a trip that returns to a different airport than it left from. */
+/**
+ * §2/§3 - one leg of an open jaw, as its own observation.
+ *
+ * Deliberately not flattened into the pair. An open jaw is TWO tickets bought
+ * from possibly two sellers at two moments, and every one of those facts
+ * matters to somebody deciding whether to book it. Collapsing them into a
+ * single price with a single provider would be a quiet lie.
+ */
+export interface OpenJawLeg {
+  /** The flight_prices row this leg IS. Provenance is a join, never a copy. */
+  priceId: number
+  origin: string
+  destination: string
+  departureDate: string
+  departureTime: string | null
+  price: number
+  currency: string
+  provider: string
+  providerConfidence: string
+  verificationLevel: string
+  airline: string | null
+  stops: number | null
+  durationMinutes: number | null
+  baggage: string | null
+  itineraryHash: string
+  observedAt: string
+  cabin: string
+}
+
+/** §6 - the ordinary round trip an open jaw is measured against, with its row. */
+export interface OpenJawComparator {
+  priceId: number
+  price: number
+  currency: string
+  origin: string
+  destination: string
+  departureDate: string
+  returnDate: string
+  nights: number
+  provider: string
+  observedAt: string
+}
+
+/** §8 - a trip that does not fly in and out of the same pair of airports. */
 export interface OpenJawOption {
   /** False for a combination that was evaluated and rejected. */
   qualifies: boolean
-  outbound: {
-    origin: string
-    destination: string
-    departureDate: string
-    price: number
-    currency: string
-    provider: string
-    observedAt: string
+  /** When the combination became knowable: the later of the two legs. */
+  asOf: string
+  outbound: OpenJawLeg
+  inbound: OpenJawLeg
+  /** §8 the configured pairing this came from, and how useful a trip it is. */
+  destinationPair: {
+    group: string | null
+    arrive: string
+    depart: string
+    usefulness: number
+    transfer: { mode: string; hours: number; typicalCost: Record<string, number> } | null
+    note: string | null
   }
-  inbound: {
-    origin: string
-    destination: string
-    departureDate: string
-    price: number
-    currency: string
-    provider: string
-    observedAt: string
-  }
+  /** The two fares, and nothing else. §2 requires this figure to stay pure. */
   totalPrice: number
+  /** §7 what getting between the cities and home from the wrong airport costs. */
+  transferCost: number
+  destinationTransferCost: number
+  homeTransferCost: number
+  homeTransfer: { mode: string; hours: number } | null
+  /** totalPrice + transferCost - what the trip really costs to fly. */
+  trueTripCost: number
   currency: string
   cabin: string
   tripLengthNights: number
-  /** The cheapest same-airport round trip we can compare against. */
+  comparator: OpenJawComparator | null
+  /** The comparator's price, or null - never a zero standing in for "unknown". */
   comparableRoundTrip: number | null
   saving: number | null
   savingPercent: number | null
+  /** The saving once the transfers are paid for. Can be negative. */
+  netSaving: number | null
+  netSavingPercent: number | null
+  /** 0..1, higher is worse. Applied as a penalty, never as a component. */
+  friction: number
+  frictionReasons: string[]
+  mixedProvider: boolean
+  legAgeSpreadDays: number
+  convenience: number
+  convenienceDetail: string
   note: string
 }

@@ -49,7 +49,7 @@ function providerRaw(
 function assemble(
   parts: Record<string, { raw: number | null; weight: number; detail: string }>,
   weightsVersion: string,
-  penalty?: { points: number; detail: string },
+  penalty?: { points: number; detail: string; name?: string },
   /** Ceiling for a decision that rests on absolute price alone. */
   cap?: { max: number; detail: string },
 ): ScoreResult {
@@ -83,7 +83,7 @@ function assemble(
   // penalty cannot, so an overnight bus to a 6am departure always costs the
   // same visible number of points however cheap the fare is.
   if (penalty && penalty.points > 0) {
-    components.positioningPenalty = {
+    components[penalty.name ?? "positioningPenalty"] = {
       raw: 0, weight: 0,
       points: -Math.round(penalty.points * 10) / 10,
       detail: penalty.detail,
@@ -327,6 +327,106 @@ export function scoreAward(
      })
 }
 
+/**
+ * §9 - the open-jaw score, which is deliberately NOT the round-trip score with
+ * a different label.
+ *
+ * A round trip is judged almost entirely on "is this cheap for this route?".
+ * An open jaw has to answer a different question first: did splitting the trip
+ * actually beat flying in and out of one city, and is what is left worth
+ * arriving in the wrong country for? So the saving against the comparable
+ * round trip leads, the usefulness of the pairing is a real component rather
+ * than an afterthought, and the two legs earn trust separately - a pair is
+ * only as believable as its weaker half.
+ *
+ * Friction is a PENALTY on the assembled score rather than a component, for
+ * the same reason positioning is: a component can be outvoted by a large
+ * enough discount, and "you land 300km from home" must not be votable away.
+ */
+export function scoreOpenJaw(
+  input: {
+    totalPrice: number
+    currency: string
+    /** Saving against the comparable round trip AFTER paying for the transfers. */
+    netSaving: number | null
+    netSavingPercent: number | null
+    baseline: BaselineStats
+    /** 0..1 - the weaker leg's provider and verification standing. */
+    legConfidence: number
+    legConfidenceDetail: string
+    /** 0..1 - how current the STALER of the two legs is. */
+    legFreshness: number
+    legFreshnessDetail: string
+    usefulness: number
+    usefulnessDetail: string
+    convenience: number
+    convenienceDetail: string
+    friction: number
+    frictionDetail: string
+  },
+  config: AnomalyConfig,
+  extras?: ScoreExtras,
+): ScoreResult {
+  const w = config.openJaw?.weights ?? {}
+  const b = input.baseline
+  const hasHistory = b.count > 0
+  const hasComparator = input.netSavingPercent !== null
+  const fullCredit = config.openJaw?.fullCreditSavingPercent ?? 25
+
+  return assemble({
+    savingVsRoundTrip: {
+      // §6 no comparable round trip means the saving is UNKNOWN, not zero.
+      // Scoring it zero would punish an open jaw for our never having watched
+      // the round trip it competes with - the same mistake the CPP component
+      // was written to avoid.
+      raw: hasComparator ? clamp01(input.netSavingPercent! / fullCredit) : null,
+      weight: w.savingVsRoundTrip ?? 0,
+      detail: hasComparator
+        ? `${input.netSavingPercent}% under the comparable round trip once the transfers are paid`
+        : "no comparable round trip has been observed to measure this against",
+    },
+    priceVsMedian: {
+      raw: hasHistory ? clamp01(b.percentBelowMedian / config.cash.fullCreditPercentBelowMedian) : null,
+      weight: w.priceVsMedian ?? 0,
+      detail: hasHistory
+        ? `${b.percentBelowMedian}% below the observed median round trip (${b.median} ${input.currency}, ${b.count} obs)`
+        : "no round-trip history on this route to compare the total against",
+    },
+    destinationPairUsefulness: {
+      raw: input.usefulness,
+      weight: w.destinationPairUsefulness ?? 0,
+      detail: input.usefulnessDetail,
+    },
+    legConfidence: {
+      raw: input.legConfidence,
+      weight: w.legConfidence ?? 0,
+      detail: input.legConfidenceDetail,
+    },
+    legFreshness: {
+      raw: input.legFreshness,
+      weight: w.legFreshness ?? 0,
+      detail: input.legFreshnessDetail,
+    },
+    itineraryConvenience: {
+      raw: input.convenience,
+      weight: w.itineraryConvenience ?? 0,
+      detail: input.convenienceDetail,
+    },
+    ...extraParts(extras, w, config),
+  }, config.weightsVersion, {
+    points: clamp01(input.friction) * (config.openJaw?.frictionPenaltyWeight ?? 0.22) * 100,
+    detail: input.frictionDetail,
+    name: "openJawFriction",
+  },
+     // An open jaw with neither a comparator nor any round-trip history is
+     // resting on absolute price alone, exactly like a wildcard fare, and is
+     // capped for exactly the same reason: evidence outranks assertion.
+     hasHistory || hasComparator ? undefined : {
+       max: (config as any).noHistoryScoreCap ?? 85,
+       detail: "capped: no comparable round trip and no history behind this route",
+     })
+}
+
 // ─── §T Reason codes ─────────────────────────────────────────────────────────
 
 /**
@@ -341,7 +441,22 @@ export interface ReasonExtras {
   destinationGroup?: string | null
   discoveredBy?: string | null
   positioning?: { required: boolean; penalty: number; savingVsHome: number | null; detail: string } | null
-  openJaw?: { saving: number | null; currency: string; outboundOrigin: string; inboundDestination: string } | null
+  openJaw?: {
+    saving: number | null
+    netSaving: number | null
+    savingPercent: number | null
+    currency: string
+    outboundOrigin: string
+    outboundDestination: string
+    inboundOrigin: string
+    inboundDestination: string
+    transferCost: number
+    friction: number
+    frictionDetail: string
+    mixedProvider: boolean
+    outboundProvider: string
+    inboundProvider: string
+  } | null
   sanity?: { verdict: string; detail: string } | null
   verificationStatus?: string | null
 }
@@ -451,12 +566,72 @@ export function reasonsFor(input: {
       })
     }
   }
-  if (e?.openJaw && e.openJaw.saving !== null) {
+  // ── §10 open jaw. Every code here is reachable, and each one says something
+  // a reader could act on differently.
+  if (e?.openJaw) {
+    const j = e.openJaw
     reasons.push({
-      code: `OPEN_JAW_SAVES_${Math.round(e.openJaw.saving)}`,
-      detail: `out of ${e.openJaw.outboundOrigin}, back into ${e.openJaw.inboundDestination}, ` +
-        `saving ${Math.round(e.openJaw.saving)} ${e.openJaw.currency} against the best round trip`,
+      code: "OPEN_JAW",
+      detail: `out of ${j.outboundOrigin} into ${j.outboundDestination}, home from ` +
+        `${j.inboundOrigin} into ${j.inboundDestination} - two separate tickets, not one round trip`,
     })
+    if (j.saving === null) {
+      reasons.push({
+        code: "OPEN_JAW_NO_COMPARATOR",
+        detail: "no comparable round trip has been observed on this route at this trip length, " +
+          "so there is no saving to state - and none has been invented",
+      })
+      reasons.push({
+        code: "NO_ROUNDTRIP_COMPARATOR",
+        detail: "the saving component was dropped rather than scored zero; treat this candidate " +
+          "as an absolute-price judgement only",
+      })
+    } else if (j.saving > 0) {
+      reasons.push({
+        code: `OPEN_JAW_SAVES_${Math.round(j.saving)}`,
+        detail: `${Math.round(j.saving)} ${j.currency} under the best comparable round trip` +
+          (j.transferCost > 0
+            ? `, ${Math.round(j.netSaving ?? 0)} once the ${j.transferCost} ${j.currency} of transfers are paid`
+            : ""),
+      })
+      if (j.netSaving !== null && j.netSaving <= 0) {
+        reasons.push({
+          code: "OPEN_JAW_TRANSFERS_EAT_SAVING",
+          detail: `the fares are cheaper, but the ${j.transferCost} ${j.currency} of getting between ` +
+            `cities and home takes all of it back`,
+        })
+      }
+      if ((j.savingPercent ?? 0) >= (config.openJaw?.strongValuePercent ?? 20)
+          && j.friction < (config.openJaw?.highFrictionAt ?? 0.5)) {
+        reasons.push({
+          code: "OPEN_JAW_STRONG_VALUE",
+          detail: `${j.savingPercent}% under the comparable round trip at ${j.friction} friction - ` +
+            `a real saving without an awkward trip to pay for it`,
+        })
+      }
+    } else {
+      // "SAVES -259" is not a sentence. A negative saving is a different fact
+      // from a positive one and gets its own name - which also keeps
+      // OPEN_JAW_SAVES_X meaning exactly one thing wherever it appears.
+      reasons.push({
+        code: "OPEN_JAW_WORSE_THAN_ROUND_TRIP",
+        detail: `${Math.abs(Math.round(j.saving))} ${j.currency} MORE than the best comparable ` +
+          `round trip - splitting this trip costs money rather than saving it`,
+      })
+    }
+    if (j.friction >= (config.openJaw?.highFrictionAt ?? 0.5)) {
+      reasons.push({
+        code: "OPEN_JAW_HIGH_FRICTION",
+        detail: `friction ${j.friction}: ${j.frictionDetail}`,
+      })
+    }
+    if (j.mixedProvider) {
+      reasons.push({
+        code: "OPEN_JAW_MIXED_PROVIDER",
+        detail: `the legs come from different sellers (${j.outboundProvider} and ` +
+          `${j.inboundProvider}) - two bookings, two cancellation policies`,
+      })
+    }
   }
   if (e?.sanity && e.sanity.verdict !== "ok") {
     reasons.push({ code: "SUSPICIOUS_DATA", detail: e.sanity.detail })

@@ -6,7 +6,7 @@
  *   npx tsx discovery/cli.ts status         jobs, recent runs, budget projection
  *   npx tsx discovery/cli.ts dry-run        what a cycle would do and cost - ZERO calls
  *   npx tsx discovery/cli.ts run [name]     execute one cycle now
- *   npx tsx discovery/cli.ts openjaw <DEST> open jaws from existing observations - ZERO calls
+ *   npx tsx discovery/cli.ts openjaw <DEST> [--commit]  open jaws from stored legs - ZERO calls
  *   npx tsx discovery/cli.ts positioning <DEST>  positioning comparison - ZERO calls
  *   npx tsx discovery/cli.ts clusters       the deal families the feed shows
  *   npx tsx discovery/cli.ts enable|disable <name>
@@ -14,7 +14,7 @@
 
 import "../load-env.js"
 import { getDb } from "../db/index.js"
-import { loadDiscoveryConfig, originsFor } from "./config.js"
+import { loadDiscoveryConfig, originsFor, groupForDestination } from "./config.js"
 import {
   upsertDiscoveryJob, listDiscoveryJobs, getDiscoveryJobByName, dueDiscoveryJobs,
   listDiscoveryRuns, setDiscoveryJobEnabled,
@@ -25,6 +25,7 @@ import { routesFor } from "./sampling.js"
 import { findOpenJaws } from "./openjaw.js"
 import { assessPositioning, bestHomeFare } from "./positioning.js"
 import { listClusters, rebuildClusters } from "../anomaly/clustering.js"
+import { evaluateOpenJaws } from "../anomaly/openjaw.js"
 import type { DiscoveryJob } from "./types.js"
 
 const [command, ...args] = process.argv.slice(2)
@@ -74,7 +75,19 @@ function printProjection(db = getDb()): void {
     console.log(
       `  ${job.name.padEnd(30)} ${String(job.routes).padStart(3)} routes  ` +
       `${String(job.stage1Searches).padStart(4)} sparse searches/run  ` +
-      `${job.runsPerMonth} runs/mo  ~${job.monthlyFreeCalls} free calls/mo`,
+      `${job.runsPerMonth} runs/mo  ~${job.monthlyFreeCalls} free calls/mo` +
+      (job.openJawLegSearches > 0
+        ? `  (incl. ${job.openJawLegSearches} open-jaw legs/run, ~${job.monthlyOpenJawLegCalls}/mo)`
+        : ""),
+    )
+  }
+  if (p.totals.monthlyOpenJawLegCalls > 0) {
+    // §5 stated on its own line, because "what does open-jaw support cost?"
+    // should not be a subtraction the reader has to do themselves.
+    console.log(
+      `  of which open-jaw legs: ~${p.totals.monthlyOpenJawLegCalls} free calls/mo ` +
+      `(${Math.round((p.totals.monthlyOpenJawLegCalls / Math.max(1, p.totals.monthlyFreeCalls)) * 100)}% ` +
+      `of the free budget, taken FROM it rather than added to it)`,
     )
   }
   console.log(
@@ -129,8 +142,10 @@ async function main() {
           const job = jobs.find(j => j.id === r.jobId)
           console.log(
             `  #${r.id} ${(job?.name ?? r.jobId).toString().padEnd(30)} ${r.status.padEnd(14)} ` +
-            `${r.stage1Searches}+${r.stage2Searches} searches, ${r.freeCalls} free, ${r.awardCalls} award, ` +
-            `${r.meteredCalls} metered, ${r.cacheHits} cached, ${r.candidatesProduced} candidates, ` +
+            `${r.stage1Searches}+${r.stage2Searches} searches, ${r.openJawLegSearches} oj-legs, ` +
+            `${r.freeCalls} free, ${r.awardCalls} award, ` +
+            `${r.meteredCalls} metered, ${r.cacheHits} cached, ${r.candidatesProduced} candidates ` +
+            `(${r.openJawCandidates} open-jaw), ` +
             `${r.durationMs ?? "?"}ms (${fmtAge(r.startedAt)})`,
           )
           if (r.scopeReduced) console.log(`      scope reduced: ${r.scopeReduced}`)
@@ -152,6 +167,12 @@ async function main() {
         console.log(`${job.name} (run #${job.runsCompleted + 1}${due ? ", DUE NOW" : `, next ${fmtAge(job.nextRunAt)}`})`)
         console.log(`  routes: ${plan.routes.length} (${plan.routes.slice(0, 6).map(r => `${r.origin}-${r.destination}`).join(", ")}${plan.routes.length > 6 ? ", ..." : ""})`)
         console.log(`  stage 1: ${plan.stage1.length} sparse searches`)
+        if (plan.openJawLegs.length > 0) {
+          console.log(
+            `  stage 1b: ${plan.openJawLegs.length} one-way open-jaw legs ` +
+            `(${[...new Set(plan.openJawLegs.map(t => `${t.route.origin}-${t.route.destination}`))].join(", ")})`,
+          )
+        }
         console.log(`  stage 2 ceiling: ${plan.estimatedStage2Max} dense searches (only where stage 1 finds something)`)
         console.log(`  expected: ${plan.expected.freeCalls} free, <=${plan.expected.awardCalls} award, <=${plan.expected.meteredCalls} metered`)
         if (plan.scopeReduced) console.log(`  ⚠ ${plan.scopeReduced}`)
@@ -194,43 +215,71 @@ async function main() {
       const from = flag("from") ?? new Date().toISOString().slice(0, 10)
       const to = flag("to") ?? new Date(Date.now() + 200 * 86_400_000).toISOString().slice(0, 10)
 
+      const group = groupForDestination(destination, config)?.key
       const options = {
         cabin, currency: process.env.CASH_CURRENCY || "USD",
         asOf: new Date().toISOString(),
         window: { from, to },
-        tripLengths: config.destinationGroups.thailand?.tripLengths ?? [7, 10, 14, 21],
+        tripLengths: (group ? config.destinationGroups[group]?.tripLengths : null)
+          ?? config.destinationGroups.thailand?.tripLengths ?? [7, 10, 14, 21],
         includeNonQualifying: true,
       }
       const all = findOpenJaws(db, destination, options, config)
       const jaws = all.filter(j => j.qualifies)
-      console.log(`Open jaws to ${destination} (${cabin}) from stored observations - no provider was called.\n`)
+      console.log(`Open jaws into ${destination} (${cabin}) from stored observations - no provider was called.\n`)
       if (all.length === 0) {
         console.log("No combination could even be assembled: there are no stored one-way legs for")
         console.log("these routes in this window. Discovery collects them as it runs.")
         break
       }
+
+      const show = (jaw: typeof all[number]) => {
+        // Two tickets, printed as two tickets. Collapsing them into one line
+        // with one total is how a reader ends up believing a provider quoted
+        // this as a round trip.
+        console.log(
+          `  OUT  ${jaw.outbound.origin}->${jaw.outbound.destination} ${jaw.outbound.departureDate} ` +
+          `${jaw.outbound.price} ${jaw.currency}  ${jaw.outbound.provider} ` +
+          `(seen ${jaw.outbound.observedAt.slice(0, 10)})`,
+        )
+        console.log(
+          `  BACK ${jaw.inbound.origin}->${jaw.inbound.destination} ${jaw.inbound.departureDate} ` +
+          `${jaw.inbound.price} ${jaw.currency}  ${jaw.inbound.provider} ` +
+          `(seen ${jaw.inbound.observedAt.slice(0, 10)})`,
+        )
+        console.log(
+          `       = ${jaw.totalPrice} ${jaw.currency} in fares` +
+          (jaw.transferCost > 0 ? ` + ${jaw.transferCost} transfers = ${jaw.trueTripCost}` : "") +
+          `, ${jaw.tripLengthNights} nights`,
+        )
+        console.log(
+          jaw.comparableRoundTrip === null
+            ? `       vs no comparable round trip observed - no saving stated, and none invented`
+            : `       vs ${jaw.comparableRoundTrip} round trip (${jaw.comparator?.origin}-${jaw.comparator?.destination}, ` +
+              `${jaw.comparator?.provider}) -> saves ${jaw.saving} (${jaw.savingPercent}%)` +
+              (jaw.transferCost > 0 ? `, ${jaw.netSaving} after transfers` : ""),
+        )
+        console.log(`       friction ${jaw.friction}: ${jaw.frictionReasons.join("; ")}`)
+      }
+
       if (jaws.length === 0) {
         console.log(`None qualified. ${all.length} combination(s) were evaluated and rejected -`)
         console.log(`here is the arithmetic, rather than a blank answer:\n`)
-        for (const jaw of all.slice(0, 3)) {
-          console.log(
-            `  ${jaw.outbound.origin}->${jaw.outbound.destination} ${jaw.outbound.departureDate} ` +
-            `${jaw.outbound.price} + ${jaw.inbound.origin}->${jaw.inbound.destination} ` +
-            `${jaw.inbound.departureDate} ${jaw.inbound.price} = ${jaw.totalPrice} ${jaw.currency}`,
-          )
-          console.log(`      vs best round trip ${jaw.comparableRoundTrip} -> ${jaw.saving} (${jaw.savingPercent}%)`)
-        }
-        break
+        for (const jaw of all.slice(0, 3)) { show(jaw); console.log("") }
+      } else {
+        for (const jaw of jaws.slice(0, 10)) { show(jaw); console.log("") }
       }
-      for (const jaw of jaws.slice(0, 10)) {
+
+      // The read-only listing above is the default. --commit runs the same
+      // combinations through the anomaly engine, which is what actually
+      // produces candidates - still database-only, still no provider call.
+      if (args.includes("--commit")) {
+        const summary = evaluateOpenJaws({
+          db, discoveryConfig: config, arrivals: [destination], cabins: [cabin], quiet: true,
+        })
         console.log(
-          `  ${jaw.outbound.origin}->${jaw.outbound.destination} ${jaw.outbound.departureDate} ` +
-          `${jaw.outbound.price} + ${jaw.inbound.origin}->${jaw.inbound.destination} ` +
-          `${jaw.inbound.departureDate} ${jaw.inbound.price} = ${jaw.totalPrice} ${jaw.currency}`,
-        )
-        console.log(
-          `      vs best round trip ${jaw.comparableRoundTrip} -> saves ${jaw.saving} ` +
-          `(${jaw.savingPercent}%), ${jaw.tripLengthNights} nights`,
+          `Recorded ${summary.combinationsStored} decision(s), ${summary.candidates} at or above ` +
+          `the shadow threshold, ${summary.suspicious} flagged suspicious. No alerts were sent.`,
         )
       }
       break
@@ -328,7 +377,8 @@ Commands:
   status                    jobs, recent runs, budget projection
   dry-run                   planned scope and cost, ZERO calls
   run [name] [--cash-only]  execute one discovery cycle
-  openjaw <DEST>            open-jaw combinations from stored observations, ZERO calls
+  openjaw <DEST> [--commit] open-jaw combinations from stored legs, ZERO calls
+                            (--commit records them as shadow decisions)
   positioning <DEST>        true-trip-start-cost comparison, ZERO calls
   clusters [--min N]        rebuild and list deal families
   pool                      SerpAPI verification pools

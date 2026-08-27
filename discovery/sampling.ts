@@ -141,6 +141,109 @@ export function planStage1(
   return targets
 }
 
+/**
+ * §4/§5 - the one-way legs discovery collects so open jaws can be assembled.
+ *
+ * Until now open-jaw analysis lived off whatever one-way observations the fixed
+ * observer happened to leave behind, which meant it usually had nothing to work
+ * with: discovery samples return trips, so the legs an open jaw is made of were
+ * never deliberately collected by the thing that needs them.
+ *
+ * This is deliberately the sparsest stage in the engine:
+ *
+ *   - only the configured groups (Thailand, Mexico), never wildcards. Blindly
+ *     collecting one-ways for ten wildcard destinations would cost more than
+ *     the entire sparse scan and find nothing, because an open jaw needs BOTH
+ *     legs and a comparable round trip before it can say anything at all;
+ *   - only the priority airports of those groups;
+ *   - only a SUBSET of the dates stage 1 already chose, so no new date grid is
+ *     introduced and the legs line up with fares the engine already has;
+ *   - capped per run, and emitted as (outbound, inbound) COUPLES so that
+ *     trimming to the cap never leaves an outbound leg with no partner - half
+ *     a couple is a wasted call by construction.
+ *
+ * Successive runs rotate through the couples, so a week of cycles covers the
+ * whole set at a fraction of the per-run cost.
+ */
+export function planOpenJawLegs(
+  job: DiscoveryJob,
+  runIndex: number,
+  config: DiscoveryConfig,
+  now: Date = new Date(),
+): SampleTarget[] {
+  const openJaw = config.openJaw
+  const sampling = openJaw?.sampling
+  if (!openJaw?.enabled || !sampling?.enabled) return []
+  if (job.originGroup !== "primary") return []
+  if (!sampling.groups.includes(job.destinationGroup)) return []
+
+  const group = config.destinationGroups[job.destinationGroup]
+  const airports = (sampling.airports?.[job.destinationGroup] ?? []).map(a => a.toUpperCase())
+  const origins = sampling.origins
+    .map(o => o.toUpperCase())
+    .filter(o => config.homeRegion.primary.includes(o))
+  if (airports.length === 0 || origins.length < 2) return []
+
+  const cabins = job.cabins.filter(c => sampling.cabins.includes(c))
+  if (cabins.length === 0) return []
+
+  const dates = sparseDates(job, runIndex, config, now)
+    .slice(0, Math.max(1, sampling.datesPerRoute))
+  const nights = job.tripLengths[0] ?? 7
+
+  const route = (origin: string, destination: string): RouteTarget => ({
+    origin,
+    destination,
+    destinationGroup: job.destinationGroup,
+    requiresPositioning: !isPrimaryOrigin(origin, config),
+    desirability: group?.desirability ?? 0.8,
+  })
+  const leg = (origin: string, destination: string, departureDate: string, cabin: CabinClass): SampleTarget => ({
+    route: route(origin, destination),
+    departureDate,
+    returnDate: null,
+    tripLengthNights: null,
+    cabin,
+    stage: 1,
+  })
+
+  // One couple = the outbound into the destination, and the return home to the
+  // OTHER home airport. That second airport is what makes it an open jaw at
+  // all; both legs are useless without their partner.
+  const couples: SampleTarget[][] = []
+  for (const departureDate of dates) {
+    for (const cabin of cabins) {
+      for (const origin of origins) {
+        const partner = origins.find(o => o !== origin)!
+        for (const airport of airports) {
+          couples.push([
+            leg(origin, airport, departureDate, cabin),
+            leg(airport, partner, addDays(departureDate, nights), cabin),
+          ])
+        }
+      }
+    }
+  }
+  if (couples.length === 0) return []
+
+  const maxLegs = Math.max(2, sampling.maxLegSearchesPerRun)
+  const rotated = couples.slice(runIndex % couples.length)
+    .concat(couples.slice(0, runIndex % couples.length))
+
+  const out: SampleTarget[] = []
+  const seen = new Set<string>()
+  for (const couple of rotated) {
+    if (out.length + couple.length > maxLegs) break
+    for (const target of couple) {
+      const key = `${target.route.origin}-${target.route.destination}|${target.departureDate}|${target.cabin}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(target)
+    }
+  }
+  return out
+}
+
 export interface SparseObservation {
   route: RouteTarget
   departureDate: string

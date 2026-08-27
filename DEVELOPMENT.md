@@ -498,6 +498,9 @@ npm run discovery:run -- discover-thailand
 npm run discovery:openjaw -- BKK
 ```
 ```bash
+npm run discovery:openjaw -- BKK --commit
+```
+```bash
 npm run discovery:positioning -- BKK
 ```
 ```bash
@@ -558,11 +561,37 @@ overnight bus to a 6am departure. The penalty is applied as a visible subtractio
 the score, so a reader always sees what it cost. A positioning trip also has to clear a
 saving floor (12% and 130 USD) before it counts as worthwhile at all.
 
-**Open jaws** cost nothing to discover. Since Phase 5 the radar collects one-way cash
-observations, so every PRG-out/VIE-back combination is already in `flight_prices`
-waiting to be added up — pure SQL, no provider call. `discovery:openjaw` prints the
-arithmetic even when nothing qualifies, because "none found" on its own cannot
-distinguish "no legs stored" from "the sums came out against it".
+**Open jaws** are a discovery method in their own right (Phase 6.5), not an analysis
+helper. ASSEMBLING one costs nothing — it is two stored one-way observations added
+together, pure SQL — but HAVING the legs is not free, so discovery collects them
+deliberately: a capped twelve one-way searches per run, only for the configured groups
+(Thailand, Mexico), only their priority airports, and only on a subset of the dates
+stage 1 already chose. They come out of the same per-run ceiling rather than being added
+to it, and the cost appears on its own line in `discovery:dry-run` and on the run row.
+
+A pair gets its own row in `open_jaw_pairs` holding both leg ids as foreign keys, and
+the candidate points at that — which is what makes `deal_candidates.is_open_jaw` a real
+value instead of the write-only zero it was until Phase 6.5. Four rules keep it honest:
+
+- **Two tickets, never one.** Each leg keeps its own price, seller, cabin and timestamp
+  all the way to the UI. A single combined figure beside a single provider name would
+  imply somebody quoted this as a return; nobody did.
+- **No invented saving.** The comparison is against the best round trip of the SAME trip
+  length, selected as a row rather than by `MIN()`. Where none has been observed the
+  saving is `null`, the score component is dropped and renormalised (never scored zero),
+  and the candidate says `OPEN_JAW_NO_COMPARATOR`.
+- **Pairings must be configured.** Bangkok in / Phuket out is in `config/discovery.json`
+  because it is a trip. Bangkok in / Bali out is not there, so it cannot be assembled —
+  two cheap one-ways between unrelated cities are a coincidence, not an opportunity.
+- **Friction is a penalty, not a component.** The domestic hop, the train home from the
+  wrong capital, the two sellers, and the gap between when the legs were seen are
+  subtracted visibly, so a large enough discount cannot vote away the fact that you land
+  300km from home. The transfer money is added to the fares too, so `trueTripCost` is
+  what the trip actually costs.
+
+`discovery:openjaw` prints the arithmetic even when nothing qualifies, because "none
+found" on its own cannot distinguish "no legs stored" from "the sums came out against
+it". `--commit` records the same combinations as shadow decisions.
 
 **Absolute price rules** (`config/anomaly.json` → `absolute`) are a second axis,
 independent of history. History alone has a blind spot that discovery makes serious: a

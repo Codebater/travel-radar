@@ -22,8 +22,10 @@ import { evaluateNewObservations } from "../anomaly/engine.js"
 import { rebuildClusters } from "../anomaly/clustering.js"
 import { loadAnomalyConfig } from "../anomaly/config.js"
 import { loadDiscoveryConfig, type DiscoveryConfig } from "./config.js"
+import { evaluateOpenJaws, openJawArrivals } from "../anomaly/openjaw.js"
 import {
-  planStage1, planStage2, selectStage2Windows, routesFor, type SparseObservation,
+  planStage1, planStage2, planOpenJawLegs, selectStage2Windows, routesFor,
+  type SparseObservation,
 } from "./sampling.js"
 import {
   tryStartDiscoveryRun, finishDiscoveryRun, completeDiscoveryRun,
@@ -60,6 +62,12 @@ export function planDiscoveryRun(
     stage1 = stage1.slice(0, kept)
   }
 
+  // §5 the incremental cost of open-jaw support, planned and reported
+  // separately so it is never buried inside "free calls". It comes out of the
+  // same per-run ceiling rather than being added to it - open-jaw support may
+  // narrow the dense stage, but it can never double the budget.
+  const openJawLegs = planOpenJawLegs(job, runIndex, config, now)
+
   const s2 = config.sampling.stage2
   const perWindow = Math.ceil(s2.windowDays / s2.stepDays) * s2.extraTripLengths
   const estimatedStage2Max = s2.maxWindowsPerRun * perWindow
@@ -68,11 +76,16 @@ export function planDiscoveryRun(
     job,
     routes,
     stage1,
+    openJawLegs,
     estimatedStage2Max,
     expected: {
-      freeCalls: Math.min(stage1.length + estimatedStage2Max, job.budget.maxFreeCallsPerRun),
+      freeCalls: Math.min(
+        stage1.length + openJawLegs.length + estimatedStage2Max,
+        job.budget.maxFreeCallsPerRun,
+      ),
       awardCalls: job.budget.maxAwardCallsPerRun,
       meteredCalls: job.budget.maxMeteredCallsPerRun,
+      openJawLegCalls: openJawLegs.length,
     },
     scopeReduced,
   }
@@ -93,6 +106,32 @@ async function inBatches<T, R>(
     results.push(...await Promise.all(items.slice(i, i + size).map(worker)))
   }
   return results
+}
+
+/**
+ * Reserve a free call BEFORE the search starts.
+ *
+ * `canSpend()` followed by `spend()` after the provider returns is not the same
+ * thing when searches run three at a time: all three pass the check while the
+ * counter is still under the ceiling, and the run overshoots by up to
+ * (concurrency - 1). Reserving up front makes a ceiling a ceiling. Reservations
+ * are settled afterwards: a cache hit gives its call back, and a search that
+ * turns out to have cost more than one tops the difference up.
+ *
+ * This is the same defect as the award-ceiling overrun found in the Phase 6
+ * review - one authorisation covering work that costs more than one call - and
+ * it only became visible on the free side once another stage started competing
+ * for the same budget.
+ */
+function reserveFreeCall(budget: RunBudgetState, job: DiscoveryJob): boolean {
+  if (!canSpend(budget, job, "free")) return false
+  spend(budget, "free", 1)
+  return true
+}
+
+function settleFreeCall(budget: RunBudgetState, outcome: SearchOutcome): void {
+  if (outcome.fromCache) spend(budget, "free", -1)
+  else if (outcome.callsSpent > 1) spend(budget, "free", outcome.callsSpent - 1)
 }
 
 interface SearchOutcome {
@@ -219,9 +258,9 @@ export async function executeDiscoveryJob(
       stage1Targets,
       config.concurrency.maxConcurrentFreeSearches,
       async target => {
-        if (!canSpend(budget, job, "free")) return null
+        if (!reserveFreeCall(budget, job)) return null
         const outcome = await runCashSearch(db, target, runId, method, errors)
-        if (!outcome.fromCache) spend(budget, "free", outcome.callsSpent)
+        settleFreeCall(budget, outcome)
         return outcome
       },
     )
@@ -246,6 +285,40 @@ export async function executeDiscoveryJob(
       }
     }
 
+    // ── Stage 1b: the one-way legs an open jaw is made of (§4) ───────────────
+    //
+    // Run before stage 2 rather than after it, on purpose. Stage 2 is
+    // opportunistic - it only spends where stage 1 found something - so a busy
+    // run would use the whole ceiling and open-jaw support would starve every
+    // cycle, which is exactly the "half-present capability" this phase exists
+    // to end. Twelve calls is a small, fixed, visible price to pay for it, and
+    // it is subtracted from the same ceiling rather than added to the budget.
+    const openJawTargets = plan.openJawLegs.filter(() => canSpend(budget, job, "free"))
+    if (openJawTargets.length > 0 && (!options.shouldContinue || options.shouldContinue())) {
+      const legOutcomes = await inBatches(
+        openJawTargets,
+        config.concurrency.maxConcurrentFreeSearches,
+        async target => {
+          if (!reserveFreeCall(budget, job)) return null
+          const outcome = await runCashSearch(db, target, runId, "OPEN_JAW", errors)
+          settleFreeCall(budget, outcome)
+          return outcome
+        },
+      )
+      for (const outcome of legOutcomes) {
+        if (!outcome) continue
+        result.openJawLegSearches++
+        result.datePairsSampled++
+        if (outcome.fromCache) result.cacheHits++
+        else result.freeCalls += outcome.callsSpent
+        if (outcome.error) {
+          errors.push(
+            `openjaw-leg ${outcome.target.route.origin}-${outcome.target.route.destination}: ${outcome.error}`,
+          )
+        }
+      }
+    }
+
     // ── Stage 2: resolve only where stage 1 found something ──────────────────
     const windows = options.shouldContinue && !options.shouldContinue()
       ? []
@@ -261,9 +334,9 @@ export async function executeDiscoveryJob(
       const outcomes = await inBatches(
         targets, config.concurrency.maxConcurrentFreeSearches,
         async target => {
-          if (!canSpend(budget, job, "free")) return null
+          if (!reserveFreeCall(budget, job)) return null
           const outcome = await runCashSearch(db, target, runId, method, errors)
-          if (!outcome.fromCache) spend(budget, "free", outcome.callsSpent)
+          settleFreeCall(budget, outcome)
           return outcome
         },
       )
@@ -280,6 +353,29 @@ export async function executeDiscoveryJob(
     const anomalyConfig = loadAnomalyConfig()
     let evaluation = evaluateNewObservations({ db, config: anomalyConfig, quiet: true })
     result.candidatesProduced = evaluation.candidates
+
+    // ── §2 turn the legs into open-jaw candidates ────────────────────────────
+    //
+    // Pure database work: the combinations are assembled from observations
+    // that already exist, so this spends nothing however many it finds. It runs
+    // for every job whose group is configured for open jaws, including runs
+    // that collected no legs of their own - a leg collected yesterday and one
+    // collected today are still a pair.
+    try {
+      const arrivals = openJawArrivals(config)
+        .filter(a => a.group === job.destinationGroup)
+        .map(a => a.arrive)
+      if (arrivals.length > 0) {
+        const jaws = evaluateOpenJaws({
+          db, config: anomalyConfig, discoveryConfig: config,
+          discoveryRunId: runId, arrivals, now, quiet: true,
+        })
+        result.openJawCandidates = jaws.candidates
+        result.candidatesProduced += jaws.candidates
+      }
+    } catch (err) {
+      errors.push(`open jaw: ${(err as Error).message}`)
+    }
 
     // ── Stage 3a: award expansion on promising windows only (§16) ────────────
     // A stopped scheduler must stop here too: award searches are the slowest and
@@ -376,7 +472,8 @@ export async function executeDiscoveryJob(
 
   console.log(
     `DISCOVERY RUN ${job.name} ${result.status}: ${result.routesSampled} routes, ` +
-    `${result.stage1Searches}+${result.stage2Searches} searches, ${result.freeCalls} free calls, ` +
+    `${result.stage1Searches}+${result.stage2Searches} searches ` +
+    `(+${result.openJawLegSearches} open-jaw legs), ${result.freeCalls} free calls, ` +
     `${result.awardCalls} award, ${result.meteredCalls} metered, ${result.cacheHits} cached, ` +
     `${result.observationsAdded} observations, ${result.candidatesProduced} candidates, ` +
     `${result.durationMs}ms`,
@@ -412,6 +509,7 @@ function emptyResult(): DiscoveryRunResult {
     status: "running",
     routesSampled: 0, datePairsSampled: 0,
     stage1Searches: 0, stage2Searches: 0, awardSearches: 0,
+    openJawLegSearches: 0, openJawCandidates: 0,
     cacheHits: 0, freeCalls: 0, awardCalls: 0, meteredCalls: 0, verificationCalls: 0,
     observationsAdded: 0, candidatesProduced: 0,
     scopeReduced: null, errors: [], durationMs: 0,

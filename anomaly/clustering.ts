@@ -59,6 +59,15 @@ export interface ClusterRow {
   bestCurrency: string | null
   bestPoints: number | null
   discoveredBy: string | null
+  /**
+   * Whether this family IS an open jaw - which is not the same question as
+   * which method paid for it. The open-jaw stage spends its calls on ordinary
+   * one-way LEGS, and those legs are labelled OPEN_JAW so §20 can tell whether
+   * collecting them was worth it. A single one-way fare is still not an open
+   * jaw, and filtering on the label put the legs in the section meant for the
+   * pairs - where they outnumbered and outscored them.
+   */
+  isOpenJaw: boolean
 }
 
 interface CandidateRow {
@@ -194,18 +203,21 @@ export function rebuildClusters(
           cluster_key, type, origin, destination, destination_group, route, cabin,
           loyalty_program, earliest_departure, latest_departure, member_count,
           best_candidate_id, best_score, best_price, best_currency, best_points,
-          discovered_by, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          discovered_by, is_open_jaw, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(cluster_key) DO UPDATE SET
           member_count = excluded.member_count, best_candidate_id = excluded.best_candidate_id,
           best_score = excluded.best_score, best_price = excluded.best_price,
           best_points = excluded.best_points, latest_departure = excluded.latest_departure,
-          earliest_departure = excluded.earliest_departure, updated_at = excluded.updated_at
+          earliest_departure = excluded.earliest_departure,
+          is_open_jaw = excluded.is_open_jaw, updated_at = excluded.updated_at
       `).run(
         key, seed.type, seed.origin, seed.destination, seed.destination_group, seed.route,
         seed.cabin, seed.loyalty_program, departures[0], departures[departures.length - 1],
         family.members.length, seed.id, seed.score, seed.price_amount, seed.price_currency,
-        seed.points, seed.discovered_by, now, now,
+        // Every member shares the seed's trip style - the grouping refuses to
+        // mix them - so the seed's flag describes the whole family.
+        seed.points, seed.discovered_by, seed.is_open_jaw, now, now,
       )
       // NOT lastInsertRowid: SQLite leaves it untouched when an upsert takes
       // the UPDATE branch, so it hands back a stale id from an earlier insert
@@ -230,13 +242,20 @@ export function rebuildClusters(
 
 export function listClusters(
   db: DB,
-  opts: { minScore?: number; type?: "cash" | "award"; limit?: number; discoveredBy?: string } = {},
+  opts: {
+    minScore?: number
+    type?: "cash" | "award"
+    limit?: number
+    discoveredBy?: string
+    isOpenJaw?: boolean
+  } = {},
 ): ClusterRow[] {
   const where: string[] = []
   const params: any[] = []
   if (opts.minScore !== undefined) { where.push("best_score >= ?"); params.push(opts.minScore) }
   if (opts.type) { where.push("type = ?"); params.push(opts.type) }
   if (opts.discoveredBy) { where.push("discovered_by = ?"); params.push(opts.discoveredBy) }
+  if (opts.isOpenJaw !== undefined) { where.push("is_open_jaw = ?"); params.push(opts.isOpenJaw ? 1 : 0) }
   const limit = Math.min(opts.limit ?? 50, 300)
 
   return (db.prepare(`
@@ -262,5 +281,6 @@ export function listClusters(
     bestCurrency: r.best_currency,
     bestPoints: r.best_points,
     discoveredBy: r.discovered_by,
+    isOpenJaw: Boolean(r.is_open_jaw),
   }))
 }

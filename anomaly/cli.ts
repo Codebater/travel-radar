@@ -17,6 +17,7 @@ import "../load-env.js"
 import { getDb } from "../db/index.js"
 import { loadAnomalyConfig } from "./config.js"
 import { evaluateNewObservations, recomputeHistory } from "./engine.js"
+import { evaluateOpenJaws } from "./openjaw.js"
 import { listCandidates, getCandidate, recordFeedback } from "./store.js"
 import { buildReport } from "./report.js"
 import { rebuildClusters } from "./clustering.js"
@@ -53,6 +54,11 @@ function main() {
           : "Judging observations recorded since the last evaluation.",
       )
       const summary = fromScratch ? recomputeHistory({ db, config }) : evaluateNewObservations({ db, config })
+      // §2 open jaws are decisions about PAIRS of observations, so they are not
+      // reached by the row-driven pass above. Re-assembling them here means a
+      // backfill re-judges the whole picture, not the part of it that happens
+      // to be one row per decision.
+      const jaws = evaluateOpenJaws({ db, config, quiet: true })
       // Scores just changed, so the families that present them are stale.
       // Rebuilding here keeps the feed's stored "best member" honest without
       // anybody having to remember a second command.
@@ -62,6 +68,11 @@ function main() {
       console.log(`Below threshold    ${summary.belowThreshold}${config.storeBelowThreshold ? " (stored for review)" : " (not stored)"}`)
       console.log(`Skipped, thin      ${summary.skippedThinBaseline} (fewer than ${config.minSamplesToEmit} prior comparable observations)`)
       console.log(`Skipped, no data   ${summary.skippedNoBaseline}`)
+      console.log(
+        `Open jaws          ${jaws.combinationsFound} assembled, ${jaws.combinationsStored} recorded, ` +
+        `${jaws.candidates} at or above ${config.candidateThreshold}` +
+        `${jaws.noComparator > 0 ? `, ${jaws.noComparator} with no comparable round trip` : ""}`,
+      )
       console.log(`Top score          ${summary.topScore ?? "n/a"}`)
       console.log(`Duration           ${summary.durationMs}ms`)
       console.log(`Clusters rebuilt    ${clustered.clusters} families from ${clustered.candidatesClustered} candidates`)

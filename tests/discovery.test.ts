@@ -17,11 +17,11 @@ import { setProviders } from "../providers/cash-flights/index.js"
 import { setAwardProviders } from "../providers/award-flights/index.js"
 import { loadDiscoveryConfig, groupForDestination, isPrimaryOrigin, type DiscoveryConfig } from "../discovery/config.js"
 import {
-  planStage2, selectStage2Windows, routesFor, sparseDates, sparseCabins,
+  planStage2, planOpenJawLegs, selectStage2Windows, routesFor, sparseDates, sparseCabins,
   type SparseObservation,
 } from "../discovery/sampling.js"
 import { assessPositioning, bestHomeFare, observedFare } from "../discovery/positioning.js"
-import { findOpenJaws } from "../discovery/openjaw.js"
+import { findOpenJaws, bestComparableRoundTrip } from "../discovery/openjaw.js"
 import { upsertDiscoveryJob, listDiscoveryJobs, listDiscoveryRuns, type NewDiscoveryJob } from "../discovery/store.js"
 import { planDiscoveryRun, executeDiscoveryJob } from "../discovery/engine.js"
 import { projectDiscoveryBudget, discoveryVerificationPool, newRunBudget, canSpend, spend } from "../discovery/budget.js"
@@ -29,8 +29,10 @@ import { selectForVerification } from "../discovery/verification.js"
 import { loadAnomalyConfig } from "../anomaly/config.js"
 import { assessCashAbsolute, assessAwardAbsolute, routeDesirability } from "../anomaly/absolute.js"
 import { scoreCash } from "../anomaly/scoring.js"
-import { checkCashSanity, checkAwardSanity, checkComparabilityGuards } from "../anomaly/sanity.js"
+import { checkCashSanity, checkAwardSanity, checkComparabilityGuards, checkOpenJawSanity } from "../anomaly/sanity.js"
 import { rebuildClusters, listClusters } from "../anomaly/clustering.js"
+import { evaluateOpenJaws, openJawArrivals } from "../anomaly/openjaw.js"
+import { buildFeed, dealDetail } from "../anomaly/feed.js"
 import { evaluateNewObservations } from "../anomaly/engine.js"
 import { listCandidates } from "../anomaly/store.js"
 import { MockProvider, MockAwardProvider, makeFlight, makeAwardFlight } from "./mocks.js"
@@ -1175,14 +1177,22 @@ describe("a discovery cycle end to end (mocked providers)", () => {
     expect(runs).toHaveLength(1)
     expect(runs[0]!.status).toBe("success")
 
-    // Every search it performed is labelled with the method that made it.
-    const methods = db.prepare(
-      `SELECT DISTINCT discovery_method FROM search_requests WHERE discovery_run_id = ?`,
-    ).all(runs[0]!.id) as { discovery_method: string }[]
-    expect(methods.length).toBe(1)
+    // Every search it performed is labelled with the method that made it, and a
+    // cycle now performs two kinds: the sparse return-trip scan, and the one-way
+    // legs collected so open jaws can be assembled.
+    const methods = db.prepare(`
+      SELECT DISTINCT discovery_method, (return_date IS NULL) oneWay
+      FROM search_requests WHERE discovery_run_id = ?
+    `).all(runs[0]!.id) as { discovery_method: string; oneWay: number }[]
+
     // A priority-1 group is flexible-date discovery, not a wildcard sweep.
     // This was wrong for every job until an operator-precedence bug was fixed.
-    expect(methods[0]!.discovery_method).toBe("FLEXIBLE_DATE")
+    const returnSearches = methods.filter(m => m.oneWay === 0)
+    expect(returnSearches.length).toBe(1)
+    expect(returnSearches[0]!.discovery_method).toBe("FLEXIBLE_DATE")
+    // And the one-way searches are labelled for what they are, so "was open-jaw
+    // collection worth its calls?" has an answer in a few weeks.
+    expect(methods.filter(m => m.oneWay === 1).every(m => m.discovery_method === "OPEN_JAW")).toBe(true)
   })
 
   it("labels a wildcard job as a wildcard sweep and a positioning job as positioning", async () => {
@@ -1281,6 +1291,524 @@ describe("a discovery cycle end to end (mocked providers)", () => {
     const after = db.prepare(`SELECT COUNT(*) c FROM observation_jobs`).get() as { c: number }
     expect(after.c).toBe(before.c)
     expect(listDiscoveryJobs(db).length).toBeGreaterThan(0)
+  })
+})
+
+// ─── §2/§22 open jaw as a real discovery method ─────────────────────────────
+
+describe("open jaw as a discovery method", () => {
+  // Before Phase 6.5 every one of these assertions was unreachable: both
+  // evaluation sites hard-coded isOpenJaw false, so the column, the reason
+  // codes, the clustering split and the detail panel described a capability
+  // that could not fire.
+
+  function leg(origin: string, destination: string, date: string, price: number, over: any = {}) {
+    recordPriceObservations(db, [makeFlight({
+      origin, destination, cabin: "economy", returnDate: null,
+      departureDate: date, departureTime: `${date}T09:00`,
+      price: { amount: price, currency: "USD" }, fetchedAt: at(-1),
+      stops: 0, provider: "fast_flights", ...over,
+    })], { adults: 1 })
+  }
+  function ret(origin: string, destination: string, date: string, back: string, price: number, over: any = {}) {
+    recordPriceObservations(db, [makeFlight({
+      origin, destination, cabin: "economy", returnDate: back,
+      departureDate: date, departureTime: `${date}T09:00`,
+      price: { amount: price, currency: "USD" }, fetchedAt: at(-1),
+      stops: 0, provider: "fast_flights", ...over,
+    })], { adults: 1 })
+  }
+  const run = (arrivals = ["BKK"]) => evaluateOpenJaws({
+    db, discoveryConfig: config, arrivals, cabins: ["economy"], now: NOW, quiet: true,
+  })
+  const stored = (): any[] =>
+    db.prepare(`SELECT * FROM deal_candidates WHERE is_open_jaw = 1 ORDER BY score DESC`).all() as any[]
+  const jawOf = (row: any) => JSON.parse(row.open_jaw)
+  const codes = (row: any) => JSON.parse(row.reasons).map((r: any) => r.code)
+
+  it("produces a real candidate carrying isOpenJaw, not a zero column", () => {
+    leg("PRG", "BKK", day(30), 300)
+    leg("BKK", "VIE", day(37), 260)
+    ret("PRG", "BKK", day(30), day(37), 800)
+
+    const summary = run()
+    expect(summary.combinationsStored).toBeGreaterThan(0)
+
+    const rows = stored()
+    expect(rows.length).toBeGreaterThan(0)
+    const row = rows[0]!
+    expect(row.is_open_jaw).toBe(1)
+    expect(row.discovered_by).toBe("OPEN_JAW")
+    // An open jaw is a decision about TWO observations, so it points at a pair
+    // row rather than at a fare.
+    expect(row.source_table).toBe("open_jaw")
+    expect(row.route).toBe("PRG-BKK/BKK-VIE")
+    expect(row.price_amount).toBe(560)
+    expect(row.trip_type).toBe("return")
+    expect(codes(row)).toContain("OPEN_JAW")
+    expect(codes(row)).toContain("FOUND_BY_OPEN_JAW")
+  })
+
+  it("keeps each leg's own price, seller and timestamp all the way to the row", () => {
+    // §3 the pair must never be presentable as one provider quoting a return.
+    leg("PRG", "BKK", day(30), 300, { provider: "seller_a", fetchedAt: at(-4) })
+    leg("BKK", "VIE", day(37), 260, { provider: "seller_b", fetchedAt: at(-1) })
+    ret("PRG", "BKK", day(30), day(37), 800)
+    run()
+
+    const row = stored()[0]!
+    const jaw = jawOf(row)
+    const pair = db.prepare(`SELECT * FROM open_jaw_pairs WHERE id = ?`).get(row.source_id) as any
+    expect(pair.outbound_price_id).toBe(jaw.outbound.priceId)
+    expect(pair.inbound_price_id).toBe(jaw.inbound.priceId)
+
+    for (const side of ["outbound", "inbound"] as const) {
+      const observation = db.prepare(
+        `SELECT * FROM flight_prices WHERE id = ?`,
+      ).get(jaw[side].priceId) as any
+      expect(observation).toBeDefined()
+      expect(observation.price_amount).toBe(jaw[side].price)
+      expect(observation.provider).toBe(jaw[side].provider)
+      expect(observation.fetched_at).toBe(jaw[side].observedAt)
+      expect(observation.origin).toBe(jaw[side].origin)
+      expect(observation.return_date).toBeNull()
+    }
+    // And the candidate's own provider field says two tickets, whatever it says.
+    expect(row.provider).toBe("seller_a + seller_b")
+  })
+
+  it("compares against a round trip of the SAME trip length, not merely the cheapest", () => {
+    leg("PRG", "BKK", day(30), 300)
+    leg("BKK", "VIE", day(37), 260)
+    ret("PRG", "BKK", day(30), day(51), 400)   // 21 nights - a different trip
+    ret("PRG", "BKK", day(30), day(37), 800)   // 7 nights - the real comparator
+    run()
+
+    const jaw = jawOf(stored()[0]!)
+    expect(jaw.comparator.price).toBe(800)
+    expect(jaw.comparator.nights).toBe(7)
+    // The comparator carries the row it came from, so the figure can be checked.
+    const observation = db.prepare(
+      `SELECT * FROM flight_prices WHERE id = ?`,
+    ).get(jaw.comparator.priceId) as any
+    expect(observation.price_amount).toBe(800)
+    expect(observation.return_date).toBe(day(37))
+  })
+
+  it("states the saving as arithmetic a reader can redo", () => {
+    leg("PRG", "BKK", day(30), 300)
+    leg("BKK", "VIE", day(37), 260)
+    ret("PRG", "BKK", day(30), day(37), 800)
+    run()
+
+    const row = stored()[0]!
+    const jaw = jawOf(row)
+    expect(jaw.totalPrice).toBe(560)
+    // The comparator is the ROW, not a copied number: there is one place the
+    // 800 comes from, and it can be looked up.
+    expect(jaw.comparator.price).toBe(800)
+    expect(jaw.saving).toBe(240)
+    expect(jaw.savingPercent).toBe(30)
+    // Landing at VIE instead of PRG costs a train, and that comes off the saving.
+    expect(jaw.homeTransferCost).toBeGreaterThan(0)
+    expect(jaw.trueTripCost).toBe(560 + jaw.transferCost)
+    expect(jaw.netSaving).toBe(800 - jaw.trueTripCost)
+    expect(codes(row)).toContain("OPEN_JAW_SAVES_240")
+  })
+
+  it("refuses to invent a saving when no comparable round trip exists", () => {
+    // §6 the honest answer to "how much does this save?" is sometimes "we have
+    // never seen the trip it would be saving against".
+    leg("PRG", "BKK", day(30), 300)
+    leg("BKK", "VIE", day(37), 260)
+    const summary = run()
+    expect(summary.noComparator).toBeGreaterThan(0)
+
+    const row = stored()[0]!
+    const jaw = jawOf(row)
+    expect(jaw.comparator).toBeNull()
+    expect(jaw.saving).toBeNull()
+    expect(jaw.savingPercent).toBeNull()
+    expect(codes(row)).toContain("OPEN_JAW_NO_COMPARATOR")
+    expect(codes(row)).toContain("NO_ROUNDTRIP_COMPARATOR")
+    // Dropped and renormalised, NOT scored zero - scoring it zero would punish
+    // the open jaw for a gap in our own observations.
+    const breakdown = JSON.parse(row.score_breakdown)
+    expect(breakdown.components.savingVsRoundTrip.weight).toBe(0)
+    expect(breakdown.effectiveWeights.savingVsRoundTrip).toBeUndefined()
+  })
+
+  it("assembles a configured cross-city pairing", () => {
+    // §8 Bangkok in, Phuket out is a real Thailand itinerary, and it is in the
+    // config precisely so it can exist.
+    leg("PRG", "BKK", day(30), 300)
+    leg("HKT", "VIE", day(37), 200)
+    run()
+
+    const row = stored().find(r => r.route === "PRG-BKK/HKT-VIE")
+    expect(row).toBeDefined()
+    const jaw = jawOf(row!)
+    expect(jaw.destinationPair.arrive).toBe("BKK")
+    expect(jaw.destinationPair.depart).toBe("HKT")
+    // The domestic hop is money, and it is counted.
+    expect(jaw.destinationTransferCost).toBeGreaterThan(0)
+    expect(jaw.trueTripCost).toBeGreaterThan(jaw.totalPrice)
+  })
+
+  it("will not pair two cities merely because both have a cheap one-way", () => {
+    // §7/§8 Bangkok in, Bali out is two flights and a 4,000km gap. It is not a
+    // trip, and no amount of cheapness should be able to make it one.
+    leg("PRG", "BKK", day(30), 300)
+    leg("DPS", "VIE", day(37), 90)
+    run()
+
+    expect(stored().some(r => JSON.parse(r.open_jaw).inbound.origin === "DPS")).toBe(false)
+    expect(config.openJaw.destinationPairs.some(p => p.depart === "DPS")).toBe(false)
+  })
+
+  it("says when the two legs come from different sellers", () => {
+    leg("PRG", "BKK", day(30), 300, { provider: "seller_a" })
+    leg("BKK", "VIE", day(37), 260, { provider: "seller_b" })
+    ret("PRG", "BKK", day(30), day(37), 800)
+    run()
+
+    const row = stored()[0]!
+    expect(codes(row)).toContain("OPEN_JAW_MIXED_PROVIDER")
+    expect(jawOf(row).mixedProvider).toBe(true)
+
+    // The same trip from one seller is the same trip with less to go wrong.
+    db.prepare(`DELETE FROM deal_candidates`).run()
+    db.prepare(`DELETE FROM open_jaw_pairs`).run()
+    db.prepare(`DELETE FROM flight_prices`).run()
+    leg("PRG", "BKK", day(30), 300, { provider: "seller_a" })
+    leg("BKK", "VIE", day(37), 260, { provider: "seller_a" })
+    ret("PRG", "BKK", day(30), day(37), 800)
+    run()
+    const single = stored()[0]!
+    expect(codes(single)).not.toContain("OPEN_JAW_MIXED_PROVIDER")
+    expect(jawOf(single).friction).toBeLessThan(jawOf(row).friction)
+  })
+
+  it("applies friction as a penalty rather than as a component", () => {
+    // A component can be outvoted by a large enough discount. "You land in a
+    // different country" must not be votable away.
+    leg("PRG", "BKK", day(30), 300)
+    leg("BKK", "VIE", day(37), 260)
+    ret("PRG", "BKK", day(30), day(37), 800)
+    run()
+
+    const breakdown = JSON.parse(stored()[0]!.score_breakdown)
+    expect(breakdown.components.openJawFriction).toBeDefined()
+    expect(breakdown.components.openJawFriction.points).toBeLessThan(0)
+    expect(breakdown.components.openJawFriction.weight).toBe(0)
+    // And the score is still explainable: every surviving component is named.
+    expect(Object.keys(breakdown.effectiveWeights).length).toBeGreaterThan(3)
+  })
+
+  it("flags a suspicious leg even when the total looks ordinary", () => {
+    // 9 USD to Bangkok is a bug, not a fare - but 9 + 260 is a plausible total,
+    // so checking only the combined price would wave it through.
+    leg("PRG", "BKK", day(30), 9)
+    leg("BKK", "VIE", day(37), 260)
+    ret("PRG", "BKK", day(30), day(37), 800)
+    run()
+
+    const row = stored()[0]!
+    expect(row.sanity).toBe("SUSPICIOUS_DATA")
+    expect(row.status).toBe("below-threshold")
+    expect(String(row.sanity_detail)).toContain("leg")
+
+    rebuildClusters(db, { minScore: 0 })
+    const feed = buildFeed(db, { minScore: 0 })
+    expect(feed.sections.openjaw.every(c => c.sanity === "ok")).toBe(true)
+  })
+
+  it("rejects the shapes that are not trips", () => {
+    // §14 each of these has been a real bug in some itinerary builder.
+    const anomalyConfig = loadAnomalyConfig(true)
+    const base = {
+      outbound: {
+        origin: "PRG", destination: "BKK", departureDate: day(30), price: 300,
+        currency: "USD", cabin: "economy", observedAt: at(-1), stops: 0, durationMinutes: 700,
+      },
+      inbound: {
+        origin: "BKK", destination: "VIE", departureDate: day(37), price: 260,
+        currency: "USD", cabin: "economy", observedAt: at(-1), stops: 0, durationMinutes: 700,
+      },
+      totalPrice: 560, tripLengthNights: 7, destinationGroup: "thailand",
+      homeAirports: ["PRG", "VIE"], suspiciousLegs: [] as string[],
+    }
+    expect(checkOpenJawSanity(base, anomalyConfig).verdict).toBe("ok")
+
+    const bad = (over: any) => checkOpenJawSanity({ ...base, ...over }, anomalyConfig)
+
+    // The return departs before the outbound.
+    expect(bad({
+      inbound: { ...base.inbound, departureDate: day(20) }, tripLengthNights: -10,
+    }).verdict).toBe("SUSPICIOUS_DATA")
+    // Two prices in two currencies, added together.
+    expect(bad({ inbound: { ...base.inbound, currency: "EUR" } }).detail).toContain("conversion")
+    // Two outbound legs dressed up as a trip.
+    expect(bad({ inbound: { ...base.inbound, origin: "PRG", destination: "BKK" } }).verdict)
+      .toBe("SUSPICIOUS_DATA")
+    // A return that does not land anywhere I live.
+    expect(bad({ inbound: { ...base.inbound, destination: "FRA" } }).detail).toContain("home airport")
+    // Cabins that do not match.
+    expect(bad({ inbound: { ...base.inbound, cabin: "business" } }).detail).toContain("cabin")
+    // A trip length nobody takes.
+    expect(bad({ tripLengthNights: 400 }).verdict).toBe("SUSPICIOUS_DATA")
+    // Two fares observed months apart are not two fares you can buy today.
+    expect(bad({ outbound: { ...base.outbound, observedAt: at(-90) } }).detail)
+      .toContain("days apart")
+    // And a leg already judged unbelievable in its own right.
+    expect(bad({ suspiciousLegs: ["outbound PRG-BKK: below the floor"] }).verdict)
+      .toBe("SUSPICIOUS_DATA")
+  })
+
+  it("never files an open jaw into the same family as an ordinary round trip", () => {
+    // §11 they are different products at the same price on the same day, and a
+    // feed that merges them tells the reader the wrong thing about both.
+    leg("PRG", "BKK", day(30), 300)
+    leg("BKK", "VIE", day(37), 260)
+    for (let i = 0; i < 8; i++) {
+      ret("PRG", "BKK", day(30 + i), day(37 + i), 560, { fetchedAt: at(-30 + i) })
+    }
+    evaluateNewObservations({ db, quiet: true })
+    run()
+    rebuildClusters(db, { minScore: 0 })
+
+    const mixed = db.prepare(`
+      SELECT cluster_id, COUNT(DISTINCT is_open_jaw) kinds
+      FROM deal_candidates WHERE cluster_id IS NOT NULL
+      GROUP BY cluster_id HAVING kinds > 1
+    `).all()
+    expect(mixed).toHaveLength(0)
+
+    const jaw = stored()[0]!
+    const family = db.prepare(
+      `SELECT is_open_jaw FROM deal_candidates WHERE cluster_id = ?`,
+    ).all(jaw.cluster_id) as any[]
+    expect(family.every(m => m.is_open_jaw === 1)).toBe(true)
+  })
+
+  it("serialises both legs all the way to the feed and the detail panel", () => {
+    // §12/§13 the panel used to print the raw JSON, which is not a UI - it is
+    // an admission that nothing rendered it.
+    leg("PRG", "BKK", day(30), 300, { provider: "seller_a", airline: "Emirates" })
+    leg("BKK", "VIE", day(37), 260, { provider: "seller_b", airline: "Qatar Airways" })
+    ret("PRG", "BKK", day(30), day(37), 800)
+    run()
+    rebuildClusters(db, { minScore: 0 })
+
+    const feed = buildFeed(db, { minScore: 0 })
+    expect(feed.counts.openjaw).toBeGreaterThan(0)
+    const card = feed.sections.openjaw[0]!
+    expect(card.isOpenJaw).toBe(true)
+    expect(card.openJaw).not.toBeNull()
+    expect(card.openJaw!.outbound.origin).toBe("PRG")
+    expect(card.openJaw!.outbound.provider).toBe("seller_a")
+    expect(card.openJaw!.inbound.destination).toBe("VIE")
+    expect(card.openJaw!.inbound.provider).toBe("seller_b")
+    expect(card.openJaw!.comparator!.price).toBe(800)
+
+    const detail = dealDetail(db, card.candidateId!)!
+    expect(detail.candidate.isOpenJaw).toBe(true)
+    expect(detail.warnings.some(w => w.includes("TWO one-way tickets"))).toBe(true)
+  })
+
+  it("collects the one-way legs it needs without doubling the search budget", () => {
+    // §4/§5 the legs are deliberately collected, sparsely, out of the SAME
+    // ceiling the rest of the run spends from.
+    const j = job({ name: "oj-plan", destinationGroup: "thailand" })
+    const legs = planOpenJawLegs(j, 0, config, NOW)
+    const sampling = config.openJaw.sampling
+
+    expect(legs.length).toBeGreaterThan(0)
+    expect(legs.length).toBeLessThanOrEqual(sampling.maxLegSearchesPerRun)
+    // One-ways only: a return fare cannot be half of an open jaw.
+    expect(legs.every(t => t.returnDate === null)).toBe(true)
+    // Only the priority airports of a configured group, only home origins.
+    const allowed = new Set([...sampling.airports.thailand!, ...sampling.origins])
+    expect(legs.every(t => allowed.has(t.route.origin) && allowed.has(t.route.destination))).toBe(true)
+    // Outbound legs reuse the dates stage 1 already chose - no second grid.
+    const sparse = new Set(sparseDates(j, 0, config, NOW))
+    const outbound = legs.filter(t => sampling.origins.includes(t.route.origin))
+    expect(outbound.length).toBeGreaterThan(0)
+    expect(outbound.every(t => sparse.has(t.departureDate))).toBe(true)
+    // Every outbound has a partner: half a couple is a wasted call.
+    expect(legs.length - outbound.length).toBe(outbound.length)
+
+    // Wildcards are deliberately excluded: an open jaw needs both legs AND a
+    // comparable round trip, so collecting one-ways for ten unwatched
+    // destinations would cost more than the sparse scan and find nothing.
+    const wild = job({ name: "oj-wild", destinationGroup: "wildcard", cabins: ["economy"] })
+    expect(planOpenJawLegs(wild, 0, config, NOW)).toHaveLength(0)
+
+    // And the incremental cost is stated rather than buried in "free calls".
+    const plan = planDiscoveryRun(j, 0, config, NOW)
+    expect(plan.expected.openJawLegCalls).toBe(legs.length)
+    expect(plan.openJawLegs).toHaveLength(legs.length)
+
+    const projection = projectDiscoveryBudget(db, config, NOW)
+    const row = projection.jobs.find(r => r.name === "oj-plan")!
+    expect(row.openJawLegSearches).toBe(legs.length)
+    expect(projection.totals.monthlyOpenJawLegCalls).toBeGreaterThan(0)
+  })
+
+  it("rotates through the couples so a week of runs covers them all", () => {
+    const j = job({ name: "oj-rotate", destinationGroup: "thailand" })
+    const first = planOpenJawLegs(j, 0, config, NOW).map(t => `${t.route.origin}-${t.route.destination}`)
+    const later = planOpenJawLegs(j, 3, config, NOW).map(t => `${t.route.origin}-${t.route.destination}`)
+    expect(first.join()).not.toBe(later.join())
+  })
+
+  it("records the legs it collected and the candidates they produced", async () => {
+    setProviders([new MockProvider({ name: "free_mock", flights: [makeFlight()] })])
+    const j = job({
+      name: "oj-run", destinationGroup: "thailand",
+      budget: {
+        maxFreeCallsPerRun: 40, maxAwardCallsPerRun: 0, maxMeteredCallsPerRun: 0,
+        maxRuntimeMs: 60_000, maxDestinations: 1, datesPerRoute: 1,
+      } as any,
+    })
+
+    const { result, runId } = await executeDiscoveryJob(j, {
+      db, trigger: "manual", cashOnly: true, config,
+    })
+
+    expect(result.openJawLegSearches).toBeGreaterThan(0)
+    expect(result.freeCalls).toBeLessThanOrEqual(40)
+    expect(result.meteredCalls).toBe(0)
+
+    // §20 the cost of open-jaw support is on the run row, in the same units as
+    // every other cost class. A capability whose price is not recorded cannot
+    // be judged worth keeping.
+    const row = db.prepare(`SELECT * FROM discovery_runs WHERE id = ?`).get(runId) as any
+    expect(row.open_jaw_leg_searches).toBe(result.openJawLegSearches)
+    expect(row.open_jaw_candidates).toBe(result.openJawCandidates)
+
+    // And the legs really were one-ways, recorded with their own provenance.
+    const oneWays = db.prepare(`
+      SELECT COUNT(*) c FROM flight_prices WHERE search_request_id IN (
+        SELECT id FROM search_requests WHERE discovery_method = 'OPEN_JAW' AND discovery_run_id = ?
+      )
+    `).get(runId) as any
+    expect(oneWays.c).toBeGreaterThan(0)
+    const requests = db.prepare(`
+      SELECT COUNT(*) c FROM search_requests
+      WHERE discovery_method = 'OPEN_JAW' AND return_date IS NOT NULL
+    `).get() as any
+    expect(requests.c).toBe(0)
+  })
+
+  it("says an open jaw is worse rather than claiming it saves a negative amount", () => {
+    // The first live run produced OPEN_JAW_SAVES_-259, which is not a sentence.
+    // A negative saving is a different fact and gets its own name - which also
+    // keeps OPEN_JAW_SAVES_X meaning exactly one thing wherever it appears.
+    leg("PRG", "BKK", day(30), 472)
+    leg("BKK", "VIE", day(37), 396)
+    ret("PRG", "BKK", day(30), day(37), 609)
+    run()
+
+    const row = stored()[0]!
+    const jaw = jawOf(row)
+    expect(jaw.saving).toBeLessThan(0)
+    expect(codes(row)).toContain("OPEN_JAW_WORSE_THAN_ROUND_TRIP")
+    expect(codes(row).some((c: string) => c.startsWith("OPEN_JAW_SAVES_"))).toBe(false)
+    expect(row.status).toBe("below-threshold")
+
+    // §19 and it is still SHOWN, with the arithmetic. "Nothing found" cannot
+    // distinguish "no legs" from "the sums came out against it".
+    rebuildClusters(db, { minScore: 0 })
+    const feed = buildFeed(db, { minScore: 0 })
+    expect(feed.counts.openjaw).toBeGreaterThan(0)
+  })
+
+  it("does not let a busy feed truncate the open-jaw section out of existence", () => {
+    // Sections are filtered views of the top-N families by score, so a small
+    // section can be emptied by the truncation rather than by being empty -
+    // "no open jaws" would then mean "none made the cut", which is a different
+    // and much less useful statement.
+    leg("PRG", "BKK", day(30), 472)
+    leg("BKK", "VIE", day(37), 396)
+    ret("PRG", "BKK", day(30), day(37), 609)
+    // Higher-scoring families than the open jaw, more of them than the pool.
+    for (let i = 0; i < 12; i++) {
+      ret("VIE", "HKT", day(40 + i * 5), day(47 + i * 5), 300 + i, { fetchedAt: at(-40 + i) })
+    }
+    evaluateNewObservations({ db, quiet: true })
+    run()
+    rebuildClusters(db, { minScore: 0 })
+
+    const pool = buildFeed(db, { minScore: 0, poolLimit: 2 })
+    expect(pool.counts.openjaw).toBeGreaterThan(0)
+    // The open jaw is genuinely outside the truncated pool - it is in the feed
+    // because it was fetched for its own section, not by luck of the ranking.
+    const topTwo = listClusters(db, { minScore: 0, limit: 2 })
+    expect(topTwo.some(c => c.isOpenJaw)).toBe(false)
+  })
+
+  it("does not mistake a leg the open-jaw stage paid for FOR an open jaw", () => {
+    // `discovered_by` records WHICH METHOD SPENT THE CALL. The open-jaw stage
+    // spends its calls on ordinary one-way legs, and labelling them OPEN_JAW is
+    // how §20 answers "was collecting them worth it". A single one-way fare is
+    // still not an open jaw - and on the first live run the legs outnumbered
+    // and outscored the real pairs, filling the fetch and emptying the section
+    // that exists to show them.
+    for (let i = 0; i < 8; i++) {
+      // One search request per fetch, exactly as a real run produces them.
+      // Sharing one across all eight would make them siblings, and siblings are
+      // excluded from each other's baselines by design.
+      const requestId = recordSearchRequest(db, {
+        origin: "HKT", destination: "PRG", departureDate: day(37),
+        returnDate: null, cabin: "economy", adults: 1, currency: "USD",
+      }, "discovery", { discoveryMethod: "OPEN_JAW", discoveryRunId: null, discoveryStage: 1 })
+      recordPriceObservations(db, [makeFlight({
+        origin: "HKT", destination: "PRG", cabin: "economy", returnDate: null,
+        departureDate: day(37), price: { amount: 900 - i * 40, currency: "USD" },
+        fetchedAt: at(-20 + i),
+      })], { adults: 1, searchRequestId: requestId })
+    }
+    evaluateNewObservations({ db, quiet: true })
+    rebuildClusters(db, { minScore: 0 })
+
+    const legCandidate = db.prepare(
+      `SELECT discovered_by, is_open_jaw FROM deal_candidates WHERE route = 'HKT-PRG' LIMIT 1`,
+    ).get() as any
+    expect(legCandidate.discovered_by).toBe("OPEN_JAW")   // correct: it paid for it
+    expect(legCandidate.is_open_jaw).toBe(0)              // and it is still one fare
+
+    // The cluster carries the same distinction, so the section can filter on it.
+    const byLabel = listClusters(db, { minScore: 0, limit: 50, discoveredBy: "OPEN_JAW" })
+    const byNature = listClusters(db, { minScore: 0, limit: 50, isOpenJaw: true })
+    expect(byLabel.length).toBeGreaterThan(byNature.length)
+    expect(byNature.every(c => c.isOpenJaw)).toBe(true)
+    expect(buildFeed(db, { minScore: 0 }).sections.openjaw.every(c => c.isOpenJaw)).toBe(true)
+  })
+
+  it("knows which arrivals it is configured to assemble", () => {
+    const arrivals = openJawArrivals(config)
+    expect(arrivals.map(a => a.arrive)).toContain("BKK")
+    expect(arrivals.map(a => a.arrive)).toContain("CUN")
+    // Not a wildcard destination: nothing collects its legs, so scanning it
+    // every cycle would be work that cannot produce an answer.
+    expect(arrivals.map(a => a.arrive)).not.toContain("MLE")
+  })
+
+  it("looks up a comparable round trip by row, never by aggregate", () => {
+    ret("PRG", "BKK", day(30), day(37), 800, { provider: "expensive_seller", fetchedAt: at(-2) })
+    ret("PRG", "BKK", day(30), day(37), 620, { provider: "cheap_seller", fetchedAt: at(-8) })
+
+    const found = bestComparableRoundTrip(
+      db, "PRG", ["BKK"], "economy", "USD", at(0),
+      { from: day(0), to: day(90) }, 45, 7, 2,
+    )!
+    expect(found.price).toBe(620)
+    // The cheapest PRICE and the newest TIMESTAMP describe different rows here,
+    // which is exactly the shape that used to attribute one row's fare to
+    // another row's seller.
+    expect(found.provider).toBe("cheap_seller")
+    expect(found.observedAt).toBe(at(-8))
   })
 })
 

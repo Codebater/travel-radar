@@ -16,8 +16,8 @@ import { readUsage } from "../db/repositories.js"
 import { serpApiBudget } from "../cache/policy.js"
 import { loadDiscoveryConfig, type DiscoveryConfig } from "./config.js"
 import { listDiscoveryJobs } from "./store.js"
-import { planStage1, routesFor } from "./sampling.js"
-import type { DiscoveryJob, DiscoveryPlan } from "./types.js"
+import { planStage1, planOpenJawLegs, routesFor } from "./sampling.js"
+import type { DiscoveryJob } from "./types.js"
 
 /**
  * The SerpAPI calls DISCOVERY may still spend this month.
@@ -111,11 +111,16 @@ export interface DiscoveryProjection {
     name: string
     routes: number
     stage1Searches: number
+    /** §5 the one-way legs collected purely so open jaws can be assembled. */
+    openJawLegSearches: number
     runsPerMonth: number
     monthlyFreeCalls: number
+    monthlyOpenJawLegCalls: number
   }[]
   totals: {
     monthlyFreeCalls: number
+    /** Stated separately: the incremental cost of open-jaw support, per month. */
+    monthlyOpenJawLegCalls: number
     monthlyAwardCallsMax: number
     /** What the per-run ceilings would ALLOW if every run verified its maximum. */
     monthlyMeteredCallsMax: number
@@ -145,21 +150,28 @@ export function projectDiscoveryBudget(
   const jobs = listDiscoveryJobs(db, { enabledOnly: true })
   const rows: DiscoveryProjection["jobs"] = []
   let monthlyFree = 0
+  let monthlyOpenJawLegs = 0
   let monthlyAward = 0
   let monthlyMetered = 0
 
   for (const job of jobs) {
     const routes = routesFor(job, config).length
     const stage1 = planStage1(job, 0, config, now).length
+    // §5 open-jaw legs come out of the same ceiling rather than being added to
+    // it, so they appear inside perRunFree AND on their own line: the question
+    // "what does open-jaw support cost?" has to have an answer that is not a
+    // subtraction the reader has to do themselves.
+    const openJawLegs = planOpenJawLegs(job, 0, config, now).length
     const runsPerMonth = HOURS_PER_MONTH / Math.max(1, job.frequencyHours)
     // Stage 2 is bounded by its own per-run window cap, so the pessimistic
     // per-run cost is stage 1 plus that cap's worth of dense searches.
     const stage2Max = config.sampling.stage2.maxWindowsPerRun *
       Math.ceil(config.sampling.stage2.windowDays / config.sampling.stage2.stepDays) *
       config.sampling.stage2.extraTripLengths
-    const perRunFree = Math.min(stage1 + stage2Max, job.budget.maxFreeCallsPerRun)
+    const perRunFree = Math.min(stage1 + openJawLegs + stage2Max, job.budget.maxFreeCallsPerRun)
 
     monthlyFree += perRunFree * runsPerMonth
+    monthlyOpenJawLegs += openJawLegs * runsPerMonth
     monthlyAward += job.budget.maxAwardCallsPerRun * runsPerMonth
     monthlyMetered += job.budget.maxMeteredCallsPerRun * runsPerMonth
 
@@ -167,8 +179,10 @@ export function projectDiscoveryBudget(
       name: job.name,
       routes,
       stage1Searches: stage1,
+      openJawLegSearches: openJawLegs,
       runsPerMonth: Math.round(runsPerMonth * 10) / 10,
       monthlyFreeCalls: Math.ceil(perRunFree * runsPerMonth),
+      monthlyOpenJawLegCalls: Math.ceil(openJawLegs * runsPerMonth),
     })
   }
 
@@ -194,6 +208,7 @@ export function projectDiscoveryBudget(
     jobs: rows,
     totals: {
       monthlyFreeCalls: Math.ceil(monthlyFree),
+      monthlyOpenJawLegCalls: Math.ceil(monthlyOpenJawLegs),
       monthlyAwardCallsMax: Math.ceil(monthlyAward),
       monthlyMeteredCallsMax: Math.ceil(monthlyMetered),
       monthlyMeteredCallsEffective: Math.min(Math.ceil(monthlyMetered), serpapi.discoveryCeiling),
@@ -203,11 +218,4 @@ export function projectDiscoveryBudget(
     warnings,
     ok: conflicts.length === 0,
   }
-}
-
-/** Ceiling figures for one planned run, for dry-run output. */
-export function estimatePlan(plan: DiscoveryPlan): {
-  freeCalls: number; awardCalls: number; meteredCalls: number
-} {
-  return plan.expected
 }

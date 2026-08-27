@@ -309,6 +309,10 @@ export function evaluateCashObservation(
     positioning: positioning ?? null,
     positioningPenalty: positioning?.penalty ?? null,
     trueTripStartCost: positioning?.trueTripStartCost ?? null,
+    // A single observation is a single fare: one origin, one destination, one
+    // price. Open jaws are decisions about PAIRS of observations and are built
+    // in anomaly/openjaw.ts, where there are two legs to reason about. This
+    // false is the truth about this row, not a placeholder.
     isOpenJaw: false,
     openJaw: null,
     clusterId: null,
@@ -472,6 +476,10 @@ export function evaluateAwardObservation(
     positioning: positioning ?? null,
     positioningPenalty: positioning?.penalty ?? null,
     trueTripStartCost: positioning?.trueTripStartCost ?? null,
+    // A single observation is a single fare: one origin, one destination, one
+    // price. Open jaws are decisions about PAIRS of observations and are built
+    // in anomaly/openjaw.ts, where there are two legs to reason about. This
+    // false is the truth about this row, not a placeholder.
     isOpenJaw: false,
     openJaw: null,
     clusterId: null,

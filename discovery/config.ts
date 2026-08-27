@@ -42,6 +42,28 @@ export interface DestinationGroup {
   note?: string
 }
 
+/** §7/§8 - a pairing of arrival and departure city that is a real itinerary. */
+export interface TransferLeg {
+  mode: PositioningMode
+  hours: number
+  typicalCost: Record<string, number>
+  note?: string
+}
+
+export interface DestinationPairRule {
+  group: string
+  arrive: string
+  depart: string
+  /** 0..1 - is this a trip somebody would actually want, or just two cheap fares? */
+  usefulness: number
+  transfer: TransferLeg | null
+  note?: string
+}
+
+export interface HomeTransferRule extends TransferLeg {
+  between: [string, string]
+}
+
 export interface DiscoveryJobConfig {
   name: string
   originGroup: OriginGroup
@@ -115,8 +137,26 @@ export interface DiscoveryConfig {
   }
   openJaw: {
     enabled: boolean
+    /** Home airport out, home airport back. A same-home pair is only used when the destination cities differ. */
     originPairs: [string, string][]
     minSavingPercent: number
+    maxCombinationsPerPair: number
+    maxLegAgeDays: number
+    /** §8 cross-city pairings must be listed to exist. Same-city is always allowed. */
+    destinationPairs: DestinationPairRule[]
+    /** Getting home from the home airport you did not leave from. */
+    homeTransfers: HomeTransferRule[]
+    penalties: Record<string, number>
+    maxAcceptableFriction: number
+    sampling: {
+      enabled: boolean
+      groups: string[]
+      airports: Record<string, string[]>
+      origins: string[]
+      datesPerRoute: number
+      cabins: CabinClass[]
+      maxLegSearchesPerRun: number
+    }
   }
   cadence: { sparseScanHours: number }
   jobs: DiscoveryJobConfig[]
@@ -152,6 +192,42 @@ export function groupForDestination(
     .filter(([, g]) => g.classification !== false && g.airports.includes(code))
     .sort((a, b) => a[1].priority - b[1].priority)
   return entries.length > 0 ? { key: entries[0]![0], group: entries[0]![1] } : null
+}
+
+/**
+ * §8 - the destination-side pairings allowed for one arrival airport.
+ *
+ * The same-city pairing is always present and needs no configuration: flying
+ * into Bangkok and out of Bangkok, but home to a different airport, is an open
+ * jaw at the HOME end only and carries no destination transfer. Every
+ * cross-city pairing must be listed, because "two cheap one-ways exist" is not
+ * the same statement as "this is a trip".
+ */
+export function openJawPairsFor(
+  arrive: string, config: DiscoveryConfig, group: string | null = null,
+): DestinationPairRule[] {
+  const code = arrive.toUpperCase()
+  const sameCity: DestinationPairRule = {
+    group: group ?? groupForDestination(code, config)?.key ?? "",
+    arrive: code, depart: code,
+    usefulness: 1,
+    transfer: null,
+    note: "in and out of the same city, home to a different airport",
+  }
+  const configured = (config.openJaw.destinationPairs ?? [])
+    .filter(p => p.arrive.toUpperCase() === code && p.depart.toUpperCase() !== code)
+  return [sameCity, ...configured]
+}
+
+/** The ground/air link between two home airports, when one is configured. */
+export function homeTransferFor(
+  from: string, to: string, config: DiscoveryConfig,
+): HomeTransferRule | null {
+  if (from.toUpperCase() === to.toUpperCase()) return null
+  const pair = [from.toUpperCase(), to.toUpperCase()].sort().join("|")
+  return (config.openJaw.homeTransfers ?? []).find(
+    h => [...h.between].map(a => a.toUpperCase()).sort().join("|") === pair,
+  ) ?? null
 }
 
 /** Currency-keyed value with a sane fallback — never a silent zero. */

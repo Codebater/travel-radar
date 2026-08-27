@@ -131,9 +131,90 @@ export type DiscoveryMethod =
   | "FIXED_OBSERVER" | "FLEXIBLE_DATE" | "POSITIONING"
   | "OPEN_JAW" | "WILDCARD" | "TAKE_ME_ANYWHERE"
 
+/**
+ * §2/§13 - what an open-jaw candidate carries, so a reader can see the trip
+ * rather than a total.
+ *
+ * Both legs are here in full, each with its own price, seller and timestamp,
+ * because that is what buying this actually involves. Nothing in here ever
+ * presents the two as one round trip quoted by one provider.
+ */
+export interface OpenJawDetail {
+  pairId: number
+  outbound: OpenJawLegDetail
+  inbound: OpenJawLegDetail
+  destinationPair: {
+    group: string | null
+    arrive: string
+    depart: string
+    usefulness: number
+    transfer: { mode: string; hours: number; typicalCost: Record<string, number> } | null
+    note: string | null
+  }
+  /** The two fares and nothing else. */
+  totalPrice: number
+  /** Getting between the cities, and home from the airport you did not leave from. */
+  transferCost: number
+  destinationTransferCost: number
+  homeTransferCost: number
+  homeTransfer: { mode: string; hours: number } | null
+  trueTripCost: number
+  currency: string
+  tripLengthNights: number
+  /** The ordinary round trip this was measured against, with the row it came from. */
+  comparator: {
+    priceId: number
+    price: number
+    currency: string
+    origin: string
+    destination: string
+    departureDate: string
+    returnDate: string
+    nights: number
+    provider: string
+    observedAt: string
+  } | null
+  saving: number | null
+  savingPercent: number | null
+  netSaving: number | null
+  netSavingPercent: number | null
+  friction: number
+  frictionReasons: string[]
+  mixedProvider: boolean
+  legAgeSpreadDays: number
+  convenience: number
+  convenienceDetail: string
+  qualifies: boolean
+  note: string
+}
+
+export interface OpenJawLegDetail {
+  priceId: number
+  origin: string
+  destination: string
+  departureDate: string
+  departureTime: string | null
+  price: number
+  currency: string
+  provider: string
+  providerConfidence: string
+  verificationLevel: string
+  airline: string | null
+  stops: number | null
+  durationMinutes: number | null
+  baggage: string | null
+  observedAt: string
+}
+
 export interface DealCandidate {
   id?: number
-  sourceTable: "flight_prices" | "award_prices"
+  /**
+   * `open_jaw` points at an open_jaw_pairs row rather than an observation: an
+   * open jaw is a decision about TWO observations, and there is nothing else
+   * for it to point at. The pair row keeps both leg ids as foreign keys, so
+   * provenance is still a join and never a copy.
+   */
+  sourceTable: "flight_prices" | "award_prices" | "open_jaw"
   sourceId: number
   observedAt: string
   asOf: string
@@ -191,9 +272,9 @@ export interface DealCandidate {
   positioning: unknown | null
   positioningPenalty: number | null
   trueTripStartCost: number | null
-  /** §8 present only when the return lands somewhere else. */
+  /** §8 present only when the trip does not fly in and out of the same pair of airports. */
   isOpenJaw: boolean
-  openJaw: unknown | null
+  openJaw: OpenJawDetail | null
   clusterId: number | null
   /** candidate = at/above threshold; below-threshold rows are kept for review. */
   status: "candidate" | "below-threshold"

@@ -161,7 +161,10 @@ function rowToRun(r: any): DiscoveryRun {
     scheduledFor: r.scheduled_for, status: r.status, trigger: r.trigger,
     routesSampled: r.routes_sampled, datePairsSampled: r.date_pairs_sampled,
     stage1Searches: r.stage1_searches, stage2Searches: r.stage2_searches,
-    awardSearches: r.award_searches, cacheHits: r.cache_hits,
+    awardSearches: r.award_searches,
+    openJawLegSearches: r.open_jaw_leg_searches ?? 0,
+    openJawCandidates: r.open_jaw_candidates ?? 0,
+    cacheHits: r.cache_hits,
     freeCalls: r.free_calls, awardCalls: r.award_calls, meteredCalls: r.metered_calls,
     verificationCalls: r.verification_calls,
     observationsAdded: r.observations_added, candidatesProduced: r.candidates_produced,
@@ -200,6 +203,8 @@ export interface DiscoveryRunResult {
   stage1Searches: number
   stage2Searches: number
   awardSearches: number
+  openJawLegSearches: number
+  openJawCandidates: number
   cacheHits: number
   freeCalls: number
   awardCalls: number
@@ -217,6 +222,7 @@ export function finishDiscoveryRun(db: DB, runId: number, result: DiscoveryRunRe
     UPDATE discovery_runs SET
       completed_at = ?, status = ?, routes_sampled = ?, date_pairs_sampled = ?,
       stage1_searches = ?, stage2_searches = ?, award_searches = ?,
+      open_jaw_leg_searches = ?, open_jaw_candidates = ?,
       cache_hits = ?, free_calls = ?, award_calls = ?, metered_calls = ?,
       verification_calls = ?, observations_added = ?, candidates_produced = ?,
       scope_reduced = ?, errors = ?, duration_ms = ?
@@ -224,6 +230,7 @@ export function finishDiscoveryRun(db: DB, runId: number, result: DiscoveryRunRe
   `).run(
     nowIso(), result.status, result.routesSampled, result.datePairsSampled,
     result.stage1Searches, result.stage2Searches, result.awardSearches,
+    result.openJawLegSearches, result.openJawCandidates,
     result.cacheHits, result.freeCalls, result.awardCalls, result.meteredCalls,
     result.verificationCalls, result.observationsAdded, result.candidatesProduced,
     result.scopeReduced,

@@ -16,8 +16,10 @@ import type { DB } from "../db/index.js"
 import { loadAnomalyConfig } from "./config.js"
 import { listClusters, type ClusterRow } from "./clustering.js"
 import { getCandidate, type StoredCandidate } from "./store.js"
+import type { OpenJawDetail } from "./types.js"
 
-export type FeedSection = "extreme" | "business" | "awards" | "wildcard" | "positioning"
+export type FeedSection =
+  | "extreme" | "business" | "awards" | "wildcard" | "positioning" | "openjaw"
 
 export interface DealCard {
   clusterId: number
@@ -57,6 +59,13 @@ export interface DealCard {
   positioningPenalty: number | null
   trueTripStartCost: number | null
   isOpenJaw: boolean
+  /**
+   * §12 the whole open jaw, not a badge. A card that says "PRG-BKK, open jaw"
+   * has told the reader nothing about where they actually land, and a card that
+   * shows one combined price implies one provider quoted it. Both legs travel
+   * with the card.
+   */
+  openJaw: OpenJawDetail | null
   reasons: { code: string; detail: string }[]
   presetsMatched: string[]
   feedback: string | null
@@ -100,6 +109,7 @@ function toCard(db: DB, cluster: ClusterRow): DealCard | null {
     positioningPenalty: c.positioningPenalty,
     trueTripStartCost: c.trueTripStartCost,
     isOpenJaw: c.isOpenJaw,
+    openJaw: c.openJaw,
     reasons: c.reasons,
     presetsMatched: c.presetsMatched,
     feedback: c.feedback?.verdict ?? null,
@@ -126,14 +136,29 @@ export interface FeedResult {
  */
 export function buildFeed(
   db: DB,
-  opts: { limitPerSection?: number; minScore?: number } = {},
+  opts: { limitPerSection?: number; minScore?: number; poolLimit?: number } = {},
 ): FeedResult {
   const config = loadAnomalyConfig()
   const limit = Math.min(opts.limitPerSection ?? 12, 50)
   const minScore = opts.minScore ?? config.candidateThreshold
+  const poolLimit = Math.min(Math.max(opts.poolLimit ?? 300, 1), 1000)
 
-  const clusters = listClusters(db, { minScore, limit: 300 })
-  const cards = clusters.map(c => toCard(db, c)).filter((c): c is DealCard => c !== null)
+  // The pool is the top N families by score, and the sections are filtered
+  // VIEWS of it. That means a small section can be emptied by the truncation
+  // rather than by being empty - a "no open jaws" that actually means "none of
+  // them made the top 300", which is a different and much less useful
+  // statement. Open jaws are fetched explicitly as well, exactly as many as the
+  // section could show, and merged in. (Positioning and wildcard cannot be
+  // fetched this way: the cluster row records `discovered_by`, not whether the
+  // trip needs a train to reach.)
+  const clusters = [
+    ...listClusters(db, { minScore, limit: poolLimit }),
+    ...listClusters(db, { minScore, limit, isOpenJaw: true }),
+  ]
+  const unique = new Map<number, ClusterRow>()
+  for (const cluster of clusters) if (!unique.has(cluster.id)) unique.set(cluster.id, cluster)
+  const cards = [...unique.values()]
+    .map(c => toCard(db, c)).filter((c): c is DealCard => c !== null)
     // A suspicious observation never reaches the feed; it stays visible in the
     // candidate table with its diagnostic reason instead.
     .filter(c => c.sanity === "ok")
@@ -151,6 +176,7 @@ export function buildFeed(
     awards: cards.filter(c => c.type === "award").slice(0, limit),
     wildcard: cards.filter(c => c.destinationGroup === "wildcard" || c.discoveredBy === "WILDCARD").slice(0, limit),
     positioning: cards.filter(c => c.requiresPositioning).slice(0, limit),
+    openjaw: cards.filter(c => c.isOpenJaw).slice(0, limit),
   }
 
   return {
@@ -168,6 +194,7 @@ export function buildFeed(
       awards: sections.awards.length,
       wildcard: sections.wildcard.length,
       positioning: sections.positioning.length,
+      openjaw: sections.openjaw.length,
     },
     generatedAt: new Date().toISOString(),
   }
@@ -229,20 +256,36 @@ export function dealDetail(db: DB, candidateId: number): DealDetail | null {
     WHERE origin = ? AND destination = ? AND cabin = ?
   `).get(candidate.origin, candidate.destination, candidate.cabin) as any
 
+  // §15 the cheapest ROW per date, selected by id - not MIN(price) beside bare
+  // `provider` and MAX(fetched_at), which forfeits the bare-column guarantee
+  // and attributes one row's price to another row's seller and timestamp. A
+  // panel whose entire purpose is provenance must not guess at it.
   const cashAlternatives = db.prepare(`
-    SELECT departure_date departureDate, MIN(price_amount) price, price_currency currency,
-           provider, MAX(fetched_at) observedAt
-    FROM flight_prices
+    SELECT departure_date departureDate, price_amount price, price_currency currency,
+           provider, fetched_at observedAt
+    FROM flight_prices f
     WHERE origin = ? AND destination = ? AND cabin = ?
-    GROUP BY departure_date ORDER BY price ASC LIMIT 8
+      AND id = (
+        SELECT id FROM flight_prices g
+        WHERE g.origin = f.origin AND g.destination = f.destination AND g.cabin = f.cabin
+          AND g.departure_date = f.departure_date
+        ORDER BY g.price_amount ASC, g.fetched_at DESC, g.id ASC LIMIT 1
+      )
+    ORDER BY price ASC LIMIT 8
   `).all(candidate.origin, candidate.destination, candidate.cabin) as any[]
 
   const awardAlternatives = db.prepare(`
     SELECT departure_date departureDate, loyalty_program loyaltyProgram,
-           MIN(points) points, taxes_amount taxes, provider
-    FROM award_prices
+           points, taxes_amount taxes, provider
+    FROM award_prices a
     WHERE origin = ? AND destination = ? AND cabin = ?
-    GROUP BY loyalty_program ORDER BY points ASC LIMIT 8
+      AND id = (
+        SELECT id FROM award_prices b
+        WHERE b.origin = a.origin AND b.destination = a.destination AND b.cabin = a.cabin
+          AND b.loyalty_program = a.loyalty_program
+        ORDER BY b.points ASC, b.fetched_at DESC, b.id ASC LIMIT 1
+      )
+    ORDER BY points ASC LIMIT 8
   `).all(candidate.origin, candidate.destination, candidate.cabin) as any[]
 
   // Said plainly rather than implied by a missing badge.
@@ -264,7 +307,29 @@ export function dealDetail(db: DB, candidateId: number): DealDetail | null {
     )
   }
   if (candidate.isOpenJaw) {
-    warnings.push("Open jaw: this returns to a different airport than it departs from.")
+    const j = candidate.openJaw
+    warnings.push(
+      "Open jaw: this is TWO one-way tickets, not one return. Nothing connects them, bags are " +
+      "not through-checked, and if one leg moves the other seller is not responsible.",
+    )
+    if (j && j.comparator === null) {
+      warnings.push(
+        "No comparable round trip has been observed at this trip length, so there is no saving " +
+        "to state - the saving component was dropped rather than scored, and none was invented.",
+      )
+    }
+    if (j && j.netSaving !== null && j.saving !== null && j.netSaving <= 0 && j.saving > 0) {
+      warnings.push(
+        `The fares are ${j.saving} ${j.currency} cheaper, but ${j.transferCost} ${j.currency} of ` +
+        `transfers takes all of it back.`,
+      )
+    }
+    if (j && j.legAgeSpreadDays >= 7) {
+      warnings.push(
+        `The two legs were observed ${Math.round(j.legAgeSpreadDays)} days apart - they may never ` +
+        `have been buyable on the same day.`,
+      )
+    }
   }
   if (candidate.cpp?.cpp == null && candidate.type === "award") {
     warnings.push("No comparable cash fare has been observed, so there is no cents-per-point figure.")
@@ -281,7 +346,7 @@ export function dealDetail(db: DB, candidateId: number): DealDetail | null {
       memberCount: cluster.member_count, bestCandidateId: cluster.best_candidate_id,
       bestScore: cluster.best_score, bestPrice: cluster.best_price,
       bestCurrency: cluster.best_currency, bestPoints: cluster.best_points,
-      discoveredBy: cluster.discovered_by,
+      discoveredBy: cluster.discovered_by, isOpenJaw: Boolean(cluster.is_open_jaw),
     } : null,
     siblings,
     // The median comes from the candidate's baseline, which is a ZEROED

@@ -144,6 +144,108 @@ export function checkAwardSanity(
 }
 
 /**
+ * §14 - the ways two believable one-way fares can fail to be a trip.
+ *
+ * Every check here has been a real bug in some itinerary builder: a return leg
+ * that departs before the outbound, a pair of legs both heading the same way,
+ * two prices in different currencies quietly added together, or two fares
+ * observed six weeks apart and long since gone. None of them look wrong in the
+ * total - which is exactly why the total cannot be the only thing checked.
+ *
+ * The combined price is ALSO run through the ordinary cash rules, so an open
+ * jaw cannot slip past a floor that a single fare would have been caught by.
+ */
+export function checkOpenJawSanity(
+  input: {
+    outbound: {
+      origin: string; destination: string; departureDate: string
+      price: number; currency: string; cabin: string; observedAt: string
+      stops: number | null; durationMinutes?: number | null
+    }
+    inbound: {
+      origin: string; destination: string; departureDate: string
+      price: number; currency: string; cabin: string; observedAt: string
+      stops: number | null; durationMinutes?: number | null
+    }
+    totalPrice: number
+    tripLengthNights: number
+    destinationGroup: string | null
+    /** Airports a trip may legitimately end at. */
+    homeAirports: string[]
+    /** Legs already judged suspicious in their own right. */
+    suspiciousLegs: string[]
+  },
+  config: AnomalyConfig,
+): SanityResult {
+  const rules = (config as any).sanity?.openJaw
+  const reasons: string[] = []
+  const { outbound, inbound } = input
+
+  if (outbound.currency !== inbound.currency) {
+    reasons.push(
+      `legs are priced in ${outbound.currency} and ${inbound.currency}, and no conversion has ` +
+      `been observed - adding them would produce a number in no currency at all`,
+    )
+  }
+  if (outbound.cabin !== inbound.cabin && rules?.allowCabinMismatch !== true) {
+    reasons.push(`cabin mismatch: ${outbound.cabin} out, ${inbound.cabin} back`)
+  }
+  if (inbound.departureDate <= outbound.departureDate) {
+    reasons.push(
+      `the return leg departs ${inbound.departureDate}, on or before the outbound on ` +
+      `${outbound.departureDate} - that is not a trip`,
+    )
+  }
+  if (rules) {
+    if (input.tripLengthNights < rules.minNights) {
+      reasons.push(`${input.tripLengthNights} nights is below the ${rules.minNights}-night minimum`)
+    }
+    if (input.tripLengthNights > rules.maxNights) {
+      reasons.push(`${input.tripLengthNights} nights is above the ${rules.maxNights}-night ceiling`)
+    }
+  }
+  // Same-direction pair: two outbound legs dressed up as a round trip. The
+  // return has to LEAVE the destination side and LAND somewhere I live.
+  if (inbound.origin === outbound.origin) {
+    reasons.push(`both legs depart ${outbound.origin} - this is two outbound flights, not a trip`)
+  }
+  if (inbound.destination === outbound.destination) {
+    reasons.push(`both legs arrive ${outbound.destination} - this is two outbound flights, not a trip`)
+  }
+  const homes = input.homeAirports.map(a => a.toUpperCase())
+  if (homes.length > 0 && !homes.includes(inbound.destination.toUpperCase())) {
+    reasons.push(`the return leg lands at ${inbound.destination}, which is not a home airport`)
+  }
+
+  const spreadDays = Math.abs(
+    Date.parse(outbound.observedAt) - Date.parse(inbound.observedAt),
+  ) / 86_400_000
+  const maxSpread = rules?.maxLegAgeSpreadDays
+  if (maxSpread !== undefined && spreadDays > maxSpread) {
+    reasons.push(
+      `the legs were observed ${Math.round(spreadDays)} days apart, beyond the ${maxSpread}-day ` +
+      `limit - one of these prices is very unlikely to still exist`,
+    )
+  }
+
+  for (const leg of input.suspiciousLegs) reasons.push(`a leg is itself suspicious: ${leg}`)
+
+  // And the total must survive the same floors and ceilings any single fare does.
+  const asFare = checkCashSanity({
+    price: input.totalPrice, currency: outbound.currency, cabin: outbound.cabin,
+    destinationGroup: input.destinationGroup,
+    stops: Math.max(outbound.stops ?? 0, inbound.stops ?? 0),
+    durationMinutes: null,
+    departureDate: outbound.departureDate,
+  }, config)
+  reasons.push(...asFare.reasons)
+
+  return reasons.length === 0
+    ? OK
+    : { verdict: "SUSPICIOUS_DATA", reasons, detail: reasons.join("; ") }
+}
+
+/**
  * §25 - the comparability guards, asserted as a unit rather than trusted.
  *
  * Each of these is enforced structurally somewhere in the pipeline already.

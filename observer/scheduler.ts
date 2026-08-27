@@ -17,6 +17,7 @@ import { executeJob } from "./engine.js"
 import { projectMonthlyBudget } from "./budget.js"
 import { backupIfDue } from "../db/backup.js"
 import { evaluateNewObservations } from "../anomaly/engine.js"
+import { evaluateOpenJaws } from "../anomaly/openjaw.js"
 import { dueDiscoveryJobs, getDiscoveryJob, reapStaleDiscoveryRuns } from "../discovery/store.js"
 import { executeDiscoveryJob } from "../discovery/engine.js"
 
@@ -150,6 +151,17 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
         evaluateNewObservations({ db, quiet: false })
       } catch (err) {
         console.warn(`⚠️ anomaly evaluation failed (observation collection is unaffected): ${(err as Error).message}`)
+      }
+
+      // §2/§4 and re-assemble the open jaws, since the observer collects
+      // one-way legs of its own. Also database-only, and separately guarded:
+      // an open jaw is two observations, so a leg collected here and one
+      // collected by a discovery run yesterday are still a pair, and neither
+      // side should have to wait for the other's cycle to notice.
+      try {
+        evaluateOpenJaws({ db, quiet: false })
+      } catch (err) {
+        console.warn(`⚠️ open-jaw assembly failed (nothing else is affected): ${(err as Error).message}`)
       }
 
       // §AC a rolling local backup, taken by whoever holds the lease. Cheap

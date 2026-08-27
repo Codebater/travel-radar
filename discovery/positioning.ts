@@ -47,6 +47,11 @@ export function observedFare(
   if (opts.departureDate) { where.push("departure_date = ?"); params.push(opts.departureDate) }
   if (opts.tripType) { where.push("(return_date IS NULL) = ?"); params.push(opts.tripType === "oneway" ? 1 : 0) }
 
+  // Three aggregates and NO bare columns, which is what makes this safe. The
+  // cheapest fare and the freshest timestamp deliberately describe different
+  // rows - "the best price seen" and "how current this set is" are two separate
+  // questions here. The pattern to avoid is an aggregate beside an ungrouped
+  // column, where the row the value came from is left to chance; §15.
   const row = db.prepare(`
     SELECT MIN(price_amount) price, COUNT(*) observations, MAX(fetched_at) newest
     FROM flight_prices WHERE ${where.join(" AND ")}

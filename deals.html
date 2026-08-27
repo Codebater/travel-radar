@@ -103,6 +103,7 @@ const SECTIONS = [
   ['awards',      'Awards',      'Points redemptions, judged per loyalty program.'],
   ['wildcard',    'Wildcard',    'Destinations the fixed observer does not watch at all.'],
   ['positioning', 'Positioning', 'Trips that start somewhere other than PRG or VIE. The true start cost includes getting there.'],
+  ['openjaw',     'Open jaw',     'Two one-way tickets flown as one trip: out of one airport, home into another. Never one provider quoting a round trip - both legs are priced, sold and timed separately.'],
 ];
 
 function scoreColour(score) {
@@ -117,6 +118,13 @@ function priceCell(d) {
     return `${int.format(d.points || 0)} pts${taxes}`;
   }
   const base = `${d.price} ${esc(d.currency || '')}`;
+  // Two tickets, said out loud. A single figure next to a single route is how
+  // a reader ends up believing one seller quoted this as a return.
+  if (d.isOpenJaw) {
+    const j = d.openJaw;
+    return `${base} <span class="text-gray-500">2 tickets</span>` +
+      (j && j.transferCost > 0 ? ` <span class="text-gray-500">+${j.transferCost} transfers</span>` : '');
+  }
   // The headline fare is not what a positioning trip costs to begin, so both
   // numbers are shown rather than one standing in for the other.
   return d.trueTripStartCost && d.requiresPositioning
@@ -185,6 +193,58 @@ function verdictCell(d) {
   ).join('');
 }
 
+// §12 open jaws get their own shape. The generic row has one route, one price
+// and one seller, and every one of those is wrong here: there are four
+// airports, two fares and two bookings. Showing it in the ordinary table would
+// be accurate about the number and misleading about the trip.
+function openJawRow(d) {
+  const j = d.openJaw;
+  if (!j) return dealRow(d);
+  const money = `${j.currency}`;
+  const comparison = j.comparator === null
+    ? '<div class="text-gray-500">no comparable round trip observed — no saving stated</div>'
+    : `<div>Comparable normal return <span class="text-gray-300">${j.comparator.price} ${esc(money)}</span>
+         <span class="text-gray-500">(${esc(j.comparator.origin)}–${esc(j.comparator.destination)}, ${esc(j.comparator.provider)})</span></div>
+       <div>${j.saving > 0
+         ? `Saving <span class="text-emerald">${j.saving} ${esc(money)}${j.savingPercent !== null ? ` (${j.savingPercent}%)` : ''}</span>`
+         : `<span class="text-warn">${Math.abs(j.saving)} ${esc(money)} more</span> than a normal return`}${
+         j.transferCost > 0 ? ` <span class="text-gray-500">→ ${j.netSaving} after ${j.transferCost} of transfers</span>` : ''}</div>`;
+  return `<tr class="deal border-b border-gray-800" onclick="showDetail(${d.candidateId})">
+    <td class="font-extrabold ${scoreColour(d.score)} align-top">${d.score}</td>
+    <td class="align-top">
+      <div class="text-[11px] text-gray-500">OUTBOUND</div>
+      <div class="font-semibold text-white">${esc(j.outbound.origin)} → ${esc(j.outbound.destination)}</div>
+      <div class="text-gray-400 text-xs">${esc(j.outbound.departureDate)} · ${j.outbound.price} ${esc(money)} · ${esc(j.outbound.provider)}</div>
+      <div class="text-[11px] text-gray-500 mt-2">RETURN</div>
+      <div class="font-semibold text-white">${esc(j.inbound.origin)} → ${esc(j.inbound.destination)}</div>
+      <div class="text-gray-400 text-xs">${esc(j.inbound.departureDate)} · ${j.inbound.price} ${esc(money)} · ${esc(j.inbound.provider)}</div>
+    </td>
+    <td class="text-gray-400 align-top">${esc(d.cabin)}<div class="text-xs text-gray-500">${j.tripLengthNights}n</div></td>
+    <td class="align-top">
+      <div class="font-semibold text-white">${j.totalPrice} ${esc(money)}</div>
+      <div class="text-[11px] text-gray-500">two tickets</div>
+      ${j.transferCost > 0 ? `<div class="text-xs text-gray-400">+ ${j.transferCost} transfers = ${j.trueTripCost}</div>` : ''}
+    </td>
+    <td class="text-xs text-gray-400 align-top">${comparison}</td>
+    <td class="align-top">${badges(d)}</td>
+    <td class="text-gray-500 text-[11px] align-top">friction ${j.friction}</td>
+    <td class="text-gray-500 text-[11px] align-top">${esc((d.reasons || []).map(r => r.code).filter(c => c.startsWith('OPEN_JAW') || c === 'NO_ROUNDTRIP_COMPARATOR').slice(0, 4).join(' '))}</td>
+    <td class="align-top" onclick="event.stopPropagation()">${verdictCell(d)}</td>
+  </tr>`;
+}
+
+function openJawTable(rows) {
+  return `<div class="bg-card rounded-xl overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-gray-400 border-b border-gray-700">
+        <tr><th>Score</th><th>Legs</th><th>Cabin</th><th>Combined</th>
+        <th>Against a normal return</th><th>Status</th><th>Friction</th><th>Reasons</th><th>Verdict</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
 function table(rows) {
   return `<div class="bg-card rounded-xl overflow-x-auto">
     <table class="w-full text-sm">
@@ -206,11 +266,13 @@ async function load() {
   document.getElementById('sections').innerHTML = SECTIONS.map(([key, title, blurb]) => {
     const cards = d.sections[key] || [];
     const body = cards.length
-      ? table(cards.map(dealRow).join(''))
+      ? (key === 'openjaw' ? openJawTable(cards.map(openJawRow).join('')) : table(cards.map(dealRow).join('')))
       : `<div class="bg-card rounded-xl p-4 text-sm text-gray-500">
            Nothing here yet. ${key === 'positioning'
              ? 'Positioning trips appear once discovery has fares from BUD/MUC/WAW/BER/BTS and a home fare to compare them against.'
-             : 'Discovery needs a few cycles before a route has enough history to judge against.'}
+             : key === 'openjaw'
+               ? 'An open jaw needs BOTH one-way legs stored before it can be assembled. Discovery collects them for Thailand and Mexico on every cycle; give it a few days.'
+               : 'Discovery needs a few cycles before a route has enough history to judge against.'}
          </div>`;
     return `<div class="mb-8">
       <div class="flex items-baseline justify-between mb-1">
@@ -273,9 +335,54 @@ async function showDetail(id) {
       <div class="text-xs text-gray-500 mt-1">Penalty ${c.positioning.penalty}: ${esc((c.positioning.penaltyReasons || []).join('; '))}</div>
     </div>` : '';
 
-  const openJaw = c.openJaw ? `
-    <h4 class="text-sm font-semibold text-gray-300 mt-4 mb-1">Open jaw</h4>
-    <div class="text-sm text-gray-400">${esc(JSON.stringify(c.openJaw))}</div>` : '';
+  // §13 each leg on its own row with its own seller, price, time and standing,
+  // then the arithmetic that combines them. The previous version dumped the
+  // raw JSON, which is not a UI - it is an admission that nothing rendered it.
+  const legRow = (label, leg) => `
+    <tr class="border-b border-gray-800">
+      <td class="text-gray-500 text-[11px]">${label}</td>
+      <td class="text-white font-semibold">${esc(leg.origin)} → ${esc(leg.destination)}</td>
+      <td class="text-gray-400">${esc(leg.departureDate)}${leg.departureTime ? ` <span class="text-gray-500">${esc(String(leg.departureTime).slice(11, 16))}</span>` : ''}</td>
+      <td class="text-gray-300">${leg.price} ${esc(leg.currency)}</td>
+      <td class="text-gray-400">${esc(leg.airline || '—')}</td>
+      <td class="text-gray-400">${leg.stops === null ? '—' : leg.stops === 0 ? 'direct' : leg.stops + ' stop'}</td>
+      <td class="text-gray-400">${esc(leg.provider)}</td>
+      <td class="text-gray-500 text-[11px]">${esc(leg.providerConfidence)} · ${esc(leg.verificationLevel)}</td>
+      <td class="text-gray-500 text-[11px]">${esc(String(leg.observedAt).slice(0, 10))}</td>
+    </tr>`;
+
+  const openJaw = c.openJaw ? (() => {
+    const j = c.openJaw;
+    const cur = esc(j.currency);
+    const arithmetic = [
+      `${j.outbound.price} ${cur} outbound + ${j.inbound.price} ${cur} return = <span class="text-white font-semibold">${j.totalPrice} ${cur}</span> in fares`,
+      j.transferCost > 0
+        ? `+ ${j.transferCost} ${cur} to get ${j.destinationTransferCost > 0 ? `from ${esc(j.destinationPair.arrive)} to ${esc(j.destinationPair.depart)}` : ''}${j.destinationTransferCost > 0 && j.homeTransferCost > 0 ? ' and ' : ''}${j.homeTransferCost > 0 ? `home from ${esc(j.inbound.destination)}` : ''} = <span class="text-white font-semibold">${j.trueTripCost} ${cur}</span> all in`
+        : null,
+      j.comparator
+        ? `Comparable normal return ${esc(j.comparator.origin)}–${esc(j.comparator.destination)} ${esc(j.comparator.departureDate)} ↩ ${esc(j.comparator.returnDate)}: <span class="text-white font-semibold">${j.comparator.price} ${cur}</span> (${esc(j.comparator.provider)}, seen ${esc(String(j.comparator.observedAt).slice(0, 10))})`
+        : 'No comparable round trip has been observed at this trip length, so no saving is stated — and none was invented.',
+      !j.comparator ? null
+        : j.saving > 0
+          ? `Saving <span class="text-emerald font-semibold">${j.saving} ${cur}${j.savingPercent !== null ? ` (${j.savingPercent}%)` : ''}</span>${j.transferCost > 0 ? `, <span class="${j.netSaving > 0 ? 'text-emerald' : 'text-warn'}">${j.netSaving} ${cur}</span> once the transfers are paid` : ''}`
+          : `<span class="text-warn font-semibold">${Math.abs(j.saving)} ${cur} MORE</span> than the comparable normal return${j.transferCost > 0 ? `, ${Math.abs(j.netSaving)} ${cur} more once the transfers are paid` : ''} — splitting this trip costs money rather than saving it`,
+    ].filter(Boolean);
+
+    return `
+    <h4 class="text-sm font-semibold text-gray-300 mt-4 mb-1">Open jaw — two separate tickets</h4>
+    <div class="overflow-x-auto"><table class="w-full text-sm mb-2">
+      <thead class="text-left text-gray-500"><tr><th></th><th>Leg</th><th>Date</th><th>Price</th>
+      <th>Airline</th><th>Stops</th><th>Sold by</th><th>Confidence</th><th>Observed</th></tr></thead>
+      <tbody>${legRow('OUT', j.outbound)}${legRow('BACK', j.inbound)}</tbody>
+    </table></div>
+    <div class="text-sm text-gray-400">${arithmetic.map(line => `<div>${line}</div>`).join('')}</div>
+    <div class="text-xs text-gray-500 mt-2">
+      Pairing: ${esc(j.destinationPair.arrive)} in, ${esc(j.destinationPair.depart)} out
+      (usefulness ${j.destinationPair.usefulness})${j.destinationPair.note ? ` — ${esc(j.destinationPair.note)}` : ''}.
+      Shape: ${esc(j.convenienceDetail)}.
+    </div>
+    <div class="text-xs text-gray-500 mt-1">Friction ${j.friction}: ${esc((j.frictionReasons || []).join('; '))}</div>`;
+  })() : '';
 
   el.innerHTML = `
     <div class="bg-card rounded-xl p-5">

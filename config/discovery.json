@@ -247,6 +247,7 @@
   },
   "openJaw": {
     "enabled": true,
+    "note": "An open jaw is one outbound observation plus one inbound observation, flown as one trip. It is never a round trip quoted by one provider, and nothing here pretends otherwise: both legs keep their own price, provider and timestamp. Pairings must be explicitly allowed - two cheap one-ways between arbitrary cities are not a trip, they are a coincidence.",
     "originPairs": [
       [
         "PRG",
@@ -255,10 +256,166 @@
       [
         "VIE",
         "PRG"
+      ],
+      [
+        "PRG",
+        "PRG"
+      ],
+      [
+        "VIE",
+        "VIE"
       ]
     ],
+    "originPairsNote": "Home airport out, home airport back. PRG/PRG and VIE/VIE are here for the destination-side jaw (fly into Cancun, home from Mexico City) - a same-home pair is only used when the destination cities differ, or it would just be a round trip.",
     "minSavingPercent": 8,
-    "note": "Assembled from one-way observations the radar already holds, so discovering an open jaw costs nothing. Only a promising combination is ever searched live. A saving under minSavingPercent is not worth arriving in a different city for."
+    "maxCombinationsPerPair": 6,
+    "maxLegAgeDays": 45,
+    "destinationPairs": [
+      {
+        "group": "thailand",
+        "arrive": "BKK",
+        "depart": "HKT",
+        "usefulness": 0.85,
+        "transfer": {
+          "mode": "flight",
+          "hours": 1.5,
+          "typicalCost": {
+            "EUR": 45,
+            "USD": 49
+          }
+        },
+        "note": "Bangkok in, Phuket out - the standard Thailand two-centre trip, and the domestic hop is cheap and frequent."
+      },
+      {
+        "group": "thailand",
+        "arrive": "HKT",
+        "depart": "BKK",
+        "usefulness": 0.85,
+        "transfer": {
+          "mode": "flight",
+          "hours": 1.5,
+          "typicalCost": {
+            "EUR": 45,
+            "USD": 49
+          }
+        },
+        "note": "The same trip in the other direction."
+      },
+      {
+        "group": "thailand",
+        "arrive": "BKK",
+        "depart": "CNX",
+        "usefulness": 0.7,
+        "transfer": {
+          "mode": "flight",
+          "hours": 1.3,
+          "typicalCost": {
+            "EUR": 40,
+            "USD": 44
+          }
+        },
+        "note": "Bangkok in, Chiang Mai out. Sensible, but a narrower trip than the beach pairing."
+      },
+      {
+        "group": "mexico",
+        "arrive": "CUN",
+        "depart": "MEX",
+        "usefulness": 0.8,
+        "transfer": {
+          "mode": "flight",
+          "hours": 2.5,
+          "typicalCost": {
+            "EUR": 70,
+            "USD": 76
+          }
+        },
+        "note": "Caribbean coast in, capital out - a real itinerary rather than a fare accident."
+      },
+      {
+        "group": "mexico",
+        "arrive": "MEX",
+        "depart": "CUN",
+        "usefulness": 0.8,
+        "transfer": {
+          "mode": "flight",
+          "hours": 2.5,
+          "typicalCost": {
+            "EUR": 70,
+            "USD": 76
+          }
+        },
+        "note": "The same trip in the other direction."
+      },
+      {
+        "group": "mexico",
+        "arrive": "CUN",
+        "depart": "MID",
+        "usefulness": 0.6,
+        "transfer": {
+          "mode": "bus",
+          "hours": 4.0,
+          "typicalCost": {
+            "EUR": 25,
+            "USD": 27
+          }
+        },
+        "note": "Cancun in, Merida out. Configured because the Yucatan overland link is genuinely easy; scored lower because it is a narrower trip."
+      }
+    ],
+    "destinationPairsNote": "Cross-city pairings must appear here to exist at all. Same-city pairings (in and out of the same airport, different home airports) are always allowed and need no entry - they carry no destination transfer.",
+    "homeTransfers": [
+      {
+        "between": [
+          "PRG",
+          "VIE"
+        ],
+        "mode": "train",
+        "hours": 4.0,
+        "typicalCost": {
+          "EUR": 25,
+          "USD": 27
+        },
+        "note": "RegioJet/OeBB, several a day. Landing in the wrong home city is an inconvenience, not a disaster - but it is not free either."
+      }
+    ],
+    "penalties": {
+      "note": "Points on a 0-1 friction scale, additive and capped at 1.0, applied to the score as a penalty rather than a component - so a big enough discount can never vote it away.",
+      "separateTickets": 0.2,
+      "mixedProvider": 0.1,
+      "perHourOfDestinationTransfer": 0.06,
+      "destinationTransferByFlight": 0.12,
+      "perHourOfHomeReturnTransfer": 0.05,
+      "unlistedHomeTransfer": 0.25,
+      "perDayOfLegAgeSpread": 0.01
+    },
+    "maxAcceptableFriction": 0.85,
+    "sampling": {
+      "note": "§4/§5 - discovery collects the one-way legs it needs rather than living off the fixed observer's leftovers. Deliberately sparse: only the configured groups, only the priority airports, only a SUBSET of the dates stage 1 already chose, and capped per run so open-jaw support cannot double the search budget.",
+      "enabled": true,
+      "groups": [
+        "thailand",
+        "mexico"
+      ],
+      "airports": {
+        "thailand": [
+          "BKK",
+          "HKT"
+        ],
+        "mexico": [
+          "CUN",
+          "MEX"
+        ]
+      },
+      "origins": [
+        "PRG",
+        "VIE"
+      ],
+      "datesPerRoute": 2,
+      "cabins": [
+        "economy"
+      ],
+      "maxLegSearchesPerRun": 12
+    }
   },
   "cadence": {
     "sparseScanHours": 24,
