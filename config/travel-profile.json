@@ -1,0 +1,50 @@
+{
+  "description": "Personal travel profile for the Extreme Travel Opportunity Radar. This is configuration, not code: routes, priorities and sampling defaults live here so nothing is hardcoded through the application. Wildcard destinations are declared for later phases and deliberately NOT scanned by default.",
+  "updated": "2026-08-27",
+
+  "origins": {
+    "primary": ["PRG", "VIE"],
+    "positioning": ["BUD", "MUC", "WAW", "BER", "BTS"]
+  },
+
+  "destinations": {
+    "mexico": {
+      "priority1": ["CUN", "MEX"],
+      "priority2": ["SJD", "MID", "PVR"]
+    },
+    "thailand": {
+      "priority1": ["BKK", "HKT"],
+      "priority2": ["KBV", "CNX"]
+    },
+    "wildcard": {
+      "note": "Config only for Phase 4 — powers TAKE ME ANYWHERE / EXTREME HOLIDAY DEALS later. Not seeded into observation jobs.",
+      "airports": ["MLE", "SEZ", "MRU", "ZNZ", "DPS", "SIN", "DXB", "DOH", "NRT", "HND"]
+    }
+  },
+
+  "observer": {
+    "note": "Defaults applied when seeding observation jobs. Every value can be overridden per job in the database.",
+    "seedRoutes": [
+      { "origin": "PRG", "destination": "BKK", "priority": 1 },
+      { "origin": "VIE", "destination": "BKK", "priority": 1 },
+      { "origin": "PRG", "destination": "CUN", "priority": 1 },
+      { "origin": "VIE", "destination": "CUN", "priority": 1 },
+      { "origin": "PRG", "destination": "MEX", "priority": 2 },
+      { "origin": "VIE", "destination": "MEX", "priority": 2 }
+    ],
+    "cabins": ["economy", "business"],
+    "cashProviders": ["fast_flights"],
+    "awardProviders": ["roame"],
+    "atfNote": "ATF is excluded from scheduled observation on purpose: one search costs 5 of ~150 monthly calls. It stays reserved for manual validation and explicit high-value checks.",
+    "frequencyHours": 84,
+    "jitterMinutes": 45,
+    "dateStrategy": {
+      "horizonDays": 180,
+      "firstDepartureOffsetDays": 21,
+      "stepDays": 14,
+      "tripLengths": [7, 10, 14, 21],
+      "datesPerRun": 4,
+      "awardEveryNRuns": 2
+    }
+  }
+}
