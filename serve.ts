@@ -17,8 +17,11 @@ import path from "path"
 import { fileURLToPath } from "url"
 import { runSearch, type SearchConfig, type DashboardResults } from "./search.ts"
 import { providerHealth } from "./providers/cash-flights/index.js"
+import { awardProviderHealth } from "./providers/award-flights/index.js"
+import { balancesHealth } from "./providers/balances/index.js"
 import { getDb } from "./db/index.js"
-import { allUsage, priceHistory } from "./db/repositories.js"
+import { allUsage, priceHistory, awardPriceHistory, latestSearchResult } from "./db/repositories.js"
+import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
 // Bind to loopback by default — this is a local dev tool holding live loyalty
@@ -100,10 +103,43 @@ const server = http.createServer(async (req, res) => {
   // Never performs a billable call.
   if (url.pathname === "/api/providers") {
     try {
-      const health = await providerHealth()
-      const usage = allUsage(getDb())
+      const db = getDb()
+      const [cash, award] = await Promise.all([providerHealth(db), awardProviderHealth(db)])
+      const balances = balancesHealth(db)
+      const usage = allUsage(db)
+
+      // Verified loyalty-program coverage (see providers/award-flights/coverage.json).
+      let coverage: unknown = null
+      try {
+        coverage = JSON.parse(fsSync.readFileSync(
+          path.join(ROOT, "providers", "award-flights", "coverage.json"), "utf-8"))
+      } catch { /* coverage file is informational */ }
+
       res.writeHead(200, { "Content-Type": "application/json" })
-      res.end(JSON.stringify({ checkedAt: new Date().toISOString(), providers: health, usage }, null, 2))
+      res.end(JSON.stringify({
+        checkedAt: new Date().toISOString(),
+        cash, awards: award, balances, usage, coverage,
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/results/latest — the most recent persisted search result.
+  // This is the dashboard's load-time state since Phase 3; results.json is a
+  // debug export only.
+  if (url.pathname === "/api/results/latest") {
+    try {
+      const latest = latestSearchResult(getDb())
+      if (!latest) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: "no search has been persisted yet" }))
+        return
+      }
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(latest.payload))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
@@ -118,13 +154,17 @@ const server = http.createServer(async (req, res) => {
       const destination = iata(url.searchParams.get("to") || "", "to")
       const departureDate = url.searchParams.get("date")
       const cabin = url.searchParams.get("cabin")
-      const stats = priceHistory(getDb(), {
+      const db = getDb()
+      const filter = {
         origin, destination,
         departureDate: departureDate ? isoDate(departureDate, "date") : undefined,
         cabin: cabin || undefined,
-      })
+      }
+      const stats = priceHistory(db, filter)
+      // "Points observed by this radar" — our own observations, not market data.
+      const awardStats = awardPriceHistory(db, filter)
       res.writeHead(200, { "Content-Type": "application/json" })
-      res.end(JSON.stringify({ origin, destination, stats }, null, 2))
+      res.end(JSON.stringify({ origin, destination, cash: stats, awards: awardStats, stats }, null, 2))
     } catch (err) {
       const status = err instanceof BadRequest ? 400 : 500
       res.writeHead(status, { "Content-Type": "application/json" })

@@ -370,13 +370,19 @@ function escapeHtml(str) {
  * layer: which tier the price came from, and how old a cached one is.
  */
 function freshnessBadge(flight) {
-  if (flight.type !== 'cash' || !flight.verificationLevel) return '';
+  if (!flight.verificationLevel) return '';
   const age = ageLabel(flight.cacheAgeMinutes, flight.fetchedAt);
   if (flight.verificationLevel === 'verified') {
     return `<span class="badge-green text-[10px] px-1.5 py-0.5 rounded-full" title="Confirmed by a metered provider">✓ Verified${age ? ' · ' + escapeHtml(age) : ''}</span>`;
   }
+  if (flight.verificationLevel === 'cross-verified') {
+    return `<span class="badge-green text-[10px] px-1.5 py-0.5 rounded-full" title="Two independent award providers reported this availability">✓✓ Cross-verified${age ? ' · ' + escapeHtml(age) : ''}</span>`;
+  }
   if (flight.verificationLevel === 'cached') {
     return `<span class="badge-yellow text-[10px] px-1.5 py-0.5 rounded-full" title="Replayed from the local cache — no provider call was made">Cached${age ? ' · ' + escapeHtml(age) : ''}</span>`;
+  }
+  if (flight.type !== 'cash') {
+    return `<span class="badge-blue text-[10px] px-1.5 py-0.5 rounded-full" title="Reported by one award provider">Live${age ? ' · ' + escapeHtml(age) : ''}</span>`;
   }
   return `<span class="badge-blue text-[10px] px-1.5 py-0.5 rounded-full" title="Found by a free discovery provider; verification recommended before booking">Discovery${age ? ' · ' + escapeHtml(age) : ''}</span>`;
 }
@@ -1136,7 +1142,15 @@ function displayResults() {
 
 async function init() {
   try {
-    const resp = await fetch('./results.json');
+    // Phase 3: the persisted state lives in SQLite, served here. results.json
+    // remains only as a fallback for the server-down / file:// case.
+    let resp = null;
+    try {
+      resp = await fetch('./api/results/latest');
+    } catch (e) { /* API unreachable */ }
+    if (!resp || !resp.ok) {
+      resp = await fetch('./results.json');
+    }
     if (resp.ok) {
       dashboardData = await resp.json();
       

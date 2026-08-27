@@ -11,8 +11,10 @@
  */
 
 import { getDb, migrate, DEFAULT_DB_PATH, currentPeriod } from "./index.js"
-import { allUsage, clearCache, pruneCache, priceHistory } from "./repositories.js"
+import { allUsage, clearCache, pruneCache, priceHistory, awardPriceHistory } from "./repositories.js"
 import { providerHealth } from "../providers/cash-flights/index.js"
+import { awardProviderHealth } from "../providers/award-flights/index.js"
+import { balancesHealth } from "../providers/balances/index.js"
 
 const [command, ...args] = process.argv.slice(2)
 
@@ -47,7 +49,7 @@ async function main() {
 
     case "providers": {
       const db = getDb()
-      const health = await providerHealth(db)
+      const health = [...await providerHealth(db), ...await awardProviderHealth(db), balancesHealth(db)]
       const usage = allUsage(db)
       console.log(`Provider status (${currentPeriod()}) — no billable calls made\n`)
       for (const h of health) {
@@ -92,19 +94,30 @@ async function main() {
         console.error("Usage: npx tsx db/cli.ts history PRG BKK [2026-11-10]")
         process.exit(1)
       }
-      const stats = priceHistory(getDb(), {
-        origin, destination, departureDate: date,
-      })
-      if (stats.length === 0) {
+      const db2 = getDb()
+      const stats = priceHistory(db2, { origin, destination, departureDate: date })
+      const awardStats = awardPriceHistory(db2, { origin, destination, departureDate: date })
+      if (stats.length === 0 && awardStats.length === 0) {
         console.log(`No observations recorded for ${origin.toUpperCase()}→${destination.toUpperCase()}`)
         break
       }
       for (const s of stats) {
-        console.log(`${origin.toUpperCase()}→${destination.toUpperCase()} [${s.currency}]`)
+        console.log(`CASH ${origin.toUpperCase()}→${destination.toUpperCase()} [${s.currency}]`)
         console.log(`  observations ${s.observations}`)
         console.log(`  min ${s.min}  median ${s.median}  average ${s.average}  max ${s.max}`)
         console.log(`  latest ${s.latest} at ${s.latestAt}`)
         console.log(`  first observed ${s.firstAt}`)
+      }
+      if (awardStats.length > 0) {
+        console.log(`
+AWARDS — points observed by this radar (not market-wide history):`)
+        for (const a of awardStats) {
+          console.log(`  ${a.loyaltyProgram} ${a.cabin}: n=${a.observations}  ` +
+                      `min ${a.minPoints.toLocaleString()}  median ${a.medianPoints.toLocaleString()}  ` +
+                      `avg ${a.averagePoints.toLocaleString()}  max ${a.maxPoints.toLocaleString()}  ` +
+                      `latest ${a.latestPoints.toLocaleString()}` +
+                      `${a.minTaxes !== null ? `  min taxes ${a.minTaxes} ${a.minTaxesCurrency}` : ""}`)
+        }
       }
       break
     }

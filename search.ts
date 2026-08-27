@@ -18,23 +18,18 @@
 
 import fs from "fs"
 import path from "path"
-import { execFileSync } from "child_process"
 import { fileURLToPath } from "url"
-import os from "os"
-import { searchRoame, roameFaresToUnified } from "./roame-scraper.js"
-import type { RoameFare, UnifiedFlightResult } from "./roame-scraper.js"
-import { searchATF, atfToUnified, ATF_AIRLINE_META } from "./atf-scraper.js"
+import type { UnifiedFlightResult } from "./roame-scraper.js"
 import { scoreFlights, type ValueScoredFlight, type ValueInsight } from "./value-engine.ts"
 import { getSweetSpotsForRoute } from "./sweet-spots.ts"
-import { findFundingPaths } from "./transfer-partners.ts"
 import { searchCashFlights } from "./providers/cash-flights/index.js"
-import { resolvePython } from "./providers/cash-flights/python-bridge.js"
 import type { NormalizedCashFlight, CabinClass } from "./providers/cash-flights/index.js"
-
-/** Home directory, cross-platform. HOME is unset on Windows outside of Git Bash. */
-function homeDir(): string {
-  return process.env.HOME || process.env.USERPROFILE || os.homedir()
-}
+import { searchAwardFlights, type NormalizedAwardFlight, type AwardProviderOutcome } from "./providers/award-flights/index.js"
+import { searchHiddenCity as searchHiddenCityEngine, type HiddenCityOpportunity } from "./providers/cash-flights/hidden-city.js"
+import { getBalances, type PointsBalance } from "./providers/balances/index.js"
+import { buildRedemptionComparisons, type RedemptionComparison } from "./value-compare.js"
+import { getDb } from "./db/index.js"
+import { recordSearchRequest, saveSearchResult } from "./db/repositories.js"
 
 // ─── Load .env file ──────────────────────────────────────────────────────────
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
@@ -78,14 +73,6 @@ interface SearchConfig {
   source?: "api" | "cli" | "test"
 }
 
-interface PointsBalance {
-  program: string
-  programKey: string
-  balance: number
-  displayBalance: string
-  transferPartners?: string[]
-}
-
 interface DashboardResults {
   meta: {
     origin: string
@@ -98,10 +85,16 @@ interface DashboardResults {
     totalFlights?: number     // set by serve.ts when outbound + return are merged
   }
   balances: PointsBalance[]
+  /** Where the balances came from and how old they are (never the values themselves in logs). */
+  balancesMeta?: { source: string; fetchedAt: string | null; ageMinutes: number | null }
   flights: ValueScoredFlight[]
   recommendations: Recommendation[]
   insights: ValueInsight[]
   routeSweetSpots: { program: string; cabin: string; maxPoints: number; description: string }[]
+  /** Same-flight-different-program comparisons — see value-compare.ts. */
+  redemptionComparisons?: RedemptionComparison[]
+  /** Per-award-provider outcome (cache age, calls spent, errors). */
+  awardProviders?: AwardProviderOutcome[]
   warnings: string[]
 }
 
@@ -118,190 +111,92 @@ interface Recommendation {
 }
 
 // ─── Points Balances ─────────────────────────────────────────────────────────
-
-async function loadBalances(): Promise<PointsBalance[]> {
-  // Try AwardWallet first
-  const awPath = path.join(homeDir(), ".openclaw", "credentials", "awardwallet.json")
-  if (fs.existsSync(awPath)) {
-    try {
-      const creds = JSON.parse(fs.readFileSync(awPath, "utf-8"))
-      const apiKey = creds.apiKey || creds.api_key
-      const userId = creds.userId || creds.user_id
-      
-      const resp = await fetch(`https://business.awardwallet.com/api/export/v1/connectedUser/${userId}`, {
-        headers: { "X-Authentication": apiKey, Accept: "application/json" }
-      })
-      
-      if (resp.ok) {
-        const data = await resp.json() as any
-        if (data.accounts) {
-          return data.accounts
-            .filter((a: any) => (a.balanceRaw || 0) > 0)
-            .map((a: any) => ({
-              program: a.displayName || a.name,
-              programKey: mapProgramKey(a.displayName || a.name),
-              balance: a.balanceRaw || parseInt(String(a.balance).replace(/,/g, ""), 10) || 0,
-              displayBalance: formatBalance(a.balanceRaw || 0),
-            }))
-            .sort((a: PointsBalance, b: PointsBalance) => b.balance - a.balance)
-        }
-      }
-    } catch (e) {
-      console.warn("⚠️ AwardWallet fetch failed, using hardcoded balances")
-    }
-  }
-  
-  // Fallback: hardcoded balances from task spec
-  return [
-    { program: "Chase UR", programKey: "chase-ur", balance: 1315295, displayBalance: "1,315,295" },
-    { program: "Flying Blue", programKey: "FLYING_BLUE", balance: 851165, displayBalance: "851,165" },
-    { program: "Marriott Bonvoy", programKey: "marriott", balance: 1392260, displayBalance: "1,392,260" },
-    { program: "Hilton Honors", programKey: "hilton", balance: 734242, displayBalance: "734,242" },
-    { program: "Aeroplan", programKey: "AEROPLAN", balance: 475663, displayBalance: "475,663" },
-    { program: "Delta SkyMiles", programKey: "DELTA", balance: 293430, displayBalance: "293,430" },
-    { program: "Southwest RR", programKey: "southwest", balance: 144250, displayBalance: "144,250" },
-    { program: "Alaska Mileage Plan", programKey: "ALASKA", balance: 87685, displayBalance: "87,685" },
-    { program: "BA Avios", programKey: "BRITISH_AIRWAYS", balance: 71449, displayBalance: "71,449" },
-    { program: "United MileagePlus", programKey: "UNITED", balance: 70000, displayBalance: "70,000" },
-    { program: "Virgin Atlantic", programKey: "VIRGIN_ATLANTIC", balance: 60728, displayBalance: "60,728" },
-    { program: "Bilt Rewards", programKey: "bilt", balance: 59390, displayBalance: "59,390" },
-  ]
-}
+// Balances come from providers/balances: AwardWallet behind a 12h snapshot
+// cache (LOYALTY_BALANCE_TTL_HOURS). A search does not refetch them; an
+// explicit refresh does.
 
 function formatBalance(n: number): string {
   return n.toLocaleString()
 }
 
-function mapProgramKey(name: string): string {
-  const lower = name.toLowerCase()
-  if (lower.includes("chase") || lower.includes("ultimate rewards")) return "chase-ur"
-  if (lower.includes("flying blue") || lower.includes("air france")) return "FLYING_BLUE"
-  if (lower.includes("aeroplan") || lower.includes("air canada")) return "AEROPLAN"
-  if (lower.includes("alaska")) return "ALASKA"
-  if (lower.includes("united")) return "UNITED"
-  if (lower.includes("delta")) return "DELTA"
-  if (lower.includes("british") || lower.includes("avios")) return "BRITISH_AIRWAYS"
-  if (lower.includes("emirates") && lower.includes("skywards")) return "EMIRATES"
-  if (lower.includes("qatar")) return "QATAR"
-  if (lower.includes("qantas")) return "QANTAS"
-  if (lower.includes("virgin") && lower.includes("atlantic")) return "VIRGIN_ATLANTIC"
-  if (lower.includes("marriott")) return "marriott"
-  if (lower.includes("hilton")) return "hilton"
-  if (lower.includes("southwest")) return "southwest"
-  if (lower.includes("bilt")) return "bilt"
-  return lower.replace(/\s+/g, "-")
-}
+// ─── Award Flights (provider abstraction) ─────────────────────────────────
+//
+// Roame, ATF and the cross-verification logic all live behind
+// providers/award-flights. This adapter converts NormalizedAwardFlight back
+// into the UnifiedFlightResult shape the value engine and dashboard expect.
 
-// ─── Search Sources ──────────────────────────────────────────────────────────
-
-async function searchRoameSource(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
-  const classes = config.searchClass === "both" ? ["ECON", "PREM"] : [config.searchClass]
-  const allFlights: UnifiedFlightResult[] = []
-  let totalCompletion = 0
-  
-  for (const cls of classes) {
-    try {
-      const result = await searchRoame(
-        config.origin, config.destination, config.departureDate,
-        cls, ["ALL"], config.verbose, config.flexDays || 0
-      )
-      
-      const unified = roameFaresToUnified(result.fares, cls)
-      allFlights.push(...unified)
-      totalCompletion += result.search.percentCompleted
-    } catch (err) {
-      console.error(`❌ Roame ${cls} search failed:`, (err as Error).message)
-    }
-  }
-  
-  return { flights: allFlights, completion: totalCompletion / classes.length }
-}
-
-// ─── ATF Source ──────────────────────────────────────────────────────────────
-
-async function searchATFSource(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
-  try {
-    const results = await searchATF(config.origin, config.destination, config.departureDate)
-    const flights = atfToUnified(results)
-    return { flights, completion: flights.length > 0 ? 100 : 50 }
-  } catch (err) {
-    console.error(`❌ ATF failed: ${(err as Error).message}`)
-    return { flights: [], completion: 0 }
+function awardToUnified(f: NormalizedAwardFlight, idx: number, cacheAgeMinutes: number | null): UnifiedFlightResult {
+  return {
+    id: `award-${f.provider}-${f.loyaltyProgram}-${idx}`,
+    source: f.provider === "atf" ? "atf" : "roame",
+    type: "award",
+    tags: f.verificationLevel === "cross-verified" ? ["cross-verified"] : undefined,
+    origin: f.origin,
+    destination: f.destination,
+    airline: f.airline || f.operatingAirlines.join(" / ") || "Unknown",
+    operatingAirlines: f.operatingAirlines,
+    flightNumbers: f.flightNumbers,
+    stops: f.stops ?? 0,
+    durationMinutes: f.durationMinutes ?? 0,
+    departureTime: f.departureTime || f.departureDate,
+    arrivalTime: f.arrivalTime || f.departureDate,
+    airports: f.airports,
+    cabinClass: f.cabin,
+    equipment: f.equipment,
+    points: f.points,
+    pointsProgram: f.loyaltyProgram,
+    cashPrice: null,
+    taxes: f.taxes?.amount ?? 0,
+    currency: f.taxes?.currency ?? "USD",
+    cppValue: null,
+    roameScore: f.providerScore,
+    availableSeats: f.availableSeats,
+    bookingUrl: f.bookingUrl,
+    fareClass: typeof f.raw?.fareClass === "string" ? f.raw.fareClass : "",
+    travelDate: f.departureDate,
+    provider: f.provider,
+    verificationLevel: f.verificationLevel,
+    providerConfidence: f.providerConfidence,
+    fetchedAt: f.fetchedAt,
+    cacheAgeMinutes,
+    itineraryHash: f.itineraryHash,
+    loyaltyProgramName: f.loyaltyProgramName,
   }
 }
 
-// ─── ATF × Roame Cross-Reference ─────────────────────────────────────────────
+async function searchAwardSource(
+  config: SearchConfig,
+  providerFilter: string[],
+  searchRequestId: number | null,
+): Promise<{ flights: UnifiedFlightResult[]; completionPct: Record<string, number>; outcome: AwardProviderOutcome[]; warnings: string[] }> {
+  const outcome = await searchAwardFlights({
+    origin: config.origin,
+    destination: config.destination,
+    departureDate: config.departureDate,
+    returnDate: config.returnDate || null,
+    searchClass: config.searchClass,
+    adults: 1,
+    flexDays: config.flexDays || 0,
+  }, {
+    providers: providerFilter,
+    forceRefresh: config.forceRefresh,
+    searchRequestId,
+  })
 
-/**
- * Cross-reference ATF and Roame award results.
- *
- * Matching key: pointsProgram + cabinClass + travelDate
- *   - Both sources agree  → "cross-verified" (keep Roame data — richer; pull ATF seat count if Roame lacks it)
- *   - ATF found, Roame missed → "ATF-exclusive" (ATF result kept as-is)
- *   - Roame found, ATF doesn't cover → unchanged (ATF only covers 5 airlines)
- *
- * ATF covers: british_airways, qatar_airways, cathay_pacific, virgin_atlantic, iberia.
- * Everything else Roame finds is out of ATF scope and stays untagged.
- */
-function crossReferenceATFAndRoame(
-  roameFlights: UnifiedFlightResult[],
-  atfFlights: UnifiedFlightResult[],
-): UnifiedFlightResult[] {
-  if (atfFlights.length === 0) return roameFlights
-
-  // Build ATF result lookup: key → ATFUnifiedResult
-  const atfByKey = new Map<string, UnifiedFlightResult>()
-  for (const f of atfFlights) {
-    if (!f.pointsProgram || !f.cabinClass || !f.travelDate) continue
-    const key = `${f.pointsProgram}:${f.cabinClass}:${f.travelDate}`
-    atfByKey.set(key, f)
+  const completionPct: Record<string, number> = {}
+  for (const p of outcome.perProvider) {
+    completionPct[p.provider] = p.ok ? (p.completionPct ?? 100) : 0
   }
 
-  // ATF-covered program keys (to know when a Roame miss is meaningful)
-  const atfProgramKeys = new Set(
-    Object.values(ATF_AIRLINE_META).map(m => m.programKey)
-  )
+  const cacheAgeByProvider = new Map(outcome.perProvider.map(p => [p.provider, p.cacheAgeMinutes]))
+  const flights = outcome.flights.map((f, i) =>
+    awardToUnified(f, i, cacheAgeByProvider.get(f.provider) ?? null))
 
-  const merged: UnifiedFlightResult[] = []
-  const matchedATFKeys = new Set<string>()
-
-  for (const roameFlight of roameFlights) {
-    if (roameFlight.type !== "award" || !roameFlight.pointsProgram) {
-      merged.push(roameFlight)
-      continue
-    }
-
-    const key = `${roameFlight.pointsProgram}:${roameFlight.cabinClass}:${roameFlight.travelDate}`
-    const atfMatch = atfByKey.get(key)
-
-    if (atfMatch) {
-      matchedATFKeys.add(key)
-      // Keep Roame data (has duration, stops, flight numbers, roameScore)
-      // Enrich with ATF seat count if Roame doesn't have it
-      merged.push({
-        ...roameFlight,
-        availableSeats: roameFlight.availableSeats ?? atfMatch.availableSeats,
-        tags: [...(roameFlight.tags || []), "cross-verified"],
-      })
-    } else {
-      // Not in ATF — only note the absence if ATF covers this program
-      // (Roame might show flights ATF doesn't cover, like QR on Flying Blue)
-      merged.push(roameFlight)
-    }
+  if (outcome.crossVerifiedCount > 0) {
+    console.log(`  🔗 Cross-verified: ${outcome.crossVerifiedCount} redemptions confirmed by two providers`)
   }
 
-  // Add ATF-exclusive results (availability ATF found that Roame missed)
-  for (const [key, atfFlight] of atfByKey.entries()) {
-    if (!matchedATFKeys.has(key)) {
-      console.log(`  🔵 ATF-exclusive: ${atfFlight.airline} ${atfFlight.cabinClass} (${atfFlight.pointsProgram})`)
-      merged.push({
-        ...atfFlight,
-        tags: [...(atfFlight.tags || []), "ATF-exclusive"],
-      })
-    }
-  }
-
-  return merged
+  return { flights, completionPct, outcome: outcome.perProvider, warnings: outcome.warnings }
 }
 
 // ─── Cash Flights (provider abstraction) ──────────────────────────────────
@@ -356,6 +251,7 @@ function toUnified(f: NormalizedCashFlight, idx: number, cacheAgeMinutes: number
 
 async function searchCashSource(
   config: SearchConfig,
+  searchRequestId: number | null = null,
 ): Promise<{ flights: UnifiedFlightResult[]; completion: number; warnings: string[] }> {
   const cabins: CabinClass[] = config.searchClass === "both"
     ? ["economy", "business"]
@@ -379,6 +275,7 @@ async function searchCashSource(
       forceRefresh: config.forceRefresh,
       userInitiated: config.userInitiated,
       verify: config.verifyPrices,
+      searchRequestId: searchRequestId ?? undefined,
     })
 
     if (outcome.flights.length > 0) anySucceeded = true
@@ -392,59 +289,67 @@ async function searchCashSource(
 }
 
 // ─── Hidden City Engine ──────────────────────────────────────────────────────
+//
+// Phase 3: the engine lives in providers/cash-flights/hidden-city.ts and gets
+// every price through searchCashFlights — cash cache, SerpAPI budget guard,
+// reserve and provider_usage all apply. The old Python path called SerpAPI
+// directly with its own counter and is no longer wired into the application.
 
-async function searchHiddenCity(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
-  const scriptPath = path.join(ROOT, "scripts", "search-hidden-city.py")
-  if (!fs.existsSync(scriptPath)) {
-    console.warn("⚠️ Hidden city script not found")
-    return { flights: [], completion: 0 }
+function hiddenCityToUnified(r: HiddenCityOpportunity, i: number, searchDate: string): UnifiedFlightResult {
+  return {
+    id: `hidden-city-${i}`,
+    source: "hidden-city",
+    type: "cash",
+    origin: r.origin,
+    destination: r.realDestination,
+    airline: r.airlines.join(" / ") || "Various",
+    operatingAirlines: r.airlines.length ? r.airlines : ["Various"],
+    flightNumbers: r.flightNumbers,
+    stops: r.stops,
+    durationMinutes: r.totalDurationMinutes ?? 0,
+    departureTime: r.departureTime || "",
+    arrivalTime: r.arrivalAtLayover || "",
+    airports: [r.origin, r.realDestination, r.ticketedDestination],
+    cabinClass: "economy",
+    equipment: [],
+    points: null,
+    pointsProgram: null,
+    cashPrice: r.hiddenCityPrice,
+    taxes: 0,
+    currency: r.currency,
+    cppValue: null,
+    roameScore: null,
+    availableSeats: null,
+    bookingUrl: r.bookingUrl,
+    // Legacy encoding kept for the dashboard card; structured fields carry the truth.
+    fareClass: `hidden-city:${r.ticketedDestination}|saves:$${Math.round(r.savings)}(${r.savingsPercent}%)|risk:${r.riskLevel}|direct:$${r.directPrice}`,
+    travelDate: searchDate,
+    hiddenCity: true,
+    hiddenCityWarnings: r.warnings,
+    hiddenCityRisk: r.riskLevel,
+    provider: r.provider,
   }
+}
 
+async function searchHiddenCity(
+  config: SearchConfig,
+  searchRequestId: number | null,
+): Promise<{ flights: UnifiedFlightResult[]; completion: number }> {
   try {
-    // Use max-beyond 5 to conserve SerpAPI budget (1 direct + 5 beyond = 6 calls max)
-    const argv = [scriptPath, config.origin, config.destination, config.departureDate,
-                  "--max-beyond", "5", "--min-savings", "30"]
-    const output = execFileSync(resolvePython(), argv, {
-      timeout: 120000,
-      env: { ...process.env },
-      encoding: "utf-8",
+    const outcome = await searchHiddenCityEngine({
+      origin: config.origin,
+      destination: config.destination,
+      departureDate: config.departureDate,
+      currency: CASH_CURRENCY,
+    }, {
+      source: config.source ?? "cli",
+      forceRefresh: config.forceRefresh,
+      userInitiated: config.userInitiated,
+      searchRequestId: searchRequestId ?? undefined,
     })
-
-    // Parse only the last line (JSON output) — stderr goes to console
-    const lines = output.trim().split("\n")
-    const jsonLine = lines[lines.length - 1]!
-    const results = JSON.parse(jsonLine) as any[]
-    
-    const flights: UnifiedFlightResult[] = results.map((r, i) => ({
-      id: `hidden-city-${i}`,
-      source: "hidden-city" as const,
-      type: "cash" as const,
-      origin: r.origin,
-      destination: r.real_destination,
-      airline: r.airline || "Various",
-      operatingAirlines: (r.airline || "Various").split(" / "),
-      flightNumbers: r.flight_numbers || [],
-      stops: r.stops || 1,
-      durationMinutes: r.total_duration_min || 0,
-      departureTime: r.departure_time || "",
-      arrivalTime: r.arrival_at_layover || "",
-      airports: [r.origin, r.real_destination, r.ticketed_destination],
-      cabinClass: "economy",
-      equipment: [],
-      points: null,
-      pointsProgram: null,
-      cashPrice: r.hidden_city_price || null,
-      taxes: 0,
-      currency: "USD",
-      cppValue: null,
-      roameScore: null,
-      availableSeats: null,
-      bookingUrl: r.booking_url || `https://www.google.com/travel/flights`,
-      fareClass: `hidden-city:${r.ticketed_destination}|saves:$${Math.round(r.savings)}(${r.savings_percent}%)|risk:${r.risk_score}|direct:$${r.direct_price}`,
-      travelDate: config.departureDate,
-    }))
-
-    return { flights, completion: results.length > 0 ? 100 : 0 }
+    for (const note of outcome.notes) console.log(`  hidden-city: ${note}`)
+    const flights = outcome.opportunities.map((r, i) => hiddenCityToUnified(r, i, config.departureDate))
+    return { flights, completion: outcome.opportunities.length > 0 ? 100 : 0 }
   } catch (err) {
     console.warn("⚠️ Hidden city search failed:", (err as Error).message?.slice(0, 200))
     return { flights: [], completion: 0 }
@@ -575,57 +480,61 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
   console.log(`   Date: ${config.departureDate}${config.returnDate ? ` → ${config.returnDate}` : " (one-way)"}`)
   console.log(`   Class: ${config.searchClass}`)
   console.log(`   Sources: ${config.sources.join(", ")}\n`)
-  
+
   const startTime = Date.now()
-  
-  // Load balances
+  const db = getDb()
+
+  // One unified search request: cash, award and hidden-city observations all
+  // reference this single row. (§ search request model)
+  let searchRequestId: number | null = null
+  try {
+    searchRequestId = recordSearchRequest(db, {
+      origin: config.origin, destination: config.destination,
+      departureDate: config.departureDate, returnDate: config.returnDate || null,
+      cabin: config.searchClass, adults: 1, currency: CASH_CURRENCY,
+    }, config.source ?? "cli")
+  } catch (err) {
+    console.warn(`⚠️ could not record search request: ${(err as Error).message}`)
+  }
+
+  // Balances: snapshot-cached (12h TTL). Only an explicit refresh refetches.
   console.log("💳 Loading points balances...")
-  const balances = await loadBalances()
-  console.log(`   ${balances.length} programs loaded`)
-  
+  const balancesResult = await getBalances({ forceRefresh: config.forceRefresh, db })
+  const balances = balancesResult.balances
+  console.log(`   ${balances.length} programs loaded (${balancesResult.source})`)
+
   // Run search sources in parallel
   const completionPct: Record<string, number> = {}
-  // Non-award flights (cash, hidden-city) go directly here
   const otherFlights: UnifiedFlightResult[] = []
-  // Award sources kept separate for cross-referencing
-  let roameFlights: UnifiedFlightResult[] = []
-  let atfFlights: UnifiedFlightResult[] = []
-
-  const cashWarnings: string[] = []
+  let awardFlights: UnifiedFlightResult[] = []
+  let awardProviders: AwardProviderOutcome[] = []
+  const sourceWarnings: string[] = []
   const promises: Promise<void>[] = []
-  
-  if (config.sources.includes("roame")) {
+
+  // Award providers requested via --sources (roame/atf map to provider names).
+  const awardProviderFilter = ["roame", "atf"].filter(p => config.sources.includes(p))
+  if (awardProviderFilter.length > 0) {
     promises.push(
-      searchRoameSource(config).then(({ flights, completion }) => {
-        roameFlights = flights
-        completionPct["roame"] = completion
-        console.log(`✅ Roame: ${flights.length} award fares`)
-      }).catch(err => {
-        console.error(`❌ Roame failed: ${err.message}`)
-        completionPct["roame"] = 0
-      })
+      searchAwardSource(config, awardProviderFilter, searchRequestId)
+        .then(({ flights, completionPct: pct, outcome, warnings }) => {
+          awardFlights = flights
+          awardProviders = outcome
+          Object.assign(completionPct, pct)
+          sourceWarnings.push(...warnings)
+          console.log(`✅ Awards: ${flights.length} redemptions across ${new Set(flights.map(f => f.pointsProgram)).size} programs`)
+        }).catch(err => {
+          console.error(`❌ Award search failed: ${err.message}`)
+          for (const p of awardProviderFilter) completionPct[p] = 0
+        })
     )
   }
 
-  if (config.sources.includes("atf")) {
-    promises.push(
-      searchATFSource(config).then(({ flights, completion }) => {
-        atfFlights = flights
-        completionPct["atf"] = completion
-        console.log(`✅ ATF: ${flights.length} award fares across ${new Set(flights.map(f => f.pointsProgram)).size} programs`)
-      }).catch(err => {
-        console.error(`❌ ATF failed: ${err.message}`)
-        completionPct["atf"] = 0
-      })
-    )
-  }
-  
   if (config.sources.includes("google")) {
     promises.push(
-      searchCashSource(config).then(({ flights, completion, warnings }) => {
+      searchCashSource(config, searchRequestId).then(({ flights, completion, warnings }) => {
         otherFlights.push(...flights)
         completionPct["google"] = completion
-        cashWarnings.push(...warnings)
+        sourceWarnings.push(...warnings)
         console.log(`✅ Cash flights: ${flights.length} fares`)
       }).catch(err => {
         console.error(`❌ Cash flight search failed: ${err.message}`)
@@ -636,7 +545,7 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
 
   if (config.sources.includes("hidden-city")) {
     promises.push(
-      searchHiddenCity(config).then(({ flights, completion }) => {
+      searchHiddenCity(config, searchRequestId).then(({ flights, completion }) => {
         otherFlights.push(...flights)
         completionPct["hidden-city"] = completion
         console.log(`✅ Hidden City: ${flights.length} opportunities`)
@@ -646,40 +555,37 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
       })
     )
   }
-  
-  await Promise.allSettled(promises)
 
-  // ── Cross-reference ATF vs Roame ──────────────────────────────────────────
-  // Merge award sources: cross-verified flights get richer data + tags;
-  // ATF-exclusive finds are flagged for the value engine and dashboard.
-  const awardFlights = crossReferenceATFAndRoame(roameFlights, atfFlights)
-  const crossVerified = awardFlights.filter(f => f.tags?.includes("cross-verified")).length
-  const atfExclusive = awardFlights.filter(f => f.tags?.includes("ATF-exclusive")).length
-  if (roameFlights.length > 0 || atfFlights.length > 0) {
-    console.log(`  🔗 Cross-reference: ${crossVerified} verified, ${atfExclusive} ATF-exclusive`)
-  }
+  await Promise.allSettled(promises)
 
   // Combine all flights
   const allFlights = [...awardFlights, ...otherFlights]
-  
+
   const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
   console.log(`\n📊 Search complete: ${allFlights.length} flights in ${elapsed}s`)
-  
+
   // Run value engine — cross-reference award vs cash, score everything
   console.log("🧠 Running value engine...")
   const { scored, insights } = scoreFlights(allFlights, balances, config.origin, config.destination)
   console.log(`   ${scored.filter(f => f.realCpp !== null).length} award flights scored against real cash prices`)
   console.log(`   ${scored.filter(f => f.sweetSpotMatch).length} sweet spot matches found`)
   console.log(`   ${insights.length} insights generated`)
-  
+
   // Sort scored flights by value score (highest first)
   scored.sort((a, b) => b.valueScore - a.valueScore)
-  
+
+  // Same flight, different programs → explicit comparison (§ best redemption)
+  const redemptionComparisons = buildRedemptionComparisons(scored)
+  const multiProgram = redemptionComparisons.filter(c => c.optionCount > 1).length
+  if (multiProgram > 0) {
+    console.log(`   ${multiProgram} itineraries bookable through more than one program`)
+  }
+
   // Generate recommendations from value-scored results
   const recommendations = generateRecommendations(scored, balances, config)
   const warnings = generateWarnings(balances)
-  for (const w of [...new Set(cashWarnings)]) warnings.push(`⚠️ Cash provider — ${w}`)
-  
+  for (const w of [...new Set(sourceWarnings)]) warnings.push(`⚠️ Provider — ${w}`)
+
   // Get route sweet spots for context
   const routeSpots = getSweetSpotsForRoute(config.origin, config.destination)
   const routeSweetSpots = routeSpots.map(s => ({
@@ -688,8 +594,8 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
     maxPoints: s.maxPoints,
     description: s.description,
   }))
-  
-  return {
+
+  const results: DashboardResults = {
     meta: {
       origin: config.origin,
       destination: config.destination,
@@ -700,12 +606,30 @@ async function runSearch(config: SearchConfig): Promise<DashboardResults> {
       completionPct,
     },
     balances,
+    balancesMeta: {
+      source: balancesResult.source,
+      fetchedAt: balancesResult.fetchedAt,
+      ageMinutes: balancesResult.ageMinutes,
+    },
     flights: scored,
     recommendations,
     insights,
     routeSweetSpots,
+    redemptionComparisons,
+    awardProviders,
     warnings,
   }
+
+  // SQLite is the persistence source; results.json remains a debug export.
+  if (searchRequestId !== null) {
+    try {
+      saveSearchResult(db, searchRequestId, results)
+    } catch (err) {
+      console.warn(`⚠️ could not persist search result: ${(err as Error).message}`)
+    }
+  }
+
+  return results
 }
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────

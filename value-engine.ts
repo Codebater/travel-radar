@@ -31,9 +31,20 @@ export interface ValueScoredFlight extends UnifiedFlightResult {
   fundingPath: FundingPath | null
   canAfford: boolean
   affordDetails: string
+  /** Points missing after every balance and transfer path is counted. 0 when bookable. */
+  pointsShortfall: number | null
   
   // Composite value score (0-100)
   valueScore: number
+
+  /**
+   * What the CPP figure rests on:
+   *   verified   — the cash comparable came from a metered, verified fare
+   *   discovered — it came from a free/cached discovery fare
+   *   estimated  — no real cash fare existed; a hardcoded cabin estimate was used
+   * CPP against an estimate is a guess and must not be presented as evidence.
+   */
+  cppBasis: "verified" | "discovered" | "estimated" | null
 }
 
 export interface ValueInsight {
@@ -105,11 +116,21 @@ function buildCashPriceLookup(flights: UnifiedFlightResult[]): Map<string, CashP
  * Find the best cash comparable for an award flight.
  * Tries: exact airline+cabin match → same cabin → cabin estimate
  */
+/**
+ * Provenance of a set of cash comparables: verified when any of them was
+ * confirmed by a metered provider, discovered otherwise. Cached replays count
+ * as discovered — the cache does not remember which tier originally filled it,
+ * so the conservative label applies.
+ */
+function basisOf(comps: UnifiedFlightResult[]): "verified" | "discovered" {
+  return comps.some(f => f.verificationLevel === "verified") ? "verified" : "discovered"
+}
+
 function findCashComparable(
   award: UnifiedFlightResult,
   cashFlights: UnifiedFlightResult[],
   cashBuckets: Map<string, CashPriceBucket>,
-): { price: number; source: "exact-match" | "same-cabin" | "estimated" } {
+): { price: number; source: "exact-match" | "same-cabin" | "estimated"; basis: "verified" | "discovered" | "estimated" } {
   
   // 1. Exact match: same airline(s), same cabin, same stops
   const exactMatches = cashFlights.filter(f => 
@@ -124,7 +145,7 @@ function findCashComparable(
     // Use median price for exact matches
     const sorted = exactMatches.map(f => f.cashPrice!).sort((a, b) => a - b)
     const median = sorted[Math.floor(sorted.length / 2)]!
-    return { price: median, source: "exact-match" }
+    return { price: median, source: "exact-match", basis: basisOf(exactMatches) }
   }
   
   // 2. Same cabin bucket (any airline, any stops)
@@ -133,7 +154,8 @@ function findCashComparable(
   const bucket = cashBuckets.get(bucketKey)
   
   if (bucket && bucket.prices.length > 0) {
-    return { price: Math.round(bucket.avgPrice), source: "same-cabin" }
+    const inCabin = cashFlights.filter(f => f.type === "cash" && f.cabinClass === award.cabinClass && f.cashPrice)
+    return { price: Math.round(bucket.avgPrice), source: "same-cabin", basis: basisOf(inCabin) }
   }
   
   // 3. Any cabin bucket as last resort
@@ -143,7 +165,7 @@ function findCashComparable(
                     cashBuckets.get(`${award.cabinClass}:1`)
   
   if (anyBucket) {
-    return { price: Math.round(anyBucket.avgPrice), source: "same-cabin" }
+    return { price: Math.round(anyBucket.avgPrice), source: "same-cabin", basis: basisOf(cashFlights) }
   }
   
   // 4. Fallback estimates (only if we have NO cash data at all)
@@ -154,7 +176,7 @@ function findCashComparable(
     first: 8000,
   }
   
-  return { price: CABIN_ESTIMATES[award.cabinClass] || 600, source: "estimated" }
+  return { price: CABIN_ESTIMATES[award.cabinClass] || 600, source: "estimated", basis: "estimated" }
 }
 
 // ─── Value Scoring ───────────────────────────────────────────────────────────
@@ -262,12 +284,15 @@ export function scoreFlights(
     let fundingPath: FundingPath | null = null
     let affordable = true
     let affordDetails = ""
+    let pointsShortfall: number | null = null
+    let cppBasis: ValueScoredFlight["cppBasis"] = null
     
     if (flight.type === "award" && flight.points && flight.points > 0) {
       // Cross-reference against real cash prices
       const comparable = findCashComparable(flight, cashFlights, cashBuckets)
       cashComparable = comparable.price
       cashSource = comparable.source
+      cppBasis = comparable.basis
       
       // Calculate real CPP
       realCpp = cashComparable > 0 ? Math.round(((cashComparable - flight.taxes) / (flight.points / 100)) * 10) / 10 : null
@@ -285,6 +310,7 @@ export function scoreFlights(
       const affordability = canAfford(flight.pointsProgram || "", flight.points, balances)
       affordable = affordability.affordable
       affordDetails = affordability.details
+      pointsShortfall = affordability.shortfall
       
       const paths = findFundingPaths(flight.pointsProgram || "", flight.points, balances)
       fundingPath = paths.length > 0 ? paths[0]! : null
@@ -308,7 +334,9 @@ export function scoreFlights(
       fundingPath,
       canAfford: affordable,
       affordDetails,
+      pointsShortfall,
       valueScore,
+      cppBasis,
     }
   })
   
