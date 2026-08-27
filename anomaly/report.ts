@@ -49,7 +49,7 @@ export interface AnomalyReport {
     withFeedback: number
     threshold: number | null
   }
-  verdicts: { GOOD_DEAL: number; NORMAL: number; BAD_SIGNAL: number }
+  verdicts: { GOOD_DEAL: number; NORMAL: number; BAD_SIGNAL: number; WOULD_BOOK: number }
   presets: { preset: string; candidates: number }[]
   reasonCorrelation: ReasonCorrelation[]
   routeVolume: RouteVolume[]
@@ -97,7 +97,7 @@ export function buildReport(db: DB, opts: { since?: string } = {}): AnomalyRepor
     GROUP BY v.verdict
   `).all(since) as { verdict: string; c: number }[]
 
-  const verdicts = { GOOD_DEAL: 0, NORMAL: 0, BAD_SIGNAL: 0 }
+  const verdicts = { GOOD_DEAL: 0, NORMAL: 0, BAD_SIGNAL: 0, WOULD_BOOK: 0 }
   for (const r of verdictRows) {
     if (r.verdict in verdicts) verdicts[r.verdict as keyof typeof verdicts] = r.c
   }
@@ -113,7 +113,7 @@ export function buildReport(db: DB, opts: { since?: string } = {}): AnomalyRepor
     SELECT json_extract(json_each.value, '$.code') code,
            COUNT(*) candidates,
            SUM(CASE WHEN v.verdict IS NOT NULL THEN 1 ELSE 0 END) judged,
-           SUM(CASE WHEN v.verdict = 'GOOD_DEAL' THEN 1 ELSE 0 END) good,
+           SUM(CASE WHEN v.verdict IN ('GOOD_DEAL', 'WOULD_BOOK') THEN 1 ELSE 0 END) good,
            SUM(CASE WHEN v.verdict = 'NORMAL' THEN 1 ELSE 0 END) normal,
            SUM(CASE WHEN v.verdict = 'BAD_SIGNAL' THEN 1 ELSE 0 END) bad
     FROM deal_candidates

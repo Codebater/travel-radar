@@ -126,6 +126,36 @@ function matchesSoftDimensions(
  * dimension at a time until the sample reaches `minSamplesToEmit`. Returns null
  * only when even the fully relaxed set is empty.
  */
+/**
+ * A baseline that says, honestly, that there is no baseline.
+ *
+ * A wildcard destination has no history by definition - that is what makes it
+ * a wildcard. Without this, §21's whole point could never fire: the engine
+ * would refuse to say anything about a 300 EUR Bangkok fare purely because it
+ * had never watched the route, which is precisely the fare worth finding.
+ *
+ * Every history-derived figure is zero and the confidence is INSUFFICIENT, so
+ * nothing downstream can mistake it for a measurement. The scorer drops the
+ * components that depend on it rather than scoring them zero.
+ */
+export function noHistoryBaseline(key: ComparabilityKey, asOf: string): BaselineStats {
+  return {
+    key: keyToString(key),
+    scope: "no-history",
+    count: 0,
+    min: 0, max: 0, median: 0,
+    percentile: 0,
+    percentBelowMedian: 0,
+    differenceFromMinimum: 0,
+    firstAt: asOf, lastAt: asOf,
+    ageDays: 0,
+    confidence: "INSUFFICIENT",
+    confidenceValue: 0,
+    medianTaxes: null, taxesCurrency: null,
+    isNewObservedLow: false,
+  }
+}
+
 export function buildBaseline(
   rows: BaselineRow[],
   key: ComparabilityKey,

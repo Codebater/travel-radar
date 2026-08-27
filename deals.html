@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Extreme Deals — Flight Radar</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  surface: '#0f172a', card: '#1e293b', cardHover: '#334155',
+  accent: '#38bdf8', gold: '#fbbf24', emerald: '#34d399', warn: '#f87171', violet: '#a78bfa',
+}}}}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .badge        { font-size: 10px; padding: .1rem .4rem; border-radius: 9999px; white-space: nowrap; }
+  .badge-green  { background: rgba(52,211,153,.15); color:#34d399; border:1px solid rgba(52,211,153,.3); }
+  .badge-yellow { background: rgba(251,191,36,.15); color:#fbbf24; border:1px solid rgba(251,191,36,.3); }
+  .badge-red    { background: rgba(248,113,113,.15); color:#f87171; border:1px solid rgba(248,113,113,.3); }
+  .badge-blue   { background: rgba(56,189,248,.15); color:#38bdf8; border:1px solid rgba(56,189,248,.3); }
+  .badge-violet { background: rgba(167,139,250,.15); color:#a78bfa; border:1px solid rgba(167,139,250,.3); }
+  .badge-grey   { background: rgba(148,163,184,.12); color:#94a3b8; border:1px solid rgba(148,163,184,.25); }
+  .deal:hover   { background: rgba(56,189,248,.06); cursor: pointer; }
+  td, th { padding: .45rem .7rem; }
+</style>
+</head>
+<body class="bg-surface text-gray-200 min-h-screen">
+<div class="max-w-7xl mx-auto px-4 py-8">
+
+  <div class="flex items-start justify-between mb-4 gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl font-extrabold text-white">🛰️ Extreme Deals</h1>
+      <p class="text-sm text-gray-400 max-w-3xl">
+        What the discovery engine found without being asked — flexible dates, positioning airports,
+        open jaws and wildcard destinations. Every figure is this radar's opinion of
+        <span class="text-gray-300">its own observations</span>, not a market price.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="badge badge-yellow font-bold tracking-wider" style="font-size:11px;padding:.3rem .6rem">EXPERIMENTAL — NO ALERTS</span>
+      <a href="/observer.html" class="text-sm text-accent hover:underline">Observer →</a>
+      <a href="/" class="text-sm text-accent hover:underline">Search →</a>
+    </div>
+  </div>
+
+  <div id="meta" class="text-xs text-gray-500 mb-6"></div>
+
+  <!-- §32 TAKE ME ANYWHERE -->
+  <div class="bg-card rounded-xl p-4 mb-8">
+    <h2 class="text-lg font-bold text-white mb-1">Take me anywhere</h2>
+    <p class="text-xs text-gray-500 mb-3">
+      Answered from what discovery has already collected — it does not fire off a live search across
+      every destination, which is exactly the brute force the engine is built to avoid.
+    </p>
+    <div class="flex flex-wrap gap-3 items-end">
+      <label class="text-xs text-gray-400">Origin
+        <select id="anyOrigin" class="block bg-surface border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 mt-1">
+          <option value="">PRG + VIE</option><option>PRG</option><option>VIE</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-400">Window
+        <select id="anyMonths" class="block bg-surface border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 mt-1">
+          <option value="3">next 3 months</option>
+          <option value="6" selected>next 6 months</option>
+          <option value="12">next 12 months</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-400">Cabin
+        <select id="anyCabin" class="block bg-surface border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 mt-1">
+          <option value="">any</option><option value="economy">economy</option><option value="business">business</option>
+        </select>
+      </label>
+      <label class="text-xs text-gray-400">Max price
+        <input id="anyBudget" type="number" placeholder="any" class="block w-28 bg-surface border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 mt-1">
+      </label>
+      <label class="text-xs text-gray-400">Trip length
+        <input id="anyLength" type="number" placeholder="any" class="block w-24 bg-surface border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 mt-1">
+      </label>
+      <label class="text-xs text-gray-400">Min score
+        <input id="anyScore" type="number" value="70" class="block w-20 bg-surface border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 mt-1">
+      </label>
+      <button onclick="runAnywhere()" class="bg-accent/20 border border-accent/40 text-accent rounded px-4 py-1.5 text-sm hover:bg-accent/30">Show me</button>
+    </div>
+    <div id="anywhereResults" class="mt-4"></div>
+  </div>
+
+  <div id="sections"></div>
+
+  <div id="detail" class="hidden mt-8"></div>
+</div>
+
+<script>
+function esc(s) {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+const int = new Intl.NumberFormat('en-US');
+
+const SECTIONS = [
+  ['extreme',     'Extreme',     'Matched an experimental extreme-deal preset, or an absolute price tier.'],
+  ['business',    'Business',    'Premium cabins, where the money at stake is largest.'],
+  ['awards',      'Awards',      'Points redemptions, judged per loyalty program.'],
+  ['wildcard',    'Wildcard',    'Destinations the fixed observer does not watch at all.'],
+  ['positioning', 'Positioning', 'Trips that start somewhere other than PRG or VIE. The true start cost includes getting there.'],
+];
+
+function scoreColour(score) {
+  if (score >= 85) return 'text-emerald';
+  if (score >= 78) return 'text-gold';
+  return 'text-gray-300';
+}
+
+function priceCell(d) {
+  if (d.type === 'award') {
+    const taxes = d.taxesAmount !== null ? ` + ${d.taxesAmount} ${esc(d.taxesCurrency || '')}` : '';
+    return `${int.format(d.points || 0)} pts${taxes}`;
+  }
+  const base = `${d.price} ${esc(d.currency || '')}`;
+  // The headline fare is not what a positioning trip costs to begin, so both
+  // numbers are shown rather than one standing in for the other.
+  return d.trueTripStartCost && d.requiresPositioning
+    ? `${base} <span class="text-gray-500">→ ${Math.round(d.trueTripStartCost)} true</span>`
+    : base;
+}
+
+function datesCell(d) {
+  const dates = d.earliestDeparture === d.latestDeparture
+    ? esc(d.earliestDeparture)
+    : `${esc(d.earliestDeparture)} – ${esc(d.latestDeparture)}`;
+  const family = d.dateCount > 1 ? ` <span class="text-gray-500">(${d.dateCount} dates)</span>` : '';
+  const nights = d.tripLengthNights ? ` <span class="text-gray-500">${d.tripLengthNights}n</span>` : '';
+  return dates + family + nights;
+}
+
+function badges(d) {
+  const out = [];
+  if (d.absoluteTier) out.push(`<span class="badge badge-violet">${esc(d.absoluteTier.toUpperCase())}</span>`);
+  for (const p of d.presetsMatched || []) out.push(`<span class="badge badge-violet">${esc(p)}</span>`);
+  if (d.verificationStatus === 'verified' || d.verificationStatus === 'cross-verified') {
+    out.push(`<span class="badge badge-green">${esc(d.verificationStatus)}</span>`);
+  } else {
+    out.push('<span class="badge badge-grey">unverified</span>');
+  }
+  if (d.requiresPositioning) out.push('<span class="badge badge-yellow">positioning</span>');
+  if (d.isOpenJaw) out.push('<span class="badge badge-blue">open jaw</span>');
+  if (d.sampleSize === 0) {
+    out.push('<span class="badge badge-yellow">price only</span>');
+  } else if (['INSUFFICIENT', 'VERY_LOW', 'LOW'].includes(d.baselineConfidence)) {
+    out.push(`<span class="badge badge-yellow">${esc(d.baselineConfidence)}</span>`);
+  }
+  return out.join(' ');
+}
+
+function dealRow(d) {
+  // No history means no median and no percentage - showing "0" would read as
+  // a measurement rather than an absence.
+  const hasHistory = d.sampleSize > 0;
+  const median = hasHistory && d.observedMedian !== null
+    ? (d.type === 'award' ? `${int.format(Math.round(d.observedMedian))} pts` : `${d.observedMedian} ${esc(d.currency || '')}`)
+    : '<span class="text-gray-600">no history</span>';
+  const diff = hasHistory && d.percentBelowMedian !== null && d.percentBelowMedian > 0
+    ? `<span class="text-emerald">-${d.percentBelowMedian}%</span>` : '—';
+  return `<tr class="deal border-b border-gray-800" onclick="showDetail(${d.candidateId})">
+    <td class="font-extrabold ${scoreColour(d.score)}">${d.score}</td>
+    <td class="font-semibold text-white">${esc(d.route)}</td>
+    <td class="text-gray-400">${esc(d.cabin)}${d.loyaltyProgram ? ` <span class="text-gray-500">${esc(d.loyaltyProgram)}</span>` : ''}</td>
+    <td class="text-gray-400">${datesCell(d)}</td>
+    <td class="font-semibold">${priceCell(d)}</td>
+    <td class="text-gray-400">${median}</td>
+    <td>${diff}</td>
+    <td class="text-gray-400">${hasHistory ? d.sampleSize : '—'}</td>
+    <td>${badges(d)}</td>
+    <td class="text-gray-500 text-[11px]">${esc((d.reasons || []).map(r => r.code).slice(0, 4).join(' '))}</td>
+    <td class="text-gray-500 text-[11px]">${esc(d.discoveredBy)}</td>
+    <td onclick="event.stopPropagation()">${verdictCell(d)}</td>
+  </tr>`;
+}
+
+function verdictCell(d) {
+  if (d.feedback) return `<span class="badge badge-blue">${esc(d.feedback.replace('_', ' '))}</span>`;
+  return ['WOULD_BOOK', 'GOOD_DEAL', 'NORMAL', 'BAD_SIGNAL'].map(v =>
+    `<button onclick="sendFeedback(${d.candidateId}, '${v}')" title="${esc(v)}"
+      class="badge badge-grey hover:text-white hover:border-accent mr-1">${esc(v.replace('_', ' '))}</button>`
+  ).join('');
+}
+
+function table(rows) {
+  return `<div class="bg-card rounded-xl overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-gray-400 border-b border-gray-700">
+        <tr><th>Score</th><th>Route</th><th>Cabin</th><th>Dates</th><th>Price / points</th>
+        <th>Observed median</th><th>Diff</th><th>Sample</th><th>Status</th><th>Reasons</th>
+        <th>Found by</th><th>Verdict</th></tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+}
+
+async function load() {
+  const d = await (await fetch('./api/deals?limit=12')).json();
+  document.getElementById('meta').textContent =
+    `${d.disclaimer} · threshold ${d.threshold}/100 · engine ${d.engineVersion} · alerts ${d.alertsEnabled ? 'ON' : 'OFF'}`;
+
+  document.getElementById('sections').innerHTML = SECTIONS.map(([key, title, blurb]) => {
+    const cards = d.sections[key] || [];
+    const body = cards.length
+      ? table(cards.map(dealRow).join(''))
+      : `<div class="bg-card rounded-xl p-4 text-sm text-gray-500">
+           Nothing here yet. ${key === 'positioning'
+             ? 'Positioning trips appear once discovery has fares from BUD/MUC/WAW/BER/BTS and a home fare to compare them against.'
+             : 'Discovery needs a few cycles before a route has enough history to judge against.'}
+         </div>`;
+    return `<div class="mb-8">
+      <div class="flex items-baseline justify-between mb-1">
+        <h2 class="text-lg font-bold text-white">${title}
+          <span class="text-sm text-gray-500 font-normal">${cards.length}</span></h2>
+      </div>
+      <p class="text-xs text-gray-500 mb-2">${blurb}</p>
+      ${body}
+    </div>`;
+  }).join('');
+}
+
+async function runAnywhere() {
+  const params = new URLSearchParams();
+  const origin = document.getElementById('anyOrigin').value;
+  if (origin) params.set('origins', origin);
+  params.set('months', document.getElementById('anyMonths').value);
+  const cabin = document.getElementById('anyCabin').value;
+  if (cabin) params.set('cabin', cabin);
+  const budget = document.getElementById('anyBudget').value;
+  if (budget) params.set('budget', budget);
+  const length = document.getElementById('anyLength').value;
+  if (length) params.set('tripLength', length);
+  params.set('minScore', document.getElementById('anyScore').value || '70');
+
+  const el = document.getElementById('anywhereResults');
+  el.innerHTML = '<div class="text-sm text-gray-500">Looking through what discovery has collected…</div>';
+  const d = await (await fetch('./api/deals/anywhere?' + params)).json();
+  el.innerHTML = d.results.length
+    ? table(d.results.map(dealRow).join('')) + `<p class="text-xs text-gray-500 mt-1">${esc(d.note)}</p>`
+    : `<div class="text-sm text-gray-500">Nothing stored matches that yet. ${esc(d.note)}</div>`;
+}
+
+async function showDetail(id) {
+  const el = document.getElementById('detail');
+  el.classList.remove('hidden');
+  el.innerHTML = '<div class="bg-card rounded-xl p-4 text-gray-400 text-sm">Loading…</div>';
+  const d = await (await fetch('./api/deals/detail?id=' + id)).json();
+  if (d.error) { el.innerHTML = `<div class="bg-card rounded-xl p-4 text-warn text-sm">${esc(d.error)}</div>`; return; }
+
+  const c = d.candidate;
+  const components = Object.entries(c.scoreBreakdown.components || {})
+    .sort((a, b) => (b[1].points || 0) - (a[1].points || 0))
+    .map(([name, comp]) => `<tr class="border-b border-gray-800">
+      <td class="text-gray-300">${esc(name)}</td>
+      <td class="${comp.points < 0 ? 'text-warn' : 'text-gray-400'}">${comp.points}</td>
+      <td class="text-gray-500">${comp.weight}</td>
+      <td class="text-gray-500 text-[11px]">${esc(comp.detail)}</td>
+    </tr>`).join('');
+
+  const positioning = c.positioning ? `
+    <h4 class="text-sm font-semibold text-gray-300 mt-4 mb-1">Positioning</h4>
+    <div class="text-sm text-gray-400">
+      Fare ${c.positioning.mainFare} + ${esc(c.positioning.mode || '')} ${c.positioning.positioningCost}
+      ${c.positioning.overnightCost ? `+ hotel ${c.positioning.overnightCost}` : ''}
+      = <span class="text-white font-semibold">${c.positioning.trueTripStartCost} ${esc(c.positioning.currency)} true start cost</span>
+      ${c.positioning.comparableHomeFare !== null
+        ? ` vs ${c.positioning.comparableHomeFare} from home → saving ${c.positioning.savingVsHome} (${c.positioning.savingPercent}%)`
+        : ' — no home fare observed to compare against'}
+      <div class="text-xs text-gray-500 mt-1">Penalty ${c.positioning.penalty}: ${esc((c.positioning.penaltyReasons || []).join('; '))}</div>
+    </div>` : '';
+
+  const openJaw = c.openJaw ? `
+    <h4 class="text-sm font-semibold text-gray-300 mt-4 mb-1">Open jaw</h4>
+    <div class="text-sm text-gray-400">${esc(JSON.stringify(c.openJaw))}</div>` : '';
+
+  el.innerHTML = `
+    <div class="bg-card rounded-xl p-5">
+      <div class="flex items-start justify-between mb-3">
+        <div>
+          <h3 class="text-lg font-bold text-white">${esc(c.route)} ${esc(c.cabin)} — score ${c.score}</h3>
+          <div class="text-sm text-gray-400">${esc(c.departureDate)}${c.returnDate ? ' ↩ ' + esc(c.returnDate) : ''} ·
+            ${c.type === 'award' ? `${int.format(c.points || 0)} pts` : `${c.priceAmount} ${esc(c.priceCurrency || '')}`} ·
+            ${esc(c.provider)} · found by ${esc(c.discoveredBy)}</div>
+        </div>
+        <button onclick="document.getElementById('detail').classList.add('hidden')" class="text-gray-500 hover:text-white">✕</button>
+      </div>
+
+      ${d.warnings.length ? `<div class="mb-3">${d.warnings.map(w =>
+        `<div class="badge-yellow rounded px-3 py-1.5 text-xs mb-1">${esc(w)}</div>`).join('')}</div>` : ''}
+
+      <h4 class="text-sm font-semibold text-gray-300 mb-1">Why it scored what it scored</h4>
+      <table class="w-full text-sm mb-2">
+        <thead class="text-left text-gray-500"><tr><th>Component</th><th>Points</th><th>Weight</th><th>Detail</th></tr></thead>
+        <tbody>${components}</tbody>
+      </table>
+
+      <h4 class="text-sm font-semibold text-gray-300 mt-4 mb-1">Reasons</h4>
+      <div class="text-xs text-gray-400">${(c.reasons || []).map(r =>
+        `<div><span class="text-gray-300">${esc(r.code)}</span> — ${esc(r.detail)}</div>`).join('')}</div>
+
+      ${positioning}${openJaw}
+
+      <h4 class="text-sm font-semibold text-gray-300 mt-4 mb-1">Other dates in this family</h4>
+      <div class="text-sm text-gray-400">${d.siblings.length
+        ? d.siblings.map(s => `${esc(s.departureDate)} ${s.price !== null ? s.price : int.format(s.points || 0) + ' pts'} (${s.score})`).join(' · ')
+        : 'just this one'}</div>
+
+      <h4 class="text-sm font-semibold text-gray-300 mt-4 mb-1">Cheapest observed on this route</h4>
+      <div class="text-sm text-gray-400">${d.alternatives.cash.slice(0, 6).map(a =>
+        `${esc(a.departureDate)} ${a.price} ${esc(a.currency)}`).join(' · ') || 'none'}</div>
+      <h4 class="text-sm font-semibold text-gray-300 mt-3 mb-1">Award alternatives</h4>
+      <div class="text-sm text-gray-400">${d.alternatives.award.slice(0, 6).map(a =>
+        `${esc(a.loyaltyProgram)} ${int.format(a.points)} pts`).join(' · ') || 'none observed'}</div>
+
+      ${d.history ? `<div class="text-xs text-gray-500 mt-4">
+        This radar has ${d.history.observations} observations on this route and cabin:
+        min ${d.history.min}, median ${d.history.median}, max ${d.history.max},
+        from ${esc(d.history.firstAt.slice(0, 10))} to ${esc(d.history.lastAt.slice(0, 10))}.
+      </div>` : ''}
+    </div>`;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function sendFeedback(id, verdict) {
+  try {
+    const resp = await fetch('./api/anomaly/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ candidateId: id, verdict }),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).error || resp.statusText);
+    await load();
+  } catch (err) {
+    alert('Could not record feedback: ' + err.message);
+  }
+}
+
+load();
+setInterval(load, 60000);
+</script>
+</body>
+</html>

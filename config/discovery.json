@@ -1,0 +1,343 @@
+{
+  "description": "Discovery engine configuration: where I can start from, where I might go, how widely to look, and what a cycle is allowed to spend. This is the file that decides whether the radar finds trips I would never have searched for - and the file that stops it from brute-forcing a million combinations to do it.",
+  "updated": "2026-08-27",
+  "homeRegion": {
+    "primary": [
+      "PRG",
+      "VIE"
+    ],
+    "positioning": [
+      "BUD",
+      "MUC",
+      "WAW",
+      "BER",
+      "BTS"
+    ],
+    "note": "Primary airports are where a trip can simply start. Positioning airports only win when the saving survives the cost of getting there AND the inconvenience of a separate ticket - see positioning.penalties.",
+    "positioningLegs": {
+      "note": "How to reach each positioning airport from home. Ground options avoid a second flight entirely; the cost is a real fare or ticket price, and the hours drive the overnight decision.",
+      "BUD": {
+        "from": "VIE",
+        "mode": "train",
+        "typicalCost": {
+          "EUR": 25,
+          "USD": 27
+        },
+        "hours": 2.7,
+        "note": "Railjet, hourly"
+      },
+      "BTS": {
+        "from": "VIE",
+        "mode": "bus",
+        "typicalCost": {
+          "EUR": 10,
+          "USD": 11
+        },
+        "hours": 1.2,
+        "note": "closest foreign airport to VIE"
+      },
+      "MUC": {
+        "from": "PRG",
+        "mode": "bus",
+        "typicalCost": {
+          "EUR": 35,
+          "USD": 38
+        },
+        "hours": 4.5
+      },
+      "BER": {
+        "from": "PRG",
+        "mode": "bus",
+        "typicalCost": {
+          "EUR": 30,
+          "USD": 33
+        },
+        "hours": 4.5
+      },
+      "WAW": {
+        "from": "PRG",
+        "mode": "flight",
+        "typicalCost": {
+          "EUR": 70,
+          "USD": 76
+        },
+        "hours": 1.3,
+        "note": "no sensible ground link; a positioning FLIGHT means a second ticket and its own risk"
+      }
+    }
+  },
+  "positioning": {
+    "note": "A positioning airport is never as good as leaving from home, and the model must not pretend otherwise. TRUE TRIP START COST is the honest money figure; the penalty is the inconvenience that money does not capture.",
+    "overnight": {
+      "requiredWhenLegHours": 3.5,
+      "requiredWhenDepartureBefore": "09:00",
+      "cost": {
+        "EUR": 90,
+        "USD": 98
+      },
+      "note": "An early long-haul departure from a city 4.5 hours away means sleeping there. That hotel is part of the trip's cost, not a detail."
+    },
+    "connectionBufferHours": 3.0,
+    "penalties": {
+      "note": "Points subtracted from a 0-1 convenience score, then applied to the shadow score as a penalty component. Additive and capped at 1.0.",
+      "separateTicket": 0.35,
+      "overnightRequired": 0.25,
+      "positioningByFlight": 0.15,
+      "checkedBaggageRecheck": 0.1,
+      "earlyDeparture": 0.1,
+      "airportChange": 0.2,
+      "perHourOfGroundTransfer": 0.04,
+      "estimatedCostBasis": 0.1
+    },
+    "maxAcceptablePenalty": 0.85,
+    "minSavingPercent": 12,
+    "minSavingAbsolute": {
+      "EUR": 120,
+      "USD": 130
+    },
+    "savingNote": "A positioning trip has to be meaningfully cheaper, not marginally: below these floors the saving is not worth a separate ticket and a night in another country."
+  },
+  "destinationGroups": {
+    "thailand": {
+      "label": "Thailand",
+      "airports": [
+        "BKK",
+        "HKT",
+        "KBV",
+        "CNX"
+      ],
+      "priority": 1,
+      "tripLengths": [
+        7,
+        10,
+        14,
+        21
+      ],
+      "desirability": 1.0
+    },
+    "mexico": {
+      "label": "Mexico",
+      "airports": [
+        "CUN",
+        "MEX",
+        "SJD",
+        "MID",
+        "PVR"
+      ],
+      "priority": 1,
+      "tripLengths": [
+        7,
+        10,
+        14,
+        21
+      ],
+      "desirability": 1.0
+    },
+    "wildcard": {
+      "label": "Wildcard",
+      "airports": [
+        "MLE",
+        "SEZ",
+        "MRU",
+        "ZNZ",
+        "DPS",
+        "SIN",
+        "HND",
+        "NRT",
+        "DXB",
+        "DOH"
+      ],
+      "priority": 2,
+      "tripLengths": [
+        7,
+        10,
+        14
+      ],
+      "desirability": 0.8,
+      "note": "Destinations I would not have thought to search. Sampled thinner than the priority groups, and only in economy during the sparse stage."
+    },
+    "citybreak": {
+      "label": "City break",
+      "airports": [
+        "DXB",
+        "DOH",
+        "SIN"
+      ],
+      "priority": 3,
+      "tripLengths": [
+        4,
+        5,
+        7
+      ],
+      "desirability": 0.6,
+      "note": "Short-trip lengths for the stopover cities, which are also in the wildcard set with long lengths."
+    },
+    "controlled": {
+      "label": "Controlled validation",
+      "airports": [
+        "BKK",
+        "CUN",
+        "MLE"
+      ],
+      "priority": 1,
+      "tripLengths": [
+        7,
+        10,
+        14
+      ],
+      "desirability": 1.0,
+      "note": "One destination from each of the three worlds the engine has to handle - a route the observer already watches (BKK), one it watches on a different continent (CUN), and one nobody is watching at all (MLE). Used for the Phase 6 live validation and kept because a narrow, cheap, representative scope is useful whenever the engine changes. Marked classification:false because it is a SEARCH SCOPE, not a kind of destination: without that it would hijack the group MLE actually belongs to (wildcard) and change how every Maldives candidate is scored.",
+      "classification": false
+    }
+  },
+  "sampling": {
+    "note": "Sparse -> dense -> confirm. Stage 1 buys BREADTH with the free provider; stage 2 buys RESOLUTION only where stage 1 found something; stage 3 buys CERTAINTY only for a candidate that already looks exceptional. No stage before 3 may spend a metered call.",
+    "stage1": {
+      "horizonDays": 180,
+      "firstDepartureOffsetDays": 21,
+      "datesPerRoute": 4,
+      "tripLengthsPerRoute": 1,
+      "cabins": {
+        "priority": [
+          "economy",
+          "business"
+        ],
+        "wildcard": [
+          "economy"
+        ]
+      },
+      "note": "One coarse pass per route: a handful of departures spread across the horizon at the group's canonical trip length. Four rather than six because successive runs ROTATE between the previous run's samples - a week of daily runs covers the horizon far more finely than any single run does, at a quarter of the per-run cost. Everything else in the engine is a reaction to what this finds."
+    },
+    "stage2": {
+      "triggerPercentBelowSparseMedian": 20,
+      "windowDays": 5,
+      "stepDays": 1,
+      "extraTripLengths": 3,
+      "maxWindowsPerRun": 4,
+      "note": "A sparse sample 20% under its own route's sparse median is worth resolution: the neighbouring days and a couple more trip lengths. The trigger is relative to the SAME route's sparse scan, so a structurally expensive route cannot swamp a cheap one."
+    },
+    "stage3": {
+      "awardExpansionMinScore": 72,
+      "maxAwardWindowsPerRun": 3,
+      "note": "Award providers are slow and quota-bound, so they never sweep a horizon. They are pointed at a window that cash discovery already found interesting."
+    }
+  },
+  "verification": {
+    "note": "§14/§15 - the only path to a metered call. Both gates must pass, and the automated pool can never touch the manual reserve.",
+    "minScore": 82,
+    "minPercentBelowMedian": 30,
+    "minBaselineConfidence": "MEDIUM",
+    "maxVerificationsPerRun": 2,
+    "pools": {
+      "automatedShare": 0.7,
+      "note": "Of the SerpAPI automation ceiling (monthly budget minus the manual reserve), discovery may spend this share. The remainder stays for interactive verification the operator asks for, and the manual reserve itself is untouchable by any automated path."
+    }
+  },
+  "budgets": {
+    "note": "Per discovery RUN, not per month. A run that would exceed a ceiling reduces its scope instead of overrunning it, and says so in the run record. 90 free calls is roughly 45 seconds of searching at three at a time, and across the whole schedule works out around 250 free searches a day - enough for real breadth, modest enough not to look like a scraper.",
+    "maxFreeCallsPerRun": 90,
+    "maxAwardCallsPerRun": 8,
+    "maxMeteredCallsPerRun": 2,
+    "maxRuntimeMs": 1800000
+  },
+  "concurrency": {
+    "note": "§37 - the DS723+ has two cores. Free searches shell out to Python, award searches hold long HTTP polls; both are cheap in CPU and expensive in wall clock, so a small amount of parallelism helps and a large amount only invites rate limiting.",
+    "maxConcurrentFreeSearches": 3,
+    "maxConcurrentAwardSearches": 1
+  },
+  "openJaw": {
+    "enabled": true,
+    "originPairs": [
+      [
+        "PRG",
+        "VIE"
+      ],
+      [
+        "VIE",
+        "PRG"
+      ]
+    ],
+    "minSavingPercent": 8,
+    "note": "Assembled from one-way observations the radar already holds, so discovering an open jaw costs nothing. Only a promising combination is ever searched live. A saving under minSavingPercent is not worth arriving in a different city for."
+  },
+  "cadence": {
+    "sparseScanHours": 24,
+    "note": "§36 - broad cash discovery daily. Award expansion rides on promising windows, and the fixed-route observer keeps its own 84h cadence untouched."
+  },
+  "jobs": [
+    {
+      "name": "discover-thailand",
+      "originGroup": "primary",
+      "destinationGroup": "thailand",
+      "horizonDays": 180,
+      "cabins": [
+        "economy",
+        "business"
+      ],
+      "frequencyHours": 24,
+      "priority": 1,
+      "enabled": true
+    },
+    {
+      "name": "discover-mexico",
+      "originGroup": "primary",
+      "destinationGroup": "mexico",
+      "horizonDays": 180,
+      "cabins": [
+        "economy",
+        "business"
+      ],
+      "frequencyHours": 24,
+      "priority": 1,
+      "enabled": true
+    },
+    {
+      "name": "discover-wildcard",
+      "originGroup": "primary",
+      "destinationGroup": "wildcard",
+      "horizonDays": 180,
+      "cabins": [
+        "economy"
+      ],
+      "frequencyHours": 48,
+      "priority": 2,
+      "enabled": true
+    },
+    {
+      "name": "discover-positioning-thailand",
+      "originGroup": "positioning",
+      "destinationGroup": "thailand",
+      "horizonDays": 180,
+      "cabins": [
+        "economy",
+        "business"
+      ],
+      "frequencyHours": 72,
+      "priority": 3,
+      "enabled": true,
+      "maxDestinations": 2,
+      "datesPerRoute": 3,
+      "note": "Narrowed on purpose: 5 origins x every airport in the group would be the single biggest line in the budget, and positioning only occasionally wins."
+    },
+    {
+      "name": "discover-positioning-mexico",
+      "originGroup": "positioning",
+      "destinationGroup": "mexico",
+      "horizonDays": 180,
+      "cabins": [
+        "economy",
+        "business"
+      ],
+      "frequencyHours": 72,
+      "priority": 3,
+      "enabled": true,
+      "maxDestinations": 2,
+      "datesPerRoute": 3,
+      "note": "Narrowed on purpose: 5 origins x every airport in the group would be the single biggest line in the budget, and positioning only occasionally wins."
+    }
+  ],
+  "alerts": {
+    "enabled": false,
+    "note": "Still hard-off. Phase 6 validates discovery; delivery is a later, separate, reviewed decision."
+  }
+}

@@ -126,6 +126,11 @@ export interface ProgramComparison {
   note: string
 }
 
+/** §20 how a candidate was found - see discovery/types.ts for the vocabulary. */
+export type DiscoveryMethod =
+  | "FIXED_OBSERVER" | "FLEXIBLE_DATE" | "POSITIONING"
+  | "OPEN_JAW" | "WILDCARD" | "TAKE_ME_ANYWHERE"
+
 export interface DealCandidate {
   id?: number
   sourceTable: "flight_prices" | "award_prices"
@@ -167,9 +172,37 @@ export interface DealCandidate {
   features: ObservationFeatures
   presetsMatched: string[]
   threshold: number
+
+  // ── Phase 6 discovery dimensions ────────────────────────────────────────
+  /** Which method surfaced this. Recorded so the useless methods can be found. */
+  discoveredBy: DiscoveryMethod
+  discoveryRunId: number | null
+  destinationGroup: string | null
+  tripLengthNights: number | null
+  /** §21 the absolute-price tier this fare reached, independent of history. */
+  absoluteTier: "interesting" | "extreme" | "wtf" | null
+  /** §26 believability. A flagged row is stored, not discarded. */
+  sanity: "ok" | "SUSPICIOUS_DATA"
+  sanityDetail: string | null
+  /** §23 whether THIS price has been confirmed, distinct from provider trust. */
+  verificationStatus: "unverified" | "verified" | "cross-verified" | "suspicious"
+  /** §3/§4 present only when the trip starts somewhere other than home. */
+  requiresPositioning: boolean
+  positioning: unknown | null
+  positioningPenalty: number | null
+  trueTripStartCost: number | null
+  /** §8 present only when the return lands somewhere else. */
+  isOpenJaw: boolean
+  openJaw: unknown | null
+  clusterId: number | null
   /** candidate = at/above threshold; below-threshold rows are kept for review. */
   status: "candidate" | "below-threshold"
   engineVersion: string
 }
 
-export type FeedbackVerdict = "GOOD_DEAL" | "NORMAL" | "BAD_SIGNAL"
+/**
+ * §33 - WOULD_BOOK is the verdict that actually matters. "Good deal" is an
+ * opinion about the algorithm; "would book" is an opinion about the trip, and
+ * only the second one tells us whether this thing is worth running.
+ */
+export type FeedbackVerdict = "GOOD_DEAL" | "NORMAL" | "BAD_SIGNAL" | "WOULD_BOOK"

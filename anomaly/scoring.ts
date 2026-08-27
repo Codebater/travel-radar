@@ -18,6 +18,7 @@
 
 import type { AnomalyConfig } from "./config.js"
 import { confidenceAtLeast, scaleFor } from "./config.js"
+import { absoluteReasonCode, type AbsoluteAssessment } from "./absolute.js"
 import type {
   BaselineStats, CppResult, Reason, ScoreComponent, ScoreResult,
 } from "./types.js"
@@ -48,6 +49,9 @@ function providerRaw(
 function assemble(
   parts: Record<string, { raw: number | null; weight: number; detail: string }>,
   weightsVersion: string,
+  penalty?: { points: number; detail: string },
+  /** Ceiling for a decision that rests on absolute price alone. */
+  cap?: { max: number; detail: string },
 ): ScoreResult {
   const usable = Object.entries(parts).filter(([, p]) => p.raw !== null)
   const totalWeight = usable.reduce((sum, [, p]) => sum + p.weight, 0)
@@ -74,7 +78,88 @@ function assemble(
       components[name] = { raw: 0, weight: 0, points: 0, detail: `not available - ${part.detail}` }
     }
   }
-  return { score: Math.round(score * 10) / 10, components, weightsVersion, effectiveWeights }
+  // §4 positioning is applied as a PENALTY on the assembled score, not as a
+  // component of it. A component can be outvoted by a big enough discount; a
+  // penalty cannot, so an overnight bus to a 6am departure always costs the
+  // same visible number of points however cheap the fare is.
+  if (penalty && penalty.points > 0) {
+    components.positioningPenalty = {
+      raw: 0, weight: 0,
+      points: -Math.round(penalty.points * 10) / 10,
+      detail: penalty.detail,
+    }
+    score -= penalty.points
+  }
+
+  // Renormalising after dropping a component is right for ONE gap - it stops
+  // an award being punished for a hole in our cash history. It is wrong when
+  // four of ten components are missing: the surviving weights inflate, and a
+  // fare with no evidence at all can outscore one backed by sixty
+  // observations saying the same thing. Evidence outranks assertion.
+  if (cap && score > cap.max) {
+    components.noHistoryCap = {
+      raw: 0, weight: 0,
+      points: -Math.round((score - cap.max) * 10) / 10,
+      detail: cap.detail,
+    }
+    score = cap.max
+  }
+
+  // A missing or negative weight in config must not produce NaN or a score
+  // outside the scale the whole product is described in.
+  const final = Number.isFinite(score) ? Math.max(0, Math.min(100, score)) : 0
+  return { score: Math.round(final * 10) / 10, components, weightsVersion, effectiveWeights }
+}
+
+export interface ScoreExtras {
+  /** §21 absolute price judgement, independent of history. */
+  absolute?: AbsoluteAssessment | null
+  /** §23 how much this destination is actually wanted, 0..1. */
+  routeDesirability?: number | null
+  /** §23 has this particular price been confirmed? */
+  verificationStatus?: string | null
+  /** §4 positioning inconvenience, 0..1. */
+  positioningPenalty?: number | null
+  positioningDetail?: string | null
+}
+
+function extraParts(
+  extras: ScoreExtras | undefined,
+  weights: Record<string, number>,
+  config: AnomalyConfig,
+): Record<string, { raw: number | null; weight: number; detail: string }> {
+  const statuses = (config as any).verificationStatusValues ?? {}
+  const status = extras?.verificationStatus ?? null
+  return {
+    absolutePrice: {
+      raw: extras?.absolute ? extras.absolute.score : null,
+      weight: weights.absolutePrice ?? 0,
+      detail: extras?.absolute?.detail ?? "no absolute rule for this route and cabin",
+    },
+    routeDesirability: {
+      raw: extras?.routeDesirability ?? null,
+      weight: weights.routeDesirability ?? 0,
+      detail: extras?.routeDesirability != null
+        ? `destination desirability ${extras.routeDesirability}`
+        : "destination not scored for desirability",
+    },
+    verification: {
+      raw: status ? (statuses[status] ?? statuses.unverified ?? 0.55) : null,
+      weight: weights.verification ?? 0,
+      detail: status ? `verification status: ${status}` : "verification status unknown",
+    },
+  }
+}
+
+function penaltyFor(
+  extras: ScoreExtras | undefined, weight: number,
+): { points: number; detail: string } | undefined {
+  const penalty = extras?.positioningPenalty ?? 0
+  if (!penalty || penalty <= 0) return undefined
+  return {
+    points: Math.max(0, Math.min(1, penalty)) * weight * 100,
+    detail: extras?.positioningDetail ?? `positioning inconvenience ${penalty}`,
+  }
 }
 
 export function scoreCash(
@@ -87,9 +172,14 @@ export function scoreCash(
     baseline: BaselineStats
   },
   config: AnomalyConfig,
+  extras?: ScoreExtras,
 ): ScoreResult {
   const w = config.cash.weights
   const b = input.baseline
+  // With no history there is nothing to be "below", so the history components
+  // are dropped and the remaining weights renormalise. Scoring them zero would
+  // punish a route for our never having watched it.
+  const hasHistory = b.count > 0
   const savings = b.median - input.price
   const savingsScale = scaleFor(config.cash.absoluteSavingsFullCredit, input.currency)
   const quality = itineraryQuality(input.stops)
@@ -97,28 +187,40 @@ export function scoreCash(
 
   return assemble({
     priceVsMedian: {
-      raw: clamp01(b.percentBelowMedian / config.cash.fullCreditPercentBelowMedian),
+      raw: hasHistory ? clamp01(b.percentBelowMedian / config.cash.fullCreditPercentBelowMedian) : null,
       weight: w.priceVsMedian!,
-      detail: `${b.percentBelowMedian}% below observed median ${b.median} ${input.currency}`,
+      detail: hasHistory
+        ? `${b.percentBelowMedian}% below observed median ${b.median} ${input.currency}`
+        : "no prior observations on this route",
     },
     percentile: {
-      raw: clamp01((100 - b.percentile) / 100),
+      raw: hasHistory ? clamp01((100 - b.percentile) / 100) : null,
       weight: w.percentile!,
-      detail: `${b.percentile}th percentile of ${b.count} observations`,
+      detail: hasHistory
+        ? `${b.percentile}th percentile of ${b.count} observations`
+        : "no prior observations to rank against",
     },
     sampleConfidence: {
-      raw: b.confidenceValue,
+      raw: hasHistory ? b.confidenceValue : null,
       weight: w.sampleConfidence!,
-      detail: `${b.count} observations, tier ${b.confidence}`,
+      detail: hasHistory ? `${b.count} observations, tier ${b.confidence}` : "no sample yet",
     },
     providerConfidence: { raw: provider.raw, weight: w.providerConfidence!, detail: provider.detail },
     absoluteSavings: {
-      raw: clamp01(savings / savingsScale),
+      raw: hasHistory ? clamp01(savings / savingsScale) : null,
       weight: w.absoluteSavings!,
-      detail: `${Math.round(savings)} ${input.currency} below median (full credit at ${savingsScale})`,
+      detail: hasHistory
+        ? `${Math.round(savings)} ${input.currency} below median (full credit at ${savingsScale})`
+        : "no median to measure a saving against",
     },
     itineraryQuality: { raw: quality.raw, weight: w.itineraryQuality!, detail: quality.detail },
-  }, config.weightsVersion)
+    ...extraParts(extras, w, config),
+  }, config.weightsVersion,
+     penaltyFor(extras, (config.cash as any).positioningPenaltyWeight ?? 0.18),
+     hasHistory ? undefined : {
+       max: (config as any).noHistoryScoreCap ?? 85,
+       detail: "capped: judged on absolute price alone, with no observations behind it",
+     })
 }
 
 export function scoreAward(
@@ -134,9 +236,11 @@ export function scoreAward(
     cpp: CppResult
   },
   config: AnomalyConfig,
+  extras?: ScoreExtras,
 ): ScoreResult {
   const w = config.award.weights
   const b = input.baseline
+  const hasHistory = b.count > 0
   const quality = itineraryQuality(input.stops)
   const provider = providerRaw(input.providerConfidence, input.verificationLevel, config)
 
@@ -179,25 +283,33 @@ export function scoreAward(
 
   return assemble({
     pointsVsMedian: {
-      raw: clamp01(b.percentBelowMedian / config.award.fullCreditPercentBelowMedian),
+      raw: hasHistory ? clamp01(b.percentBelowMedian / config.award.fullCreditPercentBelowMedian) : null,
       weight: w.pointsVsMedian!,
-      detail: `${b.percentBelowMedian}% below observed median ${b.median} pts`,
+      detail: hasHistory
+        ? `${b.percentBelowMedian}% below observed median ${b.median} pts`
+        : "no prior observations for this program on this route",
     },
     taxes: { raw: taxRaw, weight: w.taxes!, detail: taxDetail },
     cpp: { raw: cppRaw, weight: w.cpp!, detail: cppDetail },
     percentile: {
-      raw: clamp01((100 - b.percentile) / 100),
+      raw: hasHistory ? clamp01((100 - b.percentile) / 100) : null,
       weight: w.percentile!,
-      detail: `${b.percentile}th percentile of ${b.count} observations`,
+      detail: hasHistory ? `${b.percentile}th percentile of ${b.count} observations` : "no sample to rank against",
     },
     sampleConfidence: {
-      raw: b.confidenceValue,
+      raw: hasHistory ? b.confidenceValue : null,
       weight: w.sampleConfidence!,
-      detail: `${b.count} observations, tier ${b.confidence}`,
+      detail: hasHistory ? `${b.count} observations, tier ${b.confidence}` : "no sample yet",
     },
     providerConfidence: { raw: provider.raw, weight: w.providerConfidence!, detail: provider.detail },
     itineraryQuality: { raw: quality.raw, weight: w.itineraryQuality!, detail: quality.detail },
-  }, config.weightsVersion)
+    ...extraParts(extras, w, config),
+  }, config.weightsVersion,
+     penaltyFor(extras, (config.award as any).positioningPenaltyWeight ?? 0.18),
+     hasHistory ? undefined : {
+       max: (config as any).noHistoryScoreCap ?? 85,
+       detail: "capped: judged on absolute price alone, with no observations behind it",
+     })
 }
 
 // ─── §T Reason codes ─────────────────────────────────────────────────────────
@@ -208,6 +320,17 @@ export function scoreAward(
  * emitted as loudly as the positive ones, because the point of the shadow
  * period is to find out which codes correlate with bad signals (§X).
  */
+export interface ReasonExtras {
+  absolute?: AbsoluteAssessment | null
+  currency?: string | null
+  destinationGroup?: string | null
+  discoveredBy?: string | null
+  positioning?: { required: boolean; penalty: number; savingVsHome: number | null; detail: string } | null
+  openJaw?: { saving: number | null; currency: string; outboundOrigin: string; inboundDestination: string } | null
+  sanity?: { verdict: string; detail: string } | null
+  verificationStatus?: string | null
+}
+
 export function reasonsFor(input: {
   type: "cash" | "award"
   cabin: string
@@ -217,36 +340,46 @@ export function reasonsFor(input: {
   cpp?: CppResult | null
   taxesAmount?: number | null
   config: AnomalyConfig
+  extras?: ReasonExtras
 }): Reason[] {
   const b = input.baseline
   const config = input.config
   const reasons: Reason[] = []
 
-  if (b.isNewObservedLow) {
-    reasons.push({ code: "NEW_OBSERVED_LOW", detail: `below the previous observed minimum of ${b.min}` })
-  }
-  if (b.percentBelowMedian >= 10) {
-    reasons.push({
-      code: "PERCENT_BELOW_MEDIAN",
-      detail: `${b.percentBelowMedian}% below the observed median (${b.median})`,
-    })
-  }
-  if (b.percentile <= 5) {
-    reasons.push({ code: "TOP_5_PERCENT_OBSERVED_PRICE", detail: `${b.percentile}th percentile of ${b.count} observations` })
-  } else if (b.percentile <= 10) {
-    reasons.push({ code: "TOP_10_PERCENT_OBSERVED_PRICE", detail: `${b.percentile}th percentile of ${b.count} observations` })
+  // Every code below this line is a claim ABOUT HISTORY, and a no-history
+  // decision has none to make. Without this guard the empty baseline's zeroed
+  // percentile reads as "0th percentile" and the card claims to be in the top
+  // 5% of a sample that does not exist - the most convincing kind of false
+  // positive there is, and exactly the shape Phase 5's review caught.
+  const hasHistory = b.count > 0
+
+  if (hasHistory) {
+    if (b.isNewObservedLow) {
+      reasons.push({ code: "NEW_OBSERVED_LOW", detail: `below the previous observed minimum of ${b.min}` })
+    }
+    if (b.percentBelowMedian >= 10) {
+      reasons.push({
+        code: "PERCENT_BELOW_MEDIAN",
+        detail: `${b.percentBelowMedian}% below the observed median (${b.median})`,
+      })
+    }
+    if (b.percentile <= 5) {
+      reasons.push({ code: "TOP_5_PERCENT_OBSERVED_PRICE", detail: `${b.percentile}th percentile of ${b.count} observations` })
+    } else if (b.percentile <= 10) {
+      reasons.push({ code: "TOP_10_PERCENT_OBSERVED_PRICE", detail: `${b.percentile}th percentile of ${b.count} observations` })
+    }
   }
   if (input.cabin === "business") reasons.push({ code: "BUSINESS_CLASS", detail: "premium cabin" })
   if (input.cabin === "first") reasons.push({ code: "FIRST_CLASS", detail: "premium cabin" })
   if (input.stops === 0) reasons.push({ code: "DIRECT_FLIGHT", detail: "no connection" })
 
-  if (!confidenceAtLeast(b.confidence, "MEDIUM")) {
+  if (hasHistory && !confidenceAtLeast(b.confidence, "MEDIUM")) {
     reasons.push({ code: "THIN_BASELINE", detail: `${b.count} observations, ${b.confidence} confidence` })
   }
-  if (b.scope !== "strict") {
+  if (hasHistory && b.scope !== "strict") {
     reasons.push({ code: "RELAXED_BASELINE", detail: `compared against a wider set (${b.scope})` })
   }
-  if (b.ageDays > config.baseline.staleBaselineDays) {
+  if (hasHistory && b.ageDays > config.baseline.staleBaselineDays) {
     reasons.push({ code: "STALE_BASELINE", detail: `newest comparable observation is ${b.ageDays}d old` })
   }
   if (input.verificationLevel === "discovered") {
@@ -276,6 +409,57 @@ export function reasonsFor(input: {
       if (input.taxesAmount <= low) reasons.push({ code: "LOW_AWARD_TAXES", detail: `${input.taxesAmount} surcharge` })
       if (input.taxesAmount >= high) reasons.push({ code: "HIGH_AWARD_TAXES", detail: `${input.taxesAmount} surcharge - points alone would flatter this` })
     }
+  }
+
+  // ── §24 discovery-era codes ────────────────────────────────────────────
+  const e = input.extras
+  if (e?.absolute?.tier) {
+    const code = absoluteReasonCode(e.absolute, input.cabin, e.currency ?? "USD")
+    if (code) reasons.push({ code, detail: e.absolute.detail })
+    reasons.push({ code: `ABSOLUTE_${e.absolute.tier.toUpperCase()}`, detail: e.absolute.detail })
+  }
+  if (e?.destinationGroup === "wildcard") {
+    reasons.push({
+      code: "WILDCARD_DESTINATION",
+      detail: "a destination the fixed observer does not watch - found by wildcard discovery",
+    })
+  }
+  if (e?.positioning?.required) {
+    reasons.push({
+      code: "POSITIONING_REQUIRED",
+      detail: e.positioning.detail,
+    })
+    if (e.positioning.penalty >= 0.6) {
+      reasons.push({
+        code: "HIGH_POSITIONING_PENALTY",
+        detail: `inconvenience score ${e.positioning.penalty} - a saving has to be large to be worth this`,
+      })
+    }
+  }
+  if (e?.openJaw && e.openJaw.saving !== null) {
+    reasons.push({
+      code: `OPEN_JAW_SAVES_${Math.round(e.openJaw.saving)}`,
+      detail: `out of ${e.openJaw.outboundOrigin}, back into ${e.openJaw.inboundDestination}, ` +
+        `saving ${Math.round(e.openJaw.saving)} ${e.openJaw.currency} against the best round trip`,
+    })
+  }
+  if (e?.sanity && e.sanity.verdict !== "ok") {
+    reasons.push({ code: "SUSPICIOUS_DATA", detail: e.sanity.detail })
+  }
+  if (!hasHistory) {
+    reasons.push({
+      code: "NO_PRIOR_HISTORY",
+      detail: "this radar has never watched this route - judged on absolute price alone, " +
+        "with every history-based component and claim dropped",
+    })
+  } else if (!confidenceAtLeast(b.confidence, "LOW")) {
+    reasons.push({
+      code: "LOW_CONFIDENCE_BASELINE",
+      detail: `only ${b.count} prior comparable observations - treat the percentage with suspicion`,
+    })
+  }
+  if (e?.discoveredBy && e.discoveredBy !== "FIXED_OBSERVER") {
+    reasons.push({ code: `FOUND_BY_${e.discoveredBy}`, detail: `discovery method: ${e.discoveredBy}` })
   }
 
   return reasons

@@ -20,8 +20,13 @@
 
 import { getDb, type DB } from "../db/index.js"
 import { loadAnomalyConfig, type AnomalyConfig } from "./config.js"
-import { buildComparabilityKey, featuresFor } from "./comparability.js"
-import { cashBaselineRows, awardBaselineRows, buildBaseline } from "./baseline.js"
+import { assessCashAbsolute, assessAwardAbsolute, routeDesirability } from "./absolute.js"
+import { checkCashSanity, checkAwardSanity } from "./sanity.js"
+import { loadDiscoveryConfig, groupForDestination, isPrimaryOrigin } from "../discovery/config.js"
+import { assessPositioning } from "../discovery/positioning.js"
+import type { DiscoveryMethod } from "./types.js"
+import { buildComparabilityKey, featuresFor, nightsBetween } from "./comparability.js"
+import { cashBaselineRows, awardBaselineRows, buildBaseline, noHistoryBaseline } from "./baseline.js"
 import { computeCpp } from "./cpp.js"
 import { scoreCash, scoreAward, reasonsFor, matchPresets } from "./scoring.js"
 import { compareProgramsForItinerary } from "./programs.js"
@@ -52,6 +57,52 @@ function emptySummary(): EvaluationSummary {
   }
 }
 
+/**
+ * Everything the engine needs that is not on the observation row itself:
+ * which destination group it belongs to, whether the origin needs positioning,
+ * and which discovery method produced it.
+ */
+interface ObservationContext {
+  destinationGroup: string | null
+  desirability: number
+  discoveredBy: DiscoveryMethod
+  discoveryRunId: number | null
+  requiresPositioning: boolean
+}
+
+const DISCOVERY_METHODS: DiscoveryMethod[] = [
+  "FIXED_OBSERVER", "FLEXIBLE_DATE", "POSITIONING", "OPEN_JAW", "WILDCARD", "TAKE_ME_ANYWHERE",
+]
+
+function contextFor(
+  db: DB,
+  row: { origin: string; destination: string; search_request_id: number | null },
+): ObservationContext {
+  const discoveryConfig = loadDiscoveryConfig()
+  const group = groupForDestination(row.destination, discoveryConfig)
+
+  // The method rides on the search request, never inferred from the route.
+  let discoveredBy: DiscoveryMethod = "FIXED_OBSERVER"
+  let discoveryRunId: number | null = null
+  if (row.search_request_id !== null) {
+    const req = db.prepare(
+      `SELECT discovery_method, discovery_run_id FROM search_requests WHERE id = ?`,
+    ).get(row.search_request_id) as { discovery_method: string | null; discovery_run_id: number | null } | undefined
+    if (req?.discovery_method && DISCOVERY_METHODS.includes(req.discovery_method as DiscoveryMethod)) {
+      discoveredBy = req.discovery_method as DiscoveryMethod
+    }
+    discoveryRunId = req?.discovery_run_id ?? null
+  }
+
+  return {
+    destinationGroup: group?.key ?? null,
+    desirability: group?.group.desirability ?? 0.75,
+    discoveredBy,
+    discoveryRunId,
+    requiresPositioning: !isPrimaryOrigin(row.origin, discoveryConfig),
+  }
+}
+
 interface CashObservation {
   id: number
   search_request_id: number | null
@@ -63,6 +114,8 @@ interface CashObservation {
   cabin: string
   airline: string | null
   stops: number | null
+  duration_minutes: number | null
+  departure_time: string | null
   price_amount: number
   price_currency: string
   provider: string
@@ -84,6 +137,8 @@ interface AwardObservation {
   stops: number | null
   loyalty_program: string
   points: number
+  duration_minutes: number | null
+  departure_time: string | null
   taxes_amount: number | null
   taxes_currency: string | null
   provider: string
@@ -104,19 +159,86 @@ export function evaluateCashObservation(
   // §Y the observation's own timestamp is the cut-off, not "now".
   const asOf = row.fetched_at
   const rows = cashBaselineRows(db, key, asOf, config, row.price_currency, row.id, row.search_request_id)
-  const baseline = buildBaseline(rows, key, row.price_amount, asOf, config)
-  if (!baseline) return { skipped: "no-baseline" }
-  if (baseline.count < config.minSamplesToEmit) return { skipped: "thin-baseline" }
+  const measured = buildBaseline(rows, key, row.price_amount, asOf, config)
+  const usable = measured && measured.count >= config.minSamplesToEmit ? measured : null
+
+  const ctx = contextFor(db, row)
+
+  // §21 without this, a wildcard destination could never produce a candidate:
+  // it has no history by definition, so the history-only engine would refuse to
+  // say anything about the very fares it exists to find. An absolute-price
+  // judgement can stand on its own - but ONLY when it is strong enough to mean
+  // something, or every unwatched route would emit a decision per observation.
+  const absoluteOnly = !usable && assessCashAbsolute({
+    price: row.price_amount, currency: row.price_currency,
+    cabin: row.cabin, destinationGroup: ctx.destinationGroup,
+  }, config).tier !== null
+
+  if (!usable && !absoluteOnly) {
+    return { skipped: measured ? "thin-baseline" : "no-baseline" }
+  }
+  const baseline = usable ?? noHistoryBaseline(key, asOf)
+
+  // §26 believability first: a price that cannot be real must not be allowed
+  // to become the top of the feed while a reader works out why.
+  const sanity = checkCashSanity({
+    price: row.price_amount, currency: row.price_currency, cabin: row.cabin,
+    destinationGroup: ctx.destinationGroup, stops: row.stops,
+    durationMinutes: row.duration_minutes, departureDate: row.departure_date,
+  }, config)
+
+  // §21 the second axis: is this a good price full stop, not merely a good
+  // price for a route this radar happens to have watched.
+  const absolute = assessCashAbsolute({
+    price: row.price_amount, currency: row.price_currency,
+    cabin: row.cabin, destinationGroup: ctx.destinationGroup,
+  }, config)
+
+  // §3/§4 a fare leaving from a positioning airport is not comparable with one
+  // leaving from home until the train, the hotel and the risk are counted.
+  const positioning = ctx.requiresPositioning
+    ? assessPositioning(db, {
+        positioningAirport: row.origin, destination: row.destination,
+        departureDate: row.departure_date, departureTime: row.departure_time,
+        cabin: row.cabin, mainFare: row.price_amount, currency: row.price_currency,
+        asOf, tripType: row.return_date ? "return" : "oneway",
+      })
+    : null
+
+  const verificationStatus = sanity.verdict !== "ok"
+    ? "suspicious" as const
+    : row.verification_level === "verified" ? "verified" as const
+    : row.verification_level === "cross-verified" ? "cross-verified" as const
+    : "unverified" as const
+
+  const extras = {
+    absolute,
+    routeDesirability: routeDesirability(row.destination, ctx.destinationGroup, config, ctx.desirability),
+    verificationStatus,
+    positioningPenalty: positioning?.penalty ?? null,
+    positioningDetail: positioning
+      ? `${positioning.penaltyReasons.join("; ")} (true start cost ${positioning.trueTripStartCost} ${positioning.currency})`
+      : null,
+  }
 
   const breakdown = scoreCash({
     price: row.price_amount, currency: row.price_currency, stops: row.stops,
     providerConfidence: row.provider_confidence, verificationLevel: row.verification_level,
     baseline,
-  }, config)
+  }, config, extras)
 
   const reasons = reasonsFor({
     type: "cash", cabin: row.cabin, stops: row.stops, baseline,
     verificationLevel: row.verification_level, config,
+    extras: {
+      absolute, currency: row.price_currency, destinationGroup: ctx.destinationGroup,
+      discoveredBy: ctx.discoveredBy,
+      positioning: positioning && positioning.required ? {
+        required: true, penalty: positioning.penalty,
+        savingVsHome: positioning.savingVsHome, detail: positioning.note,
+      } : null,
+      sanity, verificationStatus,
+    },
   })
 
   return {
@@ -156,8 +278,27 @@ export function evaluateCashObservation(
     }),
     presetsMatched: matchPresets({ type: "cash", score: breakdown.score, baseline, config }),
     threshold: config.candidateThreshold,
-    status: breakdown.score >= config.candidateThreshold ? "candidate" : "below-threshold",
+    // A suspicious observation is never a candidate, however it scored. It is
+    // still stored, with its reason, because a provider that has started
+    // returning nonsense is exactly what you want to be able to see.
+    status: sanity.verdict === "ok" && breakdown.score >= config.candidateThreshold
+      ? "candidate" : "below-threshold",
     engineVersion: config.engineVersion,
+    discoveredBy: ctx.discoveredBy,
+    discoveryRunId: ctx.discoveryRunId,
+    destinationGroup: ctx.destinationGroup,
+    tripLengthNights: nightsBetween(row.departure_date, row.return_date),
+    absoluteTier: absolute.tier,
+    sanity: sanity.verdict,
+    sanityDetail: sanity.detail || null,
+    verificationStatus,
+    requiresPositioning: Boolean(positioning?.required),
+    positioning: positioning ?? null,
+    positioningPenalty: positioning?.penalty ?? null,
+    trueTripStartCost: positioning?.trueTripStartCost ?? null,
+    isOpenJaw: false,
+    openJaw: null,
+    clusterId: null,
   }
 }
 
@@ -173,9 +314,18 @@ export function evaluateAwardObservation(
 
   const asOf = row.fetched_at
   const rows = awardBaselineRows(db, key, asOf, config, row.id, row.search_request_id)
-  const baseline = buildBaseline(rows, key, row.points, asOf, config)
-  if (!baseline) return { skipped: "no-baseline" }
-  if (baseline.count < config.minSamplesToEmit) return { skipped: "thin-baseline" }
+  const measuredAward = buildBaseline(rows, key, row.points, asOf, config)
+  const usableAward = measuredAward && measuredAward.count >= config.minSamplesToEmit ? measuredAward : null
+
+  const absoluteOnlyAward = !usableAward && assessAwardAbsolute({
+    points: row.points, cabin: row.cabin, loyaltyProgram: row.loyalty_program,
+    taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
+  }, config).tier !== null
+
+  if (!usableAward && !absoluteOnlyAward) {
+    return { skipped: measuredAward ? "thin-baseline" : "no-baseline" }
+  }
+  const baseline = usableAward ?? noHistoryBaseline(key, asOf)
 
   // §O/§P points and surcharge stay separate; CPP carries its own provenance.
   const cpp = computeCpp(db, {
@@ -183,16 +333,62 @@ export function evaluateAwardObservation(
     taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency, asOf,
   }, config)
 
+  const ctx = contextFor(db, row)
+
+  const sanity = checkAwardSanity({
+    points: row.points, taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
+    stops: row.stops, durationMinutes: row.duration_minutes, departureDate: row.departure_date,
+  }, config)
+
+  // §22 thresholds are per PROGRAM: 60k means "bargain" in one and "poor" in
+  // another, and one number across all of them would be meaningless.
+  const absolute = assessAwardAbsolute({
+    points: row.points, cabin: row.cabin, loyaltyProgram: row.loyalty_program,
+    taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
+  }, config)
+
+  const positioning = ctx.requiresPositioning && row.taxes_amount !== null
+    ? assessPositioning(db, {
+        positioningAirport: row.origin, destination: row.destination,
+        departureDate: row.departure_date, departureTime: row.departure_time,
+        cabin: row.cabin, mainFare: row.taxes_amount,
+        currency: row.taxes_currency ?? "USD",
+        asOf, tripType: row.return_date ? "return" : "oneway",
+      })
+    : null
+
+  const verificationStatus = sanity.verdict !== "ok"
+    ? "suspicious" as const
+    : row.verification_level === "cross-verified" ? "cross-verified" as const
+    : "unverified" as const
+
+  const extras = {
+    absolute,
+    routeDesirability: routeDesirability(row.destination, ctx.destinationGroup, config, ctx.desirability),
+    verificationStatus,
+    positioningPenalty: positioning?.penalty ?? null,
+    positioningDetail: positioning ? positioning.penaltyReasons.join("; ") : null,
+  }
+
   const breakdown = scoreAward({
     points: row.points, taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
     cabin: row.cabin, stops: row.stops,
     providerConfidence: row.provider_confidence, verificationLevel: row.verification_level,
     baseline, cpp,
-  }, config)
+  }, config, extras)
 
   const reasons = reasonsFor({
     type: "award", cabin: row.cabin, stops: row.stops, baseline,
     verificationLevel: row.verification_level, cpp, taxesAmount: row.taxes_amount, config,
+    extras: {
+      absolute, currency: row.taxes_currency, destinationGroup: ctx.destinationGroup,
+      discoveredBy: ctx.discoveredBy,
+      positioning: positioning && positioning.required ? {
+        required: true, penalty: positioning.penalty,
+        savingVsHome: positioning.savingVsHome, detail: positioning.note,
+      } : null,
+      sanity, verificationStatus,
+    },
   })
 
   // §Q only worth computing for decisions somebody may actually look at.
@@ -237,8 +433,24 @@ export function evaluateAwardObservation(
     }),
     presetsMatched: matchPresets({ type: "award", score: breakdown.score, baseline, cpp, config }),
     threshold: config.candidateThreshold,
-    status: breakdown.score >= config.candidateThreshold ? "candidate" : "below-threshold",
+    status: sanity.verdict === "ok" && breakdown.score >= config.candidateThreshold
+      ? "candidate" : "below-threshold",
     engineVersion: config.engineVersion,
+    discoveredBy: ctx.discoveredBy,
+    discoveryRunId: ctx.discoveryRunId,
+    destinationGroup: ctx.destinationGroup,
+    tripLengthNights: nightsBetween(row.departure_date, row.return_date),
+    absoluteTier: absolute.tier,
+    sanity: sanity.verdict,
+    sanityDetail: sanity.detail || null,
+    verificationStatus,
+    requiresPositioning: Boolean(positioning?.required),
+    positioning: positioning ?? null,
+    positioningPenalty: positioning?.penalty ?? null,
+    trueTripStartCost: positioning?.trueTripStartCost ?? null,
+    isOpenJaw: false,
+    openJaw: null,
+    clusterId: null,
   }
 }
 

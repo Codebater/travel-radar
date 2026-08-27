@@ -100,7 +100,17 @@ describe("comparability (what may be compared with what)", () => {
   it("never compares one loyalty program's points with another's", () => {
     awardHistory(20, 150_000, { loyaltyProgram: "AEROPLAN" })
     const id = award({ loyaltyProgram: "FLYING_BLUE", points: 60_000, fetchedAt: at(0) })
-    expect("skipped" in evaluateAwardObservation(db, readAwardRow(id), config)).toBe(true)
+    const decision = evaluateAwardObservation(db, readAwardRow(id), config)
+
+    // A decision may still be made on absolute grounds - 60k Flying Blue
+    // business is a good redemption whoever else flies the route - but it must
+    // NOT borrow Aeroplan's history to say so.
+    if (!("skipped" in decision)) {
+      expect(decision.baseline.count).toBe(0)
+      expect(decision.baseline.scope).toBe("no-history")
+      expect(decision.reasons.map(r => r.code)).toContain("NO_PRIOR_HISTORY")
+      expect(decision.scoreBreakdown.components.pointsVsMedian!.weight).toBe(0)
+    }
   })
 
   it("never compares across currencies", () => {
@@ -297,14 +307,21 @@ describe("historical evaluation without look-ahead", () => {
     expect(decision.status).toBe("below-threshold")
   })
 
-  it("says nothing when the freshest comparable observation is ancient", () => {
+  it("makes no historical claim when the freshest comparable observation is ancient", () => {
     // A baseline whose newest row predates maxBaselineAgeDays is an archive,
-    // not a comparison.
+    // not a comparison. The engine may still judge the price on absolute
+    // grounds, but it must not pretend the archive is a current median.
     for (let i = 0; i < 20; i++) {
       cash({ price: { amount: 1000, currency: "USD" }, fetchedAt: at(-360 + i) })
     }
     const id = cash({ price: { amount: 400, currency: "USD" }, fetchedAt: at(0) })
-    expect(evaluateCashObservation(db, readCashRow(id), config)).toEqual({ skipped: "no-baseline" })
+    const decision = evaluateCashObservation(db, readCashRow(id), config) as DealCandidate
+
+    expect("skipped" in decision).toBe(false)
+    expect(decision.baseline.scope).toBe("no-history")
+    expect(decision.baseline.median).toBe(0)
+    expect(decision.baseline.percentBelowMedian).toBe(0)
+    expect(decision.reasons.map(r => r.code)).toContain("NO_PRIOR_HISTORY")
   })
 
   it("stores the cut-off it used", () => {
@@ -337,11 +354,25 @@ describe("small samples are not trusted", () => {
     expect(confidenceAtLeast("MEDIUM", "MEDIUM")).toBe(true)
   })
 
-  it("records no decision at all below the emit threshold", () => {
+  it("makes no historical claim below the emit threshold", () => {
     cashHistory(3, 1000)
     const id = cash({ price: { amount: 100, currency: "USD" }, fetchedAt: at(0) })
-    const decision = evaluateCashObservation(db, readCashRow(id), config)
-    expect(decision).toEqual({ skipped: "thin-baseline" })
+    const decision = evaluateCashObservation(db, readCashRow(id), config) as DealCandidate
+
+    // Three observations cannot support a percentile or a median, so none is
+    // offered - the decision that survives rests on the absolute rule alone.
+    expect("skipped" in decision).toBe(false)
+    expect(decision.baseline.count).toBe(0)
+    expect(decision.scoreBreakdown.components.percentile!.weight).toBe(0)
+    expect(decision.scoreBreakdown.components.sampleConfidence!.weight).toBe(0)
+  })
+
+  it("stays silent when a thin baseline meets an unremarkable price", () => {
+    // The absolute rule is what earns an opinion without history. An ordinary
+    // fare on a barely-watched route gets no decision at all.
+    cashHistory(3, 1000)
+    const id = cash({ price: { amount: 900, currency: "USD" }, fetchedAt: at(0) })
+    expect(evaluateCashObservation(db, readCashRow(id), config)).toEqual({ skipped: "thin-baseline" })
   })
 
   it("flags a thin baseline and scores it lower than an identical fat one", () => {
@@ -778,7 +809,10 @@ describe("candidate persistence", () => {
     // Otherwise the table mixes two configurations: the CLI reports zero
     // candidates while the API still serves yesterday's.
     cashHistory(8, 1000)
-    cash({ price: { amount: 300, currency: "USD" }, fetchedAt: at(0) })
+    // 700 is well below this route's median but nowhere near an absolute
+    // threshold, so tightening the sample requirement really does leave the
+    // engine with nothing to say - which is what makes the withdrawal visible.
+    cash({ price: { amount: 700, currency: "USD" }, fetchedAt: at(0) })
     evaluateNewObservations({ db, config, quiet: true })
     expect(listCandidates(db, { minScore: 0, limit: 50 }).length).toBeGreaterThan(0)
 

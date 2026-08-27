@@ -17,6 +17,8 @@ import { executeJob } from "./engine.js"
 import { projectMonthlyBudget } from "./budget.js"
 import { backupIfDue } from "../db/backup.js"
 import { evaluateNewObservations } from "../anomaly/engine.js"
+import { dueDiscoveryJobs, getDiscoveryJob, reapStaleDiscoveryRuns } from "../discovery/store.js"
+import { executeDiscoveryJob } from "../discovery/engine.js"
 
 function envInt(name: string, fallback: number): number {
   const raw = Number(process.env[name])
@@ -109,6 +111,27 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
         if (fresh.nextRunAt && new Date(fresh.nextRunAt) > new Date()) continue
         await executeJob(fresh, { db, trigger: "schedule", shouldContinue })
       }
+      // Discovery jobs run on the SAME scheduler and the same lease, so the
+      // two engines can never overlap on one machine and there is one process
+      // to supervise rather than two. Observation jobs go first: they are the
+      // long, comparable series that everything else is judged against, and a
+      // discovery cycle that overruns must never delay them.
+      const reapedDiscovery = reapStaleDiscoveryRuns(db)
+      if (reapedDiscovery > 0) {
+        console.warn(`OBSERVER reaped ${reapedDiscovery} stale discovery run(s) from a previous crash`)
+      }
+      for (const job of dueDiscoveryJobs(db)) {
+        if (!shouldContinue()) break
+        const fresh = getDiscoveryJob(db, job.id)
+        if (!fresh || !fresh.enabled) continue
+        if (fresh.nextRunAt && new Date(fresh.nextRunAt) > new Date()) continue
+        try {
+          await executeDiscoveryJob(fresh, { db, trigger: "schedule", shouldContinue })
+        } catch (err) {
+          console.warn(`⚠️ discovery job ${fresh.name} failed: ${(err as Error).message}`)
+        }
+      }
+
       if (leaseLost) { exitReason = "lease lost to another scheduler"; break }
       if (stopViaDb) { exitReason = "stop requested via observer:stop"; break }
 

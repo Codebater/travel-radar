@@ -39,7 +39,11 @@ export function saveCandidate(db: DB, c: DealCandidate): number {
       cpp, cpp_basis, cpp_confidence, cash_provenance, award_provenance, program_comparison,
       provider, provider_confidence, verification_level,
       score, score_breakdown, weights_version, engine_version, reasons, features,
-      presets_matched, threshold, mode, status, notified, created_at
+      presets_matched, threshold, mode, status, notified, created_at,
+      discovered_by, discovery_run_id, destination_group, trip_length_nights,
+      absolute_tier, sanity, sanity_detail, verification_status,
+      requires_positioning, positioning, positioning_penalty, true_trip_start_cost,
+      is_open_jaw, open_jaw, cluster_id
     ) VALUES (
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?, ?, ?,
@@ -51,7 +55,11 @@ export function saveCandidate(db: DB, c: DealCandidate): number {
       ?, ?, ?, ?, ?, ?,
       ?, ?, ?,
       ?, ?, ?, ?, ?, ?,
-      ?, ?, 'shadow', ?, 0, ?
+      ?, ?, 'shadow', ?, 0, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?, ?,
+      ?, ?, ?
     )
     ON CONFLICT(source_table, source_id) DO UPDATE SET
       as_of = excluded.as_of, evaluated_at = excluded.evaluated_at,
@@ -69,7 +77,18 @@ export function saveCandidate(db: DB, c: DealCandidate): number {
       weights_version = excluded.weights_version, engine_version = excluded.engine_version,
       reasons = excluded.reasons, features = excluded.features,
       presets_matched = excluded.presets_matched, threshold = excluded.threshold,
-      status = excluded.status
+      status = excluded.status,
+      discovered_by = excluded.discovered_by, discovery_run_id = excluded.discovery_run_id,
+      destination_group = excluded.destination_group,
+      trip_length_nights = excluded.trip_length_nights,
+      absolute_tier = excluded.absolute_tier,
+      sanity = excluded.sanity, sanity_detail = excluded.sanity_detail,
+      verification_status = excluded.verification_status,
+      requires_positioning = excluded.requires_positioning,
+      positioning = excluded.positioning,
+      positioning_penalty = excluded.positioning_penalty,
+      true_trip_start_cost = excluded.true_trip_start_cost,
+      is_open_jaw = excluded.is_open_jaw, open_jaw = excluded.open_jaw
   `).run(
     c.sourceTable, c.sourceId, c.observedAt, c.asOf, c.evaluatedAt,
     c.type, c.origin, c.destination, c.route, c.departureDate, c.returnDate, c.tripType,
@@ -86,6 +105,16 @@ export function saveCandidate(db: DB, c: DealCandidate): number {
     c.score, JSON.stringify(c.scoreBreakdown), c.scoreBreakdown.weightsVersion, c.engineVersion,
     JSON.stringify(c.reasons), JSON.stringify(c.features),
     JSON.stringify(c.presetsMatched), c.threshold, c.status, nowIso(),
+    c.discoveredBy, c.discoveryRunId, c.destinationGroup, c.tripLengthNights,
+    c.absoluteTier, c.sanity, c.sanityDetail, c.verificationStatus,
+    c.requiresPositioning ? 1 : 0,
+    c.positioning ? JSON.stringify(c.positioning) : null,
+    c.positioningPenalty, c.trueTripStartCost,
+    c.isOpenJaw ? 1 : 0,
+    c.openJaw ? JSON.stringify(c.openJaw) : null,
+    // cluster_id is assigned by the clustering pass AFTER the decision exists,
+    // so an upsert must never blank an existing assignment.
+    c.clusterId ?? null,
   )
   // NOT info.lastInsertRowid: SQLite leaves last_insert_rowid() untouched when
   // the upsert takes the UPDATE branch, so it would hand back a stale id from
@@ -239,6 +268,21 @@ function rowToCandidate(r: any): StoredCandidate {
     features: parse(r.features, { travelMonth: 0, departureWeekday: 0, tripLengthNights: null, daysUntilDeparture: 0 }),
     presetsMatched: parse(r.presets_matched, []),
     threshold: r.threshold,
+    discoveredBy: r.discovered_by ?? "FIXED_OBSERVER",
+    discoveryRunId: r.discovery_run_id ?? null,
+    destinationGroup: r.destination_group ?? null,
+    tripLengthNights: r.trip_length_nights ?? null,
+    absoluteTier: r.absolute_tier ?? null,
+    sanity: r.sanity ?? "ok",
+    sanityDetail: r.sanity_detail ?? null,
+    verificationStatus: r.verification_status ?? "unverified",
+    requiresPositioning: Boolean(r.requires_positioning),
+    positioning: parse(r.positioning, null as any),
+    positioningPenalty: r.positioning_penalty ?? null,
+    trueTripStartCost: r.true_trip_start_cost ?? null,
+    isOpenJaw: Boolean(r.is_open_jaw),
+    openJaw: parse(r.open_jaw, null as any),
+    clusterId: r.cluster_id ?? null,
     status: r.status,
     engineVersion: r.engine_version,
     createdAt: r.created_at,

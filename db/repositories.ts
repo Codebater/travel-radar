@@ -17,19 +17,36 @@ import type { NormalizedAwardFlight } from "../providers/award-flights/types.js"
 
 // ─── search_requests ─────────────────────────────────────────────────────────
 
+/**
+ * Why this search happened. Known only at search time: deriving it afterwards
+ * from the route's shape would be a guess, and could never tell a sparse scan
+ * apart from a dense one on the same route.
+ */
+export interface SearchProvenance {
+  discoveryMethod?: string | null
+  discoveryRunId?: number | null
+  discoveryStage?: number | null
+}
+
 export function recordSearchRequest(
   db: DB,
   // Structurally a CashFlightQuery, but `cabin` is widened: the unified search
   // row also records award search classes ("ECON"/"PREM"/"both").
   query: Omit<CashFlightQuery, "cabin"> & { cabin: string },
-  source: "api" | "cli" | "test" | "observer" = "api",
+  source: "api" | "cli" | "test" | "observer" | "discovery" = "api",
+  provenance: SearchProvenance = {},
 ): number {
   const info = db.prepare(`
-    INSERT INTO search_requests (origin, destination, departure_date, return_date, cabin, adults, source, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO search_requests
+      (origin, destination, departure_date, return_date, cabin, adults, source, created_at,
+       discovery_method, discovery_run_id, discovery_stage)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     query.origin.toUpperCase(), query.destination.toUpperCase(), query.departureDate,
     query.returnDate || null, query.cabin, query.adults, source, nowIso(),
+    provenance.discoveryMethod ?? null,
+    provenance.discoveryRunId ?? null,
+    provenance.discoveryStage ?? null,
   )
   return Number(info.lastInsertRowid)
 }

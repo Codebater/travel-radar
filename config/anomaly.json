@@ -1,100 +1,529 @@
 {
   "description": "Shadow anomaly engine configuration. EXPERIMENTAL — this file tunes what the engine calls exceptional. It never enables notifications: alerts.enabled is honoured by nothing in Phase 5, and the engine contains no notification code path at all.",
   "updated": "2026-08-27",
-
-  "engineVersion": "shadow-1",
-  "weightsVersion": "shadow-1",
-
+  "engineVersion": "shadow-2",
+  "weightsVersion": "shadow-2",
   "candidateThreshold": 70,
   "storeBelowThreshold": true,
   "storeBelowThresholdNote": "Sub-threshold decisions are stored too (status 'below-threshold') so false NEGATIVES can be inspected during evaluation, not just false positives. Only >= threshold rows are 'candidate'.",
-
   "confidenceTiers": [
-    { "label": "INSUFFICIENT", "minSamples": 0,  "value": 0.0 },
-    { "label": "VERY_LOW",     "minSamples": 5,  "value": 0.25 },
-    { "label": "LOW",          "minSamples": 10, "value": 0.5 },
-    { "label": "MEDIUM",       "minSamples": 20, "value": 0.75 },
-    { "label": "HIGHER",       "minSamples": 50, "value": 1.0 }
+    {
+      "label": "INSUFFICIENT",
+      "minSamples": 0,
+      "value": 0.0
+    },
+    {
+      "label": "VERY_LOW",
+      "minSamples": 5,
+      "value": 0.25
+    },
+    {
+      "label": "LOW",
+      "minSamples": 10,
+      "value": 0.5
+    },
+    {
+      "label": "MEDIUM",
+      "minSamples": 20,
+      "value": 0.75
+    },
+    {
+      "label": "HIGHER",
+      "minSamples": 50,
+      "value": 1.0
+    }
   ],
   "minSamplesToEmit": 5,
-
   "baseline": {
     "lookbackDays": 365,
     "maxBaselineAgeDays": 120,
     "staleBaselineDays": 45,
-    "relaxationOrder": ["directness", "tripLength"],
+    "relaxationOrder": [
+      "directness",
+      "tripLength"
+    ],
     "relaxationNote": "Origin, destination, cabin and trip type are NEVER relaxed — economy is not comparable with business, and one-way is not comparable with return. Only the softer dimensions are dropped, in this order, when the strict sample is too thin.",
     "tripLengthBuckets": [
-      { "label": "short",   "maxNights": 7 },
-      { "label": "medium",  "maxNights": 14 },
-      { "label": "long",    "maxNights": 28 },
-      { "label": "extended", "maxNights": 3650 }
+      {
+        "label": "short",
+        "maxNights": 7
+      },
+      {
+        "label": "medium",
+        "maxNights": 14
+      },
+      {
+        "label": "long",
+        "maxNights": 28
+      },
+      {
+        "label": "extended",
+        "maxNights": 3650
+      }
     ]
   },
-
   "seasonality": {
     "enabled": false,
     "note": "Phase 5 preserves travelMonth / departureWeekday / tripLength / daysUntilDeparture in every candidate's feature set but does NOT partition baselines by them yet. Christmas Bangkok and September Bangkok currently share a baseline; the features are stored so a later phase can split them retroactively."
   },
-
   "cash": {
     "weights": {
-      "priceVsMedian": 0.35,
-      "percentile": 0.20,
-      "sampleConfidence": 0.15,
-      "providerConfidence": 0.10,
-      "absoluteSavings": 0.10,
-      "itineraryQuality": 0.10
+      "priceVsMedian": 0.24,
+      "absolutePrice": 0.18,
+      "percentile": 0.14,
+      "sampleConfidence": 0.11,
+      "providerConfidence": 0.07,
+      "absoluteSavings": 0.07,
+      "itineraryQuality": 0.07,
+      "routeDesirability": 0.06,
+      "verification": 0.06
     },
     "fullCreditPercentBelowMedian": 50,
-    "absoluteSavingsFullCredit": { "USD": 800, "EUR": 750, "CZK": 18000, "default": 800 }
+    "absoluteSavingsFullCredit": {
+      "USD": 800,
+      "EUR": 750,
+      "CZK": 18000,
+      "default": 800
+    },
+    "positioningPenaltyWeight": 0.18,
+    "weightsNote": "Score v2. Historical anomaly still leads, but absolute price now carries real weight: a route with a thin or expensive history could previously never produce a candidate however good the fare was. Positioning is applied as a PENALTY on top rather than as a component, so it can only ever reduce a score."
   },
-
   "award": {
     "weights": {
-      "pointsVsMedian": 0.25,
-      "taxes": 0.15,
-      "cpp": 0.20,
-      "percentile": 0.15,
-      "sampleConfidence": 0.10,
-      "providerConfidence": 0.10,
-      "itineraryQuality": 0.05
+      "pointsVsMedian": 0.2,
+      "cpp": 0.16,
+      "absolutePrice": 0.14,
+      "taxes": 0.12,
+      "percentile": 0.12,
+      "sampleConfidence": 0.08,
+      "providerConfidence": 0.07,
+      "routeDesirability": 0.05,
+      "itineraryQuality": 0.03,
+      "verification": 0.03
     },
     "fullCreditPercentBelowMedian": 40,
     "taxes": {
-      "lowFullCredit": { "USD": 100, "EUR": 90, "default": 100 },
-      "highZeroCredit": { "USD": 600, "EUR": 550, "default": 600 }
+      "lowFullCredit": {
+        "USD": 100,
+        "EUR": 90,
+        "default": 100
+      },
+      "highZeroCredit": {
+        "USD": 600,
+        "EUR": 550,
+        "default": 600
+      }
     },
     "cpp": {
       "zeroCreditCents": 1.0,
-      "fullCreditCentsByCabin": { "economy": 2.5, "premium_economy": 3.5, "business": 5.0, "first": 8.0 },
+      "fullCreditCentsByCabin": {
+        "economy": 2.5,
+        "premium_economy": 3.5,
+        "business": 5.0,
+        "first": 8.0
+      },
       "maxCashComparableAgeDays": 45,
       "minCashSamples": 3,
       "weakCashNote": "With no usable cash comparable the CPP component is dropped and the remaining award weights are renormalised — scoring it zero would punish an award for a gap in OUR data. A weak comparable still yields a CPP number but caps the CPP component and adds WEAK_CASH_COMPARATOR."
-    }
+    },
+    "positioningPenaltyWeight": 0.18
   },
-
-  "providerConfidenceValues": { "high": 1.0, "medium": 0.6, "low": 0.3 },
+  "providerConfidenceValues": {
+    "high": 1.0,
+    "medium": 0.6,
+    "low": 0.3
+  },
   "verificationValues": {
-    "verified": 1.0, "cross-verified": 1.0, "discovered": 0.7, "cached": 0.5
+    "verified": 1.0,
+    "cross-verified": 1.0,
+    "discovered": 0.7,
+    "cached": 0.5
   },
-
   "presets": {
     "note": "CONFIG ONLY — Phase 5 records which preset a candidate WOULD have matched. No alert is produced by any of them. Alerting is a later phase and an explicit decision.",
     "EXTREME": {
-      "cash": { "minPercentBelowMedian": 35, "minSampleConfidence": "LOW" },
-      "award": { "minPercentBelowMedian": 25, "orMinCpp": 4.0, "minSampleConfidence": "LOW" },
+      "cash": {
+        "minPercentBelowMedian": 35,
+        "minSampleConfidence": "LOW"
+      },
+      "award": {
+        "minPercentBelowMedian": 25,
+        "orMinCpp": 4.0,
+        "minSampleConfidence": "LOW"
+      },
       "minScore": 80
     },
     "WTF": {
-      "cash": { "minPercentBelowMedian": 50, "orNewObservedLow": true, "minSampleConfidence": "MEDIUM" },
-      "award": { "minPercentBelowMedian": 40, "orMinCpp": 6.0, "minSampleConfidence": "MEDIUM" },
+      "cash": {
+        "minPercentBelowMedian": 50,
+        "orNewObservedLow": true,
+        "minSampleConfidence": "MEDIUM"
+      },
+      "award": {
+        "minPercentBelowMedian": 40,
+        "orMinCpp": 6.0,
+        "minSampleConfidence": "MEDIUM"
+      },
       "minScore": 90
     }
   },
-
   "alerts": {
     "enabled": false,
     "note": "Hard-off for Phase 5. There is no notification transport in this codebase — no Telegram, no ntfy, no push, no email. Setting this true does nothing today; enabling alerts is a deliberate future change reviewed on its own."
-  }
+  },
+  "absolute": {
+    "note": "Historical anomaly alone is not enough: a route this radar has only ever seen expensive would never produce a candidate, however good the fare is in absolute terms. These are PRICE FLOORS BY JUDGEMENT, not measured facts - they are one operator's sense of what a good long-haul fare looks like from Central Europe, and they belong in config precisely because they are opinions.",
+    "cash": {
+      "thailand": {
+        "economy": {
+          "interesting": {
+            "EUR": 450,
+            "USD": 490
+          },
+          "extreme": {
+            "EUR": 380,
+            "USD": 415
+          },
+          "wtf": {
+            "EUR": 300,
+            "USD": 325
+          }
+        },
+        "business": {
+          "interesting": {
+            "EUR": 1500,
+            "USD": 1630
+          },
+          "extreme": {
+            "EUR": 1200,
+            "USD": 1300
+          },
+          "wtf": {
+            "EUR": 1000,
+            "USD": 1090
+          }
+        }
+      },
+      "mexico": {
+        "economy": {
+          "interesting": {
+            "EUR": 500,
+            "USD": 545
+          },
+          "extreme": {
+            "EUR": 420,
+            "USD": 455
+          },
+          "wtf": {
+            "EUR": 340,
+            "USD": 370
+          }
+        },
+        "business": {
+          "interesting": {
+            "EUR": 1500,
+            "USD": 1630
+          },
+          "extreme": {
+            "EUR": 1200,
+            "USD": 1300
+          },
+          "wtf": {
+            "EUR": 1000,
+            "USD": 1090
+          }
+        }
+      },
+      "wildcard": {
+        "economy": {
+          "interesting": {
+            "EUR": 500,
+            "USD": 545
+          },
+          "extreme": {
+            "EUR": 400,
+            "USD": 435
+          },
+          "wtf": {
+            "EUR": 320,
+            "USD": 350
+          }
+        },
+        "business": {
+          "interesting": {
+            "EUR": 1600,
+            "USD": 1740
+          },
+          "extreme": {
+            "EUR": 1300,
+            "USD": 1415
+          },
+          "wtf": {
+            "EUR": 1050,
+            "USD": 1145
+          }
+        }
+      },
+      "citybreak": {
+        "economy": {
+          "interesting": {
+            "EUR": 250,
+            "USD": 272
+          },
+          "extreme": {
+            "EUR": 190,
+            "USD": 207
+          },
+          "wtf": {
+            "EUR": 140,
+            "USD": 152
+          }
+        },
+        "business": {
+          "interesting": {
+            "EUR": 900,
+            "USD": 980
+          },
+          "extreme": {
+            "EUR": 700,
+            "USD": 762
+          },
+          "wtf": {
+            "EUR": 550,
+            "USD": 600
+          }
+        }
+      },
+      "default": {
+        "economy": {
+          "interesting": {
+            "EUR": 500,
+            "USD": 545
+          },
+          "extreme": {
+            "EUR": 400,
+            "USD": 435
+          },
+          "wtf": {
+            "EUR": 320,
+            "USD": 350
+          }
+        },
+        "business": {
+          "interesting": {
+            "EUR": 1600,
+            "USD": 1740
+          },
+          "extreme": {
+            "EUR": 1300,
+            "USD": 1415
+          },
+          "wtf": {
+            "EUR": 1050,
+            "USD": 1145
+          }
+        }
+      }
+    },
+    "award": {
+      "note": "One mileage threshold across every program would be meaningless: 60k is a poor Aeroplan economy redemption and an excellent Flying Blue business one. Thresholds are per PROGRAM and cabin, in points, with a separate surcharge ceiling because a cheap award with a 600 EUR fuel surcharge is not cheap.",
+      "AEROPLAN": {
+        "economy": {
+          "interesting": 45000,
+          "extreme": 35000,
+          "wtf": 25000
+        },
+        "business": {
+          "interesting": 100000,
+          "extreme": 80000,
+          "wtf": 60000
+        }
+      },
+      "FLYING_BLUE": {
+        "economy": {
+          "interesting": 35000,
+          "extreme": 25000,
+          "wtf": 20000
+        },
+        "business": {
+          "interesting": 85000,
+          "extreme": 65000,
+          "wtf": 50000
+        }
+      },
+      "BRITISH_AIRWAYS": {
+        "economy": {
+          "interesting": 35000,
+          "extreme": 28000,
+          "wtf": 22000
+        },
+        "business": {
+          "interesting": 90000,
+          "extreme": 70000,
+          "wtf": 55000
+        }
+      },
+      "IBERIA": {
+        "economy": {
+          "interesting": 34000,
+          "extreme": 27000,
+          "wtf": 21000
+        },
+        "business": {
+          "interesting": 85000,
+          "extreme": 68000,
+          "wtf": 52000
+        }
+      },
+      "ETIHAD": {
+        "economy": {
+          "interesting": 40000,
+          "extreme": 30000,
+          "wtf": 22000
+        },
+        "business": {
+          "interesting": 95000,
+          "extreme": 75000,
+          "wtf": 55000
+        }
+      },
+      "ALASKA": {
+        "economy": {
+          "interesting": 35000,
+          "extreme": 27500,
+          "wtf": 22500
+        },
+        "business": {
+          "interesting": 85000,
+          "extreme": 70000,
+          "wtf": 55000
+        }
+      },
+      "default": {
+        "economy": {
+          "interesting": 40000,
+          "extreme": 32000,
+          "wtf": 25000
+        },
+        "business": {
+          "interesting": 100000,
+          "extreme": 80000,
+          "wtf": 62000
+        }
+      },
+      "maxSurcharge": {
+        "interesting": {
+          "EUR": 400,
+          "USD": 435
+        },
+        "extreme": {
+          "EUR": 250,
+          "USD": 272
+        },
+        "wtf": {
+          "EUR": 150,
+          "USD": 163
+        }
+      }
+    }
+  },
+  "sanity": {
+    "note": "A price too good to be true usually is: a parsing error, a mis-mapped cabin, or a fare for a different journey. Phase 5 showed how convincing a fabricated candidate looks, so implausible values are FLAGGED AND STORED with a diagnostic reason rather than discarded - a silent drop hides a provider that has started returning nonsense. CALIBRATION: these floors must catch the IMPOSSIBLE, not the merely remarkable. The whole point of the radar is finding fares nobody expects, so a floor set at 'a really good business fare' would reject exactly what it exists to find. A 600 EUR business fare to Bangkok is a legendary mistake fare; a 12 EUR one is a bug. The floors sit between those.",
+    "cash": {
+      "minPlausible": {
+        "economy": {
+          "longHaul": {
+            "EUR": 90,
+            "USD": 98
+          },
+          "default": {
+            "EUR": 15,
+            "USD": 17
+          }
+        },
+        "premium_economy": {
+          "longHaul": {
+            "EUR": 180,
+            "USD": 196
+          },
+          "default": {
+            "EUR": 40,
+            "USD": 44
+          }
+        },
+        "business": {
+          "longHaul": {
+            "EUR": 300,
+            "USD": 327
+          },
+          "default": {
+            "EUR": 90,
+            "USD": 98
+          }
+        },
+        "first": {
+          "longHaul": {
+            "EUR": 500,
+            "USD": 545
+          },
+          "default": {
+            "EUR": 150,
+            "USD": 163
+          }
+        }
+      },
+      "maxPlausible": {
+        "EUR": 25000,
+        "USD": 27000
+      }
+    },
+    "award": {
+      "minPoints": 3000,
+      "maxPoints": 900000,
+      "maxSurcharge": {
+        "EUR": 2500,
+        "USD": 2700
+      }
+    },
+    "itinerary": {
+      "maxStops": 4,
+      "minDurationMinutes": 45,
+      "maxDurationMinutes": 3000,
+      "requireDepartureDate": true
+    },
+    "longHaulGroups": [
+      "thailand",
+      "mexico",
+      "wildcard"
+    ]
+  },
+  "routeDesirability": {
+    "note": "How much I actually want to go there. Keeps a genuinely cheap fare to a place I have no interest in from outranking a merely good one to a place I do. Defaults come from the destination group in config/discovery.json; per-airport entries override.",
+    "byAirport": {
+      "BKK": 1.0,
+      "HKT": 0.95,
+      "CUN": 1.0,
+      "MEX": 0.9,
+      "MLE": 1.0,
+      "DPS": 0.95,
+      "SEZ": 0.9,
+      "ZNZ": 0.9,
+      "NRT": 0.9,
+      "HND": 0.9,
+      "SIN": 0.85,
+      "DXB": 0.7,
+      "DOH": 0.65,
+      "MRU": 0.85
+    },
+    "default": 0.75
+  },
+  "verificationStatusValues": {
+    "note": "Score component for §23 'verification status' - distinct from provider confidence, which is about the SOURCE rather than about this particular price having been confirmed.",
+    "verified": 1.0,
+    "cross-verified": 1.0,
+    "unverified": 0.55,
+    "suspicious": 0.0
+  },
+  "noHistoryScoreCap": 85,
+  "noHistoryScoreCapNote": "Ceiling for a decision that rests on absolute price alone. Dropping the four history components concentrates the whole weight on the ones that remain, so an unevidenced fare could otherwise outrank one backed by sixty observations saying the same thing. It can still reach the feed - that is the point of the absolute rules - but evidence outranks assertion."
 }

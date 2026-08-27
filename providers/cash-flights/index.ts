@@ -118,7 +118,7 @@ export interface CashSearchOptions extends SearchOptions {
   /** Ask the metered provider to confirm, budget permitting. */
   verify?: boolean
   /** Where the request came from — recorded against search_requests. */
-  source?: "api" | "cli" | "test" | "observer"
+  source?: "api" | "cli" | "test" | "observer" | "discovery"
   /**
    * Join an existing unified search instead of recording a new one. One user
    * search = one search_requests row; cash, award and hidden-city observations

@@ -28,6 +28,11 @@ import { observerHealth } from "./observer/health.js"
 import { listCandidates, getCandidate, recordFeedback } from "./anomaly/store.js"
 import { buildReport } from "./anomaly/report.js"
 import { loadAnomalyConfig } from "./anomaly/config.js"
+import { buildFeed, dealDetail, takeMeAnywhere } from "./anomaly/feed.js"
+import { listClusters } from "./anomaly/clustering.js"
+import { listDiscoveryJobs, listDiscoveryRuns } from "./discovery/store.js"
+import { projectDiscoveryBudget } from "./discovery/budget.js"
+import { loadDiscoveryConfig } from "./discovery/config.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
@@ -212,6 +217,116 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
+  // Route: /api/deals — §29 the extreme deal feed.
+  //
+  // Read-only over decisions that already exist: it runs no search, spends no
+  // budget, and cannot trigger one. Everything it shows can be traced to a
+  // stored score breakdown.
+  if (url.pathname === "/api/deals") {
+    try {
+      const limitRaw = Number(url.searchParams.get("limit") ?? 12)
+      const minRaw = url.searchParams.get("min")
+      const feed = buildFeed(getDb(), {
+        limitPerSection: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 12,
+        minScore: minRaw !== null && Number.isFinite(Number(minRaw)) ? Number(minRaw) : undefined,
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(feed, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/deals/detail — §31 everything behind one card.
+  if (url.pathname === "/api/deals/detail") {
+    try {
+      const id = Number(url.searchParams.get("id"))
+      if (!Number.isInteger(id) || id <= 0) throw new BadRequest("id must be a positive integer")
+      const detail = dealDetail(getDb(), id)
+      if (!detail) {
+        res.writeHead(404, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: `no candidate ${id}` }))
+        return
+      }
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(detail, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/deals/anywhere — §11/§32 TAKE ME ANYWHERE.
+  //
+  // Deliberately answered from STORED discovery data. Fanning out live across
+  // every wildcard destination on request is the brute force the engine exists
+  // to avoid, and it would put an unbounded provider bill behind one HTTP GET.
+  if (url.pathname === "/api/deals/anywhere") {
+    try {
+      const discoveryConfig = loadDiscoveryConfig()
+      const originsRaw = url.searchParams.get("origins")
+      const origins = originsRaw
+        ? originsRaw.split(",").map(o => iata(o.trim(), "origins"))
+        : discoveryConfig.homeRegion.primary
+
+      const months = Number(url.searchParams.get("months") ?? 6)
+      const budgetRaw = url.searchParams.get("budget")
+      const cabin = url.searchParams.get("cabin")
+      const tripLengthRaw = url.searchParams.get("tripLength")
+      const minScoreRaw = url.searchParams.get("minScore")
+      const limitRaw = Number(url.searchParams.get("limit") ?? 20)
+
+      if (cabin && !["economy", "premium_economy", "business", "first"].includes(cabin)) {
+        throw new BadRequest("cabin must be economy, premium_economy, business or first")
+      }
+
+      const result = takeMeAnywhere(getDb(), {
+        origins,
+        withinMonths: Number.isFinite(months) ? Math.min(Math.max(months, 1), 12) : 6,
+        maxPrice: budgetRaw !== null && Number.isFinite(Number(budgetRaw)) ? Number(budgetRaw) : null,
+        currency: process.env.CASH_CURRENCY || "USD",
+        cabin: cabin || null,
+        tripLengthNights: tripLengthRaw !== null && Number.isFinite(Number(tripLengthRaw))
+          ? Number(tripLengthRaw) : null,
+        minScore: minScoreRaw !== null && Number.isFinite(Number(minScoreRaw))
+          ? Number(minScoreRaw) : loadAnomalyConfig().candidateThreshold,
+        limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20,
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(result, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/discovery/status — read-only discovery state.
+  // Control stays CLI-only, exactly as the observer's does: nothing on the
+  // network can start a cycle that spends provider budget.
+  if (url.pathname === "/api/discovery/status") {
+    try {
+      const db = getDb()
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        checkedAt: new Date().toISOString(),
+        jobs: listDiscoveryJobs(db),
+        runs: listDiscoveryRuns(db, { limit: 20 }),
+        projection: projectDiscoveryBudget(db),
+        clusters: listClusters(db, { minScore: 0, limit: 40 }),
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
   // Route: /api/anomaly/report — §X false-positive analysis.
   if (url.pathname === "/api/anomaly/report") {
     try {
@@ -267,8 +382,10 @@ const server = http.createServer(async (req, res) => {
         const id = Number(payload.candidateId)
         const verdict = String(payload.verdict || "")
         if (!Number.isInteger(id) || id <= 0) throw new BadRequest("candidateId must be a positive integer")
-        if (!["GOOD_DEAL", "NORMAL", "BAD_SIGNAL"].includes(verdict)) {
-          throw new BadRequest("verdict must be GOOD_DEAL, NORMAL or BAD_SIGNAL")
+        // §33 WOULD_BOOK is the verdict that matters most: "good deal" is an
+        // opinion about the algorithm, "would book" is an opinion about the trip.
+        if (!["GOOD_DEAL", "NORMAL", "BAD_SIGNAL", "WOULD_BOOK"].includes(verdict)) {
+          throw new BadRequest("verdict must be GOOD_DEAL, NORMAL, BAD_SIGNAL or WOULD_BOOK")
         }
         const note = typeof payload.note === "string" ? payload.note.slice(0, 500) : null
         recordFeedback(getDb(), id, verdict as any, { note, source: "ui" })
