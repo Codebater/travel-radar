@@ -18,9 +18,9 @@
 
 import fs from "fs"
 import path from "path"
-import os from "os"
+import { execFileSync } from "child_process"
 import { fileURLToPath } from "url"
-import { execSync } from "child_process"
+import os from "os"
 import { searchRoame, roameFaresToUnified } from "./roame-scraper.js"
 import type { RoameFare, UnifiedFlightResult } from "./roame-scraper.js"
 import { searchATF, atfToUnified, ATF_AIRLINE_META } from "./atf-scraper.js"
@@ -290,12 +290,35 @@ function crossReferenceATFAndRoame(
   return merged
 }
 
+// ─── Python Interpreter Resolution ────────────────────────────────────────
+
+/**
+ * Resolve the Python interpreter for the helper scripts.
+ * Prefers the project venv (POSIX and Windows layouts), then falls back to
+ * whichever of python3/python actually exists on PATH.
+ */
+function resolvePython(): string {
+  const candidates = [
+    path.join(ROOT, ".venv", "bin", "python3"),
+    path.join(ROOT, ".venv", "Scripts", "python.exe"),
+  ]
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c
+  }
+  for (const bin of process.platform === "win32" ? ["python", "python3"] : ["python3", "python"]) {
+    try {
+      execFileSync(bin, ["--version"], { stdio: "ignore", timeout: 10000 })
+      return bin
+    } catch { /* try next */ }
+  }
+  return process.platform === "win32" ? "python" : "python3"
+}
+
 // ─── fast_flights (Primary Google Flights Source) ─────────────────────────
 
 async function searchFastFlights(config: SearchConfig): Promise<{ flights: UnifiedFlightResult[], completion: number }> {
   const scriptPath = path.join(ROOT, "scripts", "search-google-flights.py")
-  const venvPython = path.join(ROOT, ".venv", "bin", "python3")
-  const pythonBin = fs.existsSync(venvPython) ? venvPython : "python3"
+  const pythonBin = resolvePython()
   
   if (!fs.existsSync(scriptPath)) {
     console.warn("⚠️ fast_flights script not found, falling back to SerpAPI")
@@ -308,10 +331,12 @@ async function searchFastFlights(config: SearchConfig): Promise<{ flights: Unifi
 
   for (const cabin of classesToSearch) {
     try {
-      let cmd = `"${pythonBin}" "${scriptPath}" ${config.origin} ${config.destination} ${config.departureDate} --class ${cabin}`
-      if (config.returnDate) cmd += ` --return ${config.returnDate}`
-      
-      const output = execSync(cmd, {
+      // execFileSync (not execSync): arguments are passed as an argv array so
+      // route/date values can never be interpreted as shell syntax.
+      const argv = [scriptPath, config.origin, config.destination, config.departureDate, "--class", cabin]
+      if (config.returnDate) argv.push("--return", config.returnDate)
+
+      const output = execFileSync(pythonBin, argv, {
         timeout: 45000,
         env: { ...process.env },
         encoding: "utf-8",
@@ -368,9 +393,27 @@ const USAGE_FILE = path.join(ROOT, "serpapi-usage.json")
 const MONTHLY_LIMIT = 95  // hard cap (5 buffer under 100 free tier)
 const WARN_AT = 80
 
+/**
+ * Read the usage counter. A corrupt counter file is reported loudly instead of
+ * silently resetting to zero, which would let a run blow past the free tier.
+ */
+function readSerpApiUsage(): { month: string; searches: number; limit: number; warn_at: number; last_reset: string } {
+  const fresh = { month: "", searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: "" }
+  if (!fs.existsSync(USAGE_FILE)) return fresh
+  try {
+    return JSON.parse(fs.readFileSync(USAGE_FILE, "utf-8"))
+  } catch (err) {
+    console.warn(
+      `⚠️ ${USAGE_FILE} is unreadable (${(err as Error).message}). ` +
+      `Treating this month as ${MONTHLY_LIMIT}/${MONTHLY_LIMIT} used so the free tier is not exceeded. ` +
+      `Delete the file to reset the counter.`
+    )
+    return { ...fresh, month: new Date().toISOString().slice(0, 7), searches: MONTHLY_LIMIT }
+  }
+}
+
 function checkSerpApiUsage(): { allowed: boolean; used: number } {
-  let usage = { month: "", searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: "" }
-  try { usage = JSON.parse(fs.readFileSync(USAGE_FILE, "utf-8")) } catch {}
+  let usage = readSerpApiUsage()
   
   const currentMonth = new Date().toISOString().slice(0, 7)
   if (usage.month !== currentMonth) {
@@ -389,8 +432,7 @@ function checkSerpApiUsage(): { allowed: boolean; used: number } {
 }
 
 function incrementSerpApiUsage(): void {
-  let usage = { month: "", searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: "" }
-  try { usage = JSON.parse(fs.readFileSync(USAGE_FILE, "utf-8")) } catch {}
+  let usage = readSerpApiUsage()
   const currentMonth = new Date().toISOString().slice(0, 7)
   if (usage.month !== currentMonth) {
     usage = { month: currentMonth, searches: 0, limit: MONTHLY_LIMIT, warn_at: WARN_AT, last_reset: new Date().toISOString().slice(0, 10) }
@@ -446,7 +488,7 @@ async function searchSerpApiGoogle(config: SearchConfig): Promise<{ flights: Uni
 
           const firstLeg = legs[0]
           const lastLeg = legs[legs.length - 1]
-          const airlines = [...new Set(legs.map((l: any) => l.airline).filter(Boolean))]
+          const airlines = [...new Set(legs.map((l: any) => l.airline).filter(Boolean))] as string[]
           const flightNums = legs.map((l: any) => l.flight_number).filter(Boolean)
           const layovers = itinerary.layovers || []
           const airports = [
@@ -511,8 +553,9 @@ async function searchHiddenCity(config: SearchConfig): Promise<{ flights: Unifie
 
   try {
     // Use max-beyond 5 to conserve SerpAPI budget (1 direct + 5 beyond = 6 calls max)
-    const cmd = `python3 "${scriptPath}" ${config.origin} ${config.destination} ${config.departureDate} --max-beyond 5 --min-savings 30`
-    const output = execSync(cmd, {
+    const argv = [scriptPath, config.origin, config.destination, config.departureDate,
+                  "--max-beyond", "5", "--min-savings", "30"]
+    const output = execFileSync(resolvePython(), argv, {
       timeout: 120000,
       env: { ...process.env },
       encoding: "utf-8",
