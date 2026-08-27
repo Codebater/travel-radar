@@ -15,7 +15,7 @@
     "atf": "tsx atf-scraper.ts",
     "build": "tsc",
     "typecheck": "tsc",
-    "lint": "eslint search.ts serve.ts roame-scraper.ts atf-scraper.ts value-engine.ts sweet-spots.ts transfer-partners.ts db providers cache tests --ext .ts",
+    "lint": "eslint search.ts serve.ts roame-scraper.ts atf-scraper.ts value-engine.ts value-compare.ts sweet-spots.ts transfer-partners.ts db providers cache tests --ext .ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:scrapers": "vitest run --config awardwiz-scrapers/vite.config.ts awardwiz-scrapers/scrapers.test.ts",

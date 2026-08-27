@@ -259,6 +259,57 @@ SERPAPI verification €3310 (9 itineraries, 890ms)
 SERPAPI SKIPPED budget reserve — SerpAPI automation budget exhausted (80/80, 10 calls reserved for manual verification)
 ```
 
+### Award providers (Phase 3)
+
+Award search runs behind `providers/award-flights/` — the same contract idea as
+cash, with three award-specific rules:
+
+- **Not a fallback chain.** Roame and ATF see different inventory, so both run
+  by default. Disable one independently with `ENABLE_ROAME=false` /
+  `ENABLE_ATF=false`.
+- **Per-provider cache** (`AWARD_CACHE_TTL_HOURS`, default 2h). A fresh Roame
+  payload is served from cache even while ATF's expired entry is re-fetched.
+  Within TTL a repeated identical award search queries neither provider and
+  spends no quota. Award cache keys look like
+  `PRG:BKK:2026-11-10:oneway:PREM:1:f0:roame`.
+- **PROGRAM ≠ AIRLINE.** One Austrian-operated flight priced by Aeroplan,
+  LifeMiles and Miles & More is three redemption options sharing one
+  `itineraryHash` — never collapsed. Only identical (itinerary × program)
+  entries dedupe, keeping the cheapest.
+
+Verification levels: `cached` (replayed), `discovered` (one provider),
+`cross-verified` (two independent providers reported the same program + cabin +
+date — one provider repeating itself never counts).
+
+`ATF` costs **5 quota calls per search** (one per airline) from ~150/month;
+every attempt lands in `provider_usage`, and the quota ATF itself reports is
+stored separately from the local estimate.
+
+Which loyalty programs each provider can search is recorded — with evidence and
+audit dates, never alliance-membership guesses — in
+`providers/award-flights/coverage.json`, also served by `/api/providers`.
+
+### Loyalty balances
+
+Balances come from AwardWallet through `providers/balances/`, cached as
+append-only `balance_snapshots` batches for `LOYALTY_BALANCE_TTL_HOURS`
+(default 12h). A search never refetches balances while a snapshot is fresh; a
+manual refresh (`--refresh` / "Refresh live price") does. Balances are
+sensitive: they live only in the git-ignored database, are never logged
+individually (counts and ages only), and tests use synthetic values.
+
+### Hidden city (Phase 3 fix)
+
+The engine now lives in `providers/cash-flights/hidden-city.ts` and prices
+everything through `searchCashFlights` — cash cache, SerpAPI budget guard,
+reserve and accounting all apply, and a repeated sweep inside the TTL costs
+zero calls. The old `scripts/search-hidden-city.py` called SerpAPI directly
+with its own counter; it is deprecated, no longer wired into the application,
+and prints a warning if run by hand. Hidden-city results carry
+`hiddenCity: true`, a risk level and explicit warnings (baggage, cancellation
+rebooking, contract-of-carriage) — they are informational comparisons, not
+ordinary tickets.
+
 ### Testing a provider
 
 ```bash
@@ -330,6 +381,9 @@ npm run db:status
 | `search_cache` | recent provider payloads keyed by cache key | expires |
 | `provider_usage` | attempted / succeeded / failed calls per provider per month | permanent |
 | `provider_health` | last status check per provider | overwritten |
+| `award_prices` | one row per (itinerary × program × provider × fetch) — "points observed by this radar" | **append-only** |
+| `balance_snapshots` | loyalty balance batches (sensitive, local only) | append-only |
+| `search_results` | full result payload per search — the dashboard's state | one per search |
 | `schema_migrations` | which migrations have run | permanent |
 
 Back it up by copying `travel-radar.db` **together with** its `-wal` and `-shm`
@@ -344,9 +398,11 @@ npm run providers
 npm run history -- PRG BKK
 ```
 
-`history` reports observation count, min, max, median, average and latest per
-currency. Currencies are never blended — a EUR observation and a USD one are
-reported separately, because no FX conversion exists yet.
+`history` reports cash stats (count/min/median/average/max/latest per currency)
+and, since Phase 3, award stats per loyalty program and cabin — observation
+count, min/median/average/max/latest points and lowest observed taxes. These
+are **points observed by this radar**, not market-wide history. Currencies are
+never blended, and neither are programs.
 
 Raw SQL works too:
 
@@ -375,14 +431,17 @@ copy you still have.
 | File | Status |
 |------|--------|
 | `serpapi-usage.json` | **superseded** by `provider_usage`; nothing reads it any more |
-| `results.json` | still the dashboard's load-time source; the database is now the source of truth for persistence |
+| `results.json` | **retired as state** in Phase 3 — debug export only; dashboard loads from `/api/results/latest` |
 | `results-return.json` | intermediate for round-trip searches |
 | `scripts/search-google-flights.py` | **superseded** by `scripts/google-flights.py` (fast-flights 3.x) |
+| `scripts/search-hidden-city.py` | **superseded** in Phase 3 by `providers/cash-flights/hidden-city.ts`; deprecated, warns when run |
 | `load-real-data.js` | dead since Phase 1 — nothing imports it |
 | `cli.ts` | cannot start; imports a git-ignored directory |
 
-`results.json` is deliberately still written, so nothing that depends on the
-existing workflow breaks. Retiring it is a later phase, not this one.
+Since Phase 3 the dashboard loads its state from **`/api/results/latest`**,
+backed by the `search_results` table — the app runs with no `results.json` on
+disk at all. The file is still written after each search as a debugging export,
+and remains the fallback for the server-down / file:// case.
 
 ---
 
