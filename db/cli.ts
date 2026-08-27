@@ -10,6 +10,7 @@
  *   npx tsx db/cli.ts history FROM TO    observed price stats for a route
  */
 
+import "../load-env.js"
 import { getDb, migrate, DEFAULT_DB_PATH, currentPeriod } from "./index.js"
 import { allUsage, clearCache, pruneCache, priceHistory, awardPriceHistory } from "./repositories.js"
 import { providerHealth } from "../providers/cash-flights/index.js"

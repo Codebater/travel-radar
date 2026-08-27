@@ -11,6 +11,7 @@
  *   npx tsx observer/cli.ts enable <name> / disable <name>
  */
 
+import "../load-env.js"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"

@@ -11,6 +11,7 @@
  * Usage: npx tsx serve.ts [--port 8888]
  */
 
+import "./load-env.js"
 import http from "http"
 import fs from "fs"
 import path from "path"

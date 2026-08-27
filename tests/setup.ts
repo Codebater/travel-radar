@@ -16,10 +16,12 @@ process.env.DATABASE_PATH = path.join(
   os.tmpdir(), `travel-radar-test-${process.pid}.db`,
 )
 
-// Credentials are removed rather than faked: a fake key would still produce a
-// real outbound request.
-delete process.env.SERP_API_KEY
-delete process.env.ATF_API_KEY
+// Credentials are set to EMPTY, not deleted: the .env loader honours a
+// defined-empty value as "deliberately off", whereas a deleted variable would
+// be silently refilled from the developer's real .env the moment any module
+// imports load-env — and a test could then bill a real API call.
+process.env.SERP_API_KEY = ""
+process.env.ATF_API_KEY = ""
 
 process.env.SERPAPI_MONTHLY_BUDGET ??= "90"
 process.env.SERPAPI_RESERVE_CALLS ??= "10"

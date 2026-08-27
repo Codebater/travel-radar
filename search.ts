@@ -16,6 +16,7 @@
  *   npx tsx search.ts --from LAX --to DXB --date 2026-04-28 --return 2026-05-04 --class both
  */
 
+import "./load-env.js"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -31,26 +32,8 @@ import { buildRedemptionComparisons, type RedemptionComparison } from "./value-c
 import { getDb } from "./db/index.js"
 import { recordSearchRequest, saveSearchResult } from "./db/repositories.js"
 
-// ─── Load .env file ──────────────────────────────────────────────────────────
+// .env is loaded by the shared side-effect module so every entry point sees it.
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
-const envPath = path.join(ROOT, ".env")
-if (fs.existsSync(envPath)) {
-  const envContent = fs.readFileSync(envPath, "utf-8")
-  for (const line of envContent.split("\n")) {
-    const trimmed = line.trim()
-    if (!trimmed || trimmed.startsWith("#")) continue
-    const eqIdx = trimmed.indexOf("=")
-    if (eqIdx > 0) {
-      const key = trimmed.slice(0, eqIdx).trim()
-      const val = trimmed.slice(eqIdx + 1).trim()
-      // The real environment always wins, including when it deliberately sets a
-      // variable to empty. `SERP_API_KEY=` in the environment means "do not use
-      // SerpAPI"; treating that as unset would let .env silently switch a paid
-      // provider back on.
-      if (process.env[key] === undefined) process.env[key] = val
-    }
-  }
-}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
