@@ -39,6 +39,7 @@ tailwind.config = { theme: { extend: { colors: {
     </div>
     <div class="flex items-center gap-2">
       <span class="badge badge-yellow font-bold tracking-wider" style="font-size:11px;padding:.3rem .6rem">EXPERIMENTAL — NO ALERTS</span>
+      <a href="/alerts.html" class="text-sm text-accent hover:underline">Alerts →</a>
       <a href="/observer.html" class="text-sm text-accent hover:underline">Observer →</a>
       <a href="/" class="text-sm text-accent hover:underline">Search →</a>
     </div>
@@ -152,6 +153,15 @@ function badges(d) {
   }
   if (d.requiresPositioning) out.push('<span class="badge badge-yellow">positioning</span>');
   if (d.isOpenJaw) out.push('<span class="badge badge-blue">open jaw</span>');
+  // §29 would this have interrupted me, and if not, why not? Shown on the card
+  // rather than only in the alerts page, because "why was I not told about
+  // this?" is asked while looking at the deal.
+  if (d.notifyVerdict) {
+    const v = d.notifyVerdict;
+    if (v.state === 'sent') out.push('<span class="badge badge-green" title="a notification was sent for this">NOTIFIED</span>');
+    else if (v.state === 'would-notify') out.push('<span class="badge badge-green">WOULD NOTIFY</span>');
+    else out.push(`<span class="badge badge-grey" title="${esc(v.detail || '')}">SUPPRESSED ${esc(v.blocker || '')}</span>`);
+  }
   if (d.sampleSize === 0) {
     out.push('<span class="badge badge-yellow">price only</span>');
   } else if (['INSUFFICIENT', 'VERY_LOW', 'LOW'].includes(d.baselineConfidence)) {

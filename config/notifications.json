@@ -1,0 +1,131 @@
+{
+  "description": "Phase 7: when the radar is allowed to interrupt me. POLICY ONLY - the ntfy server, topic and token live in .env and must never appear in this file, in the API, in the UI, in a log line or in a database payload. Every number here is deliberately restrictive: there is no WOULD_BOOK feedback yet, so there is nothing to calibrate against, and the cost of a false alert is that I stop reading them.",
+  "updated": "2026-08-28",
+  "enabled": false,
+  "enabledNote": "The master switch. Off means the whole pipeline still runs, still evaluates, still records what it WOULD have sent - it just never delivers. Turned on only after a dry run has been read (§43).",
+  "channel": "ntfy",
+  "threshold": 90,
+  "thresholdNote": "The shadow candidate threshold stays 70; this is a second, much higher bar for interrupting a person. 90 is a guess, and an honest one: with zero WOULD_BOOK feedback there is nothing to infer an optimum from, so the starting point should be a number that is obviously too strict rather than one that is plausibly too loose. Raising it later is a config edit; recovering a reader's attention is not.",
+  "evidence": {
+    "note": "§3 a score alone never notifies. The score says 'this looks exceptional'; the evidence policy asks 'on what basis?'. One of these must hold.",
+    "minBaselineConfidence": "MEDIUM",
+    "acceptVerified": true,
+    "acceptCrossVerified": true,
+    "absoluteException": {
+      "note": "§4 the low-history exception. A wildcard destination has no history by definition, so a genuinely extraordinary fare there would otherwise be permanently silent. Allowed only at the WTF tier - the tier that means 'this should not be possible' - and only from a provider whose numbers are worth acting on. Always labelled LOW BASELINE CONFIDENCE so the message never implies statistical weight it does not have.",
+      "enabled": true,
+      "minTier": "wtf",
+      "minProviderConfidence": "medium",
+      "label": "LOW BASELINE CONFIDENCE",
+      "minScore": 85,
+      "minScoreNote": "config/anomaly.json noHistoryScoreCap is 85, and it caps EVERY zero-history candidate at exactly 85.0 - which is what this exception exists for. Against a threshold of 90 the exception would therefore be unreachable by construction. Giving it its own, lower bar keeps scoring untouched; raising the cap instead would re-score all 4,928 stored decisions and change the feed, the clustering seeds and every cluster key, to fix a notification policy problem."
+    }
+  },
+  "freshness": {
+    "note": "§35 a candidate row outlives the observation behind it - open-jaw pairs in particular persist after their legs age out of the discovery window. The alert evaluator therefore re-checks the AGE OF THE UNDERLYING OBSERVATION rather than trusting that a stored row is current. A price nobody has seen for three days is not something to wake somebody for.",
+    "maxObservationAgeHours": 72,
+    "maxOpenJawLegAgeHours": 72,
+    "maxDepartureLeadDays": 400,
+    "minDepartureLeadDays": 3,
+    "maxComparatorAgeHours": 72
+  },
+  "openJaw": {
+    "note": "§6 an open jaw is structurally interesting almost by definition, and structurally interesting is not a reason to interrupt anybody. It has to actually be cheaper - after the transfers are paid - than the ordinary round trip it competes with.",
+    "minNetSavingPercent": 12,
+    "minNetSaving": {
+      "EUR": 150,
+      "USD": 165
+    },
+    "maxFriction": 0.5,
+    "allowWithoutComparator": true,
+    "allowWithoutComparatorNote": "Only when the absolute total clears the WTF tier on its own. Without a comparator there is no saving to state, so absolute price is the only honest ground to stand on."
+  },
+  "positioning": {
+    "note": "§7 a cheaper long-haul ticket is not a cheaper trip. The saving has to survive the positioning fare, the hotel where one is required, the transfer, and the inconvenience.",
+    "minSavingPercent": 15,
+    "minSaving": {
+      "EUR": 150,
+      "USD": 165
+    },
+    "maxPenalty": 0.5,
+    "requireHomeComparator": true
+  },
+  "quietHours": {
+    "note": "§17 Prague time, because that is where the phone is. A queued alert is not a cancelled one: it is delivered as part of the morning digest (§19).",
+    "timezone": "Europe/Prague",
+    "start": "23:00",
+    "end": "08:00",
+    "digestAtEnd": true,
+    "maxCatchUpDays": 3,
+    "catchUpNote": "A machine asleep for three nights wakes with three due slots. They are combined into ONE digest, because three digests landing at once is exactly the burst the rate limits exist to prevent."
+  },
+  "extremeBypass": {
+    "note": "§18 the only thing allowed through quiet hours. Deliberately almost unreachable: 97 is above anything this engine has ever scored, and it must ALSO be independently corroborated. If this fires and the deal is ordinary, the setting was wrong, not unlucky.",
+    "enabled": true,
+    "minScore": 97,
+    "requireOneOf": [
+      "verified",
+      "cross-verified",
+      "absolute-wtf",
+      "major-improvement"
+    ]
+  },
+  "rateLimits": {
+    "note": "§20 intentionally restrictive. Two interruptions a day is the most a person will tolerate before they start ignoring the third, and a cooldown per cluster stops one volatile route from owning the whole allowance.",
+    "maxImmediatePerDay": 2,
+    "maxDigestsPerDay": 1,
+    "clusterCooldownHours": 24,
+    "maxDigestItems": 5
+  },
+  "reAlert": {
+    "note": "§15/§16 the same opportunity may only speak twice if it has MATERIALLY improved. A refreshed timestamp is not an improvement, and neither is a re-evaluation that moved the score by a point. For an open jaw the comparison is the COMBINED total: one leg being re-observed changes nothing about the trip.",
+    "enabled": true,
+    "minCashImprovementPercent": 10,
+    "minPointsImprovementPercent": 10,
+    "minTaxesImprovementPercent": 25,
+    "minScoreImprovement": 5,
+    "verificationUpgradeCounts": true,
+    "minOpenJawTotalImprovementPercent": 10,
+    "cooldownHours": 24
+  },
+  "retry": {
+    "note": "§24 bounded, and the bound is the point. Three attempts over roughly an hour, then FAILED and visible in the report. An unbounded retry against a channel that is down turns one missed alert into a permanent background load.",
+    "backoffMinutes": [
+      5,
+      15,
+      60
+    ],
+    "maxAttempts": 3,
+    "staleClaimMinutes": 10,
+    "resendUnknown": false,
+    "resendUnknownNote": "ntfy has no idempotency key, so a crash between 'SENDING' and the POST completing is indistinguishable from a crash after it. Default is AT-MOST-ONCE: the row becomes UNKNOWN and is never re-sent. This radar has sent zero alerts in its life; the credibility of the first one is the whole asset, and a missed deal is still sitting on /deals.html. Set true to opt into at-least-once, which prefixes the resent body as a possible duplicate."
+  },
+  "verifyBeforeNotify": {
+    "note": "§26 a cash candidate about to interrupt somebody is exactly what the metered budget is for. It draws from the AUTOMATED discovery pool only; the manual reserve stays unreachable, as it has since Phase 2. Open jaws are excluded - Phase 6.5 established that re-searching one as a single round trip confirms a trip that does not exist.",
+    "enabled": true,
+    "onFailure": "suppress",
+    "onFailureOptions": [
+      "suppress",
+      "downgrade"
+    ],
+    "maxPerDay": 2,
+    "maxPerTick": 1,
+    "poolShare": 0.15
+  },
+  "deepLink": {
+    "note": "§22 the notification links back to the candidate detail. Built ONLY from this base URL plus a candidate id - never from anything a provider put in a field. Local for now; a Tailscale hostname later.",
+    "baseUrl": "http://localhost:8888",
+    "path": "/deals.html#candidate="
+  },
+  "credentialWarnings": {
+    "note": "§37 a session that expires silently turns award collection off without anybody noticing. Surfaced in notify:status, never auto-renewed.",
+    "warnWithinDays": 21
+  },
+  "pass": {
+    "note": "Limits on the notification pass itself, so it stays negligible next to discovery.",
+    "maxSendsPerTick": 3,
+    "maxCandidatesPerPass": 400,
+    "nearMissBand": 10,
+    "nearMissNote": "Candidates within this many points of the threshold get the FULL gate evaluation recorded, so 'why did the 89 not fire?' has an answer. Below that, /deals.html already answers it."
+  }
+}

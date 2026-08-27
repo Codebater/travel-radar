@@ -18,6 +18,8 @@ import { fileURLToPath } from "url"
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const CANARY = "phase1-regression-canary-value"
+const NTFY_TOPIC_CANARY = "phase7-topic-canary-do-not-leak"
+const NTFY_TOKEN_CANARY = "tk_phase7tokencanarydonotleak"
 
 let server: ChildProcess
 let base: string
@@ -56,6 +58,13 @@ beforeAll(async () => {
         ...process.env,
         // No credentials: a request that slips past validation cannot spend money.
         SERP_API_KEY: "", ATF_API_KEY: "",
+        // ...except the notification destination, which is set to canaries ON
+        // PURPOSE: the point is to prove that a server holding a real topic and
+        // token never serves either of them.
+        NTFY_TOPIC: NTFY_TOPIC_CANARY,
+        NTFY_TOKEN: NTFY_TOKEN_CANARY,
+        NTFY_SERVER: "https://ntfy.example.com",
+        NOTIFICATIONS_ENABLED: "false",
         DATABASE_PATH: path.join(os.tmpdir(), `travel-radar-sec-${process.pid}.db`),
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -266,6 +275,66 @@ describe("round-trip persistence (review finding)", () => {
     expect(directions.has("return")).toBe(true)
     expect(payload.meta.totalFlights).toBe(payload.flights.length)
   }, 120_000)
+})
+
+describe("§39 the notification destination is never served", () => {
+  // On a public ntfy server the topic IS the access control, so a topic that
+  // appears in an API response or a page is the same class of mistake as
+  // serving .env. The server under test is deliberately holding one.
+
+  it("does not leak the topic or the token through /api/alerts", async () => {
+    const res = await fetch(`${base}/api/alerts`)
+    expect(res.status).toBe(200)
+    const body = await res.text()
+    expect(body).not.toContain(NTFY_TOPIC_CANARY)
+    expect(body).not.toContain(NTFY_TOKEN_CANARY)
+    // It DOES say which host it is pointed at, which is operationally useful
+    // and not a secret.
+    const parsed = JSON.parse(body) as any
+    expect(parsed.channel.detail).toContain("ntfy.example.com")
+    expect(parsed.channel.detail).toContain("topic hidden")
+  })
+
+  it("does not leak them through any page the dashboard serves", async () => {
+    for (const page of ["/alerts.html", "/deals.html", "/observer.html", "/dashboard.html"]) {
+      const body = await (await fetch(`${base}${page}`)).text()
+      expect(body).not.toContain(NTFY_TOPIC_CANARY)
+      expect(body).not.toContain(NTFY_TOKEN_CANARY)
+    }
+  })
+
+  it("refuses a cross-origin read of the alerts endpoint", async () => {
+    const res = await fetch(`${base}/api/alerts`, { headers: { Origin: "https://evil.example" } })
+    expect(res.status).toBe(403)
+  })
+
+  it("does not hand out a wildcard CORS header to any page", async () => {
+    // The wildcard used to go out on every path while the Origin allowlist
+    // guarded only /api/*, so any tab could read the dashboard cross-origin.
+    for (const path of ["/alerts.html", "/deals.html", "/api/alerts"]) {
+      const res = await fetch(`${base}${path}`)
+      expect(res.headers.get("access-control-allow-origin")).not.toBe("*")
+    }
+  })
+
+  it("offers no write route for notifications", async () => {
+    // Two forged sends would silence the radar for the day, and the /api/
+    // Origin guard only fires when an Origin header is present - which
+    // <img>, <script> and plain navigations do not send. Sending stays
+    // CLI-only, exactly as observer:start does.
+    for (const method of ["POST", "PUT", "DELETE"]) {
+      const res = await fetch(`${base}/api/alerts`, {
+        method, headers: { "Content-Type": "application/json" }, body: "{}",
+      })
+      // Either the route ignores the method and answers read-only, or there is
+      // no such route. What must NOT exist is a handler that sends anything.
+      expect([200, 403, 404, 405]).toContain(res.status)
+    }
+    for (const path of ["/api/notify", "/api/notify/send", "/api/alerts/send", "/api/notify/test"]) {
+      const res = await fetch(`${base}${path}`, { method: "POST" })
+      expect([403, 404]).toContain(res.status)
+    }
+  })
 })
 
 describe("provider endpoints do not spend money", () => {

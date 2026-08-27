@@ -16,6 +16,7 @@ import type { DB } from "../db/index.js"
 import { loadAnomalyConfig } from "./config.js"
 import { listClusters, type ClusterRow } from "./clustering.js"
 import { getCandidate, type StoredCandidate } from "./store.js"
+import { opportunityKey } from "../notifications/identity.js"
 import type { OpenJawDetail } from "./types.js"
 
 export type FeedSection =
@@ -66,9 +67,55 @@ export interface DealCard {
    * with the card.
    */
   openJaw: OpenJawDetail | null
+  /**
+   * §29 would this have interrupted me, and if not, why not?
+   *
+   * Read from the notification layer's own decision trail rather than
+   * recomputed here: the feed must show what the evaluator actually decided,
+   * not a second opinion that could quietly disagree with it.
+   */
+  notifyVerdict: { state: "would-notify" | "suppressed" | "sent"; blocker: string | null; detail: string | null } | null
   reasons: { code: string; detail: string }[]
   presetsMatched: string[]
   feedback: string | null
+}
+
+/**
+ * The notification layer's last word on this candidate.
+ *
+ * Returns null when the notification pass has never looked at it - which is
+ * the normal state for anything below the near-miss band, and is honestly
+ * different from "it was considered and rejected".
+ */
+function notifyVerdictFor(db: DB, candidate: StoredCandidate): DealCard["notifyVerdict"] {
+  try {
+    // Keyed on the OPPORTUNITY, not on the candidate id.
+    //
+    // The feed shows a cluster's best member, and the notification pass
+    // evaluates whatever `listCandidates` collapsed to - two different rows for
+    // the same trip more often than not. Looking up by candidate id therefore
+    // returned null for exactly the cards that would have notified, which is
+    // the one case the chip exists for. The opportunity key is the thing built
+    // to survive that churn.
+    const key = opportunityKey({ candidate })
+    const sent = db.prepare(
+      `SELECT sent_at FROM notifications WHERE opportunity_key = ? ORDER BY sent_at DESC LIMIT 1`,
+    ).get(key) as { sent_at: string } | undefined
+    if (sent) return { state: "sent", blocker: null, detail: `sent ${sent.sent_at.slice(0, 16).replace("T", " ")}` }
+
+    const decision = db.prepare(
+      `SELECT first_blocker, detail FROM notification_events
+       WHERE kind = 'decision' AND opportunity_key = ? ORDER BY last_seen_at DESC LIMIT 1`,
+    ).get(key) as { first_blocker: string | null; detail: string | null } | undefined
+    if (!decision) return null
+    return decision.first_blocker && decision.first_blocker !== "ELIGIBLE"
+      ? { state: "suppressed", blocker: decision.first_blocker, detail: decision.detail }
+      : { state: "would-notify", blocker: null, detail: decision.detail }
+  } catch {
+    // The notification tables may not exist yet on an older database. A feed
+    // that cannot render because of a missing chip is worse than no chip.
+    return null
+  }
 }
 
 function toCard(db: DB, cluster: ClusterRow): DealCard | null {
@@ -110,6 +157,7 @@ function toCard(db: DB, cluster: ClusterRow): DealCard | null {
     trueTripStartCost: c.trueTripStartCost,
     isOpenJaw: c.isOpenJaw,
     openJaw: c.openJaw,
+    notifyVerdict: notifyVerdictFor(db, c),
     reasons: c.reasons,
     presetsMatched: c.presetsMatched,
     feedback: c.feedback?.verdict ?? null,

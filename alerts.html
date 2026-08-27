@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alerts — Flight Radar</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = { theme: { extend: { colors: {
+  surface: '#0f172a', card: '#1e293b', cardHover: '#334155',
+  accent: '#38bdf8', gold: '#fbbf24', emerald: '#34d399', warn: '#f87171', violet: '#a78bfa',
+}}}}
+</script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  .badge        { font-size: 10px; padding: .1rem .4rem; border-radius: 9999px; white-space: nowrap; }
+  .badge-green  { background: rgba(52,211,153,.15); color:#34d399; border:1px solid rgba(52,211,153,.3); }
+  .badge-yellow { background: rgba(251,191,36,.15); color:#fbbf24; border:1px solid rgba(251,191,36,.3); }
+  .badge-red    { background: rgba(248,113,113,.15); color:#f87171; border:1px solid rgba(248,113,113,.3); }
+  .badge-blue   { background: rgba(56,189,248,.15); color:#38bdf8; border:1px solid rgba(56,189,248,.3); }
+  .badge-grey   { background: rgba(148,163,184,.12); color:#94a3b8; border:1px solid rgba(148,163,184,.25); }
+  td, th { padding: .45rem .7rem; }
+</style>
+</head>
+<body class="bg-surface text-gray-200 min-h-screen">
+<div class="max-w-7xl mx-auto px-4 py-8">
+
+  <div class="flex items-start justify-between mb-4 gap-4 flex-wrap">
+    <div>
+      <h1 class="text-2xl font-extrabold text-white">🔔 Alerts</h1>
+      <p class="text-sm text-gray-400 max-w-3xl">
+        What the radar sent, what it is holding, and — the part that matters most —
+        <span class="text-gray-300">why it stayed silent</span>. A missing notification should be a
+        decision you can read, not a bug you have to guess at.
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/deals.html" class="text-sm text-accent hover:underline">Deals →</a>
+      <a href="/observer.html" class="text-sm text-accent hover:underline">Observer →</a>
+    </div>
+  </div>
+
+  <div id="status" class="text-xs text-gray-500 mb-6">Loading…</div>
+  <div id="warnings" class="mb-6"></div>
+  <div id="sections"></div>
+
+  <p class="text-xs text-gray-600 mt-10">
+    Read-only. There is no control on this page and no write endpoint behind it: sending is a
+    command-line action, exactly as starting the observer is. Nothing here shows the notification
+    destination — on a public ntfy server the topic is the whole password.
+  </p>
+</div>
+
+<script>
+const int = new Intl.NumberFormat('en-US');
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+const STATUS_BADGE = {
+  SENT: 'badge-green', QUEUED: 'badge-blue', CLAIMED: 'badge-blue', SENDING: 'badge-blue',
+  FAILED: 'badge-red', CANCELLED: 'badge-grey', SUPPRESSED: 'badge-grey', UNKNOWN: 'badge-yellow',
+};
+
+function money(row) {
+  if (row.type === 'award' && row.points) return `${int.format(row.points)} pts`;
+  if (row.effectiveCost != null) return `${Math.round(row.effectiveCost)} ${esc(row.currency || '')}`;
+  if (row.priceAmount != null) return `${Math.round(row.priceAmount)} ${esc(row.currency || '')}`;
+  return '—';
+}
+
+function section(title, blurb, body) {
+  return `<div class="mb-8">
+    <h2 class="text-lg font-bold text-white mb-1">${title}</h2>
+    <p class="text-xs text-gray-500 mb-2">${blurb}</p>
+    ${body}
+  </div>`;
+}
+
+function emptyBox(text) {
+  return `<div class="bg-card rounded-xl p-4 text-sm text-gray-500">${esc(text)}</div>`;
+}
+
+function table(head, rows) {
+  return `<div class="bg-card rounded-xl overflow-x-auto"><table class="w-full text-sm">
+    <thead class="text-left text-gray-400 border-b border-gray-700"><tr>${
+      head.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
+}
+
+async function load() {
+  const d = await (await fetch('./api/alerts')).json();
+  if (d.error) {
+    document.getElementById('status').innerHTML =
+      `<span class="text-warn">${esc(d.error)}</span>`;
+    return;
+  }
+
+  document.getElementById('status').textContent =
+    `Notifications ${d.enabled ? 'ENABLED' : 'DISABLED'} · channel ${d.channel.name} (${d.channel.status}: ${d.channel.detail}) · ` +
+    `threshold ${d.policy.threshold}/100 · quiet ${d.policy.quietHours}${d.policy.quietNow ? ' — quiet right now' : ''} · ` +
+    `${d.today.immediatesUsed}/${d.policy.maxImmediatePerDay} used today (${d.today.localDay}) · ` +
+    `cooldown ${d.policy.clusterCooldownHours}h · bypass at ${d.policy.extremeBypassScore}`;
+
+  document.getElementById('warnings').innerHTML = (d.warnings || []).map(w =>
+    `<div class="badge-yellow rounded px-3 py-1.5 text-xs mb-1">${esc(w)}</div>`).join('');
+
+  const sent = (d.notifications || []).map(n => `<tr class="border-b border-gray-800">
+    <td class="text-gray-400">${esc(n.sentAt.replace('T', ' ').slice(0, 16))}</td>
+    <td><span class="badge badge-green">${esc(n.kind)}</span></td>
+    <td class="font-semibold text-white">${esc(n.route)}</td>
+    <td class="text-gray-400">${esc(n.cabin)}</td>
+    <td class="font-semibold">${money(n)}</td>
+    <td class="text-gold font-bold">${n.score}</td>
+    <td class="text-gray-500 text-[11px]">${esc(n.fingerprint.slice(0, 44))}…</td>
+  </tr>`).join('');
+
+  const queue = (d.queue || []).map(q => `<tr class="border-b border-gray-800">
+    <td><span class="badge ${STATUS_BADGE[q.status] || 'badge-grey'}">${esc(q.status)}</span></td>
+    <td class="text-gray-400">${esc(q.kind)}</td>
+    <td class="text-gray-400">${esc(q.scheduledFor.replace('T', ' ').slice(0, 16))}</td>
+    <td class="text-gray-400">${q.attempts}</td>
+    <td class="text-gray-500 text-[11px]">${esc(q.opportunityKey.slice(0, 60))}</td>
+    <td class="text-warn text-[11px]">${esc(q.lastError || '')}</td>
+  </tr>`).join('');
+
+  const decisions = (d.decisions || []).map(e => `<tr class="border-b border-gray-800">
+    <td><span class="badge ${e.first_blocker && e.first_blocker !== 'ELIGIBLE' ? 'badge-grey' : 'badge-green'}">${
+      esc(e.first_blocker || 'ELIGIBLE')}</span></td>
+    <td class="text-gray-400">${e.score ?? '—'}</td>
+    <td class="text-gray-500 text-[11px]">${esc(String(e.opportunity_key || '').slice(0, 70))}</td>
+    <td class="text-gray-400">${e.occurrences}×</td>
+    <td class="text-gray-500 text-[11px]">${esc(String(e.detail || '').slice(0, 160))}</td>
+  </tr>`).join('');
+
+  document.getElementById('sections').innerHTML =
+    section('Sent', 'Every notification this radar has actually delivered.',
+      sent ? table(['When', 'Kind', 'Route', 'Cabin', 'Value', 'Score', 'Fingerprint'], sent)
+           : emptyBox('Nothing has been sent. With the threshold at 90 and no candidate above it, that is the correct answer rather than a fault.')) +
+    section('Queue', 'Waiting, retrying, or finished. A queued alert is revalidated immediately before it goes out, and cancelled if the deal died while it waited.',
+      queue ? table(['Status', 'Kind', 'Scheduled', 'Attempts', 'Opportunity', 'Last error'], queue)
+            : emptyBox('The queue is empty.')) +
+    section('Decisions', 'Why the radar stayed silent. One row per opportunity and blocker, with a count of how many times it has been seen.',
+      decisions ? table(['Blocker', 'Score', 'Opportunity', 'Seen', 'Detail'], decisions)
+                : emptyBox('No decisions recorded yet — the notification pass runs on the scheduler tick.'));
+}
+
+load().catch(err => {
+  document.getElementById('status').innerHTML =
+    `<span class="text-warn">Could not load: ${esc(err.message)}</span>`;
+});
+</script>
+</body>
+</html>

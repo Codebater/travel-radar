@@ -18,6 +18,9 @@ import { projectMonthlyBudget } from "./budget.js"
 import { backupIfDue } from "../db/backup.js"
 import { evaluateNewObservations } from "../anomaly/engine.js"
 import { evaluateOpenJaws } from "../anomaly/openjaw.js"
+import { runNotificationPass } from "../notifications/dispatcher.js"
+import { recordEvent } from "../notifications/store.js"
+import { NtfyChannel } from "../notifications/providers/ntfy.js"
 import { dueDiscoveryJobs, getDiscoveryJob, reapStaleDiscoveryRuns } from "../discovery/store.js"
 import { executeDiscoveryJob } from "../discovery/engine.js"
 
@@ -84,6 +87,10 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
   }, beatMs)
 
   const shouldContinue = () => !stopping && !leaseLost && !stopViaDb
+
+  // Built once. Reading the destination is cheap, but constructing it per
+  // tick would make "which channel is this" a moving target in the logs.
+  const notificationChannel = new NtfyChannel()
 
   let exitReason = "stopped"
   try {
@@ -162,6 +169,39 @@ export async function runScheduler(options: SchedulerOptions = {}): Promise<stri
         evaluateOpenJaws({ db, quiet: false })
       } catch (err) {
         console.warn(`⚠️ open-jaw assembly failed (nothing else is affected): ${(err as Error).message}`)
+      }
+
+      // §7 decide whether any of this is worth interrupting a person for.
+      //
+      // Placed here on purpose, and the placement is load-bearing:
+      //
+      //   AFTER both evaluators, so the pass sees this tick's decisions rather
+      //   than racing evaluateOpenJaws rewriting the same rows;
+      //
+      //   BEFORE the backup, so the daily snapshot contains this tick's
+      //   notifications rows. Reversed, a restore would re-send everything -
+      //   at-most-once has no memory outside those tables;
+      //
+      //   NEVER inside the discovery block. discovery/engine.ts derives a run's
+      //   status from its errors array, so one pushed string turns success into
+      //   partial and a throw turns it into failed - which increments
+      //   consecutive_failures and multiplies the interval by up to 8x. An ntfy
+      //   outage must not be able to reach that (§40);
+      //
+      //   NEVER inside the observation loop, which is the one block in this
+      //   tick with no try/catch at all: a throw there escapes to the outer
+      //   finally, releases the lease and kills the scheduler.
+      try {
+        await runNotificationPass({ db, channel: notificationChannel, shouldContinue, holder })
+      } catch (err) {
+        console.warn(
+          `⚠️ notification pass failed (collection, discovery and evaluation are unaffected): ` +
+          `${(err as Error).message}`,
+        )
+        // Recording the failure must not itself be able to throw.
+        try {
+          recordEvent(db, { kind: "pass_error", detail: (err as Error).message })
+        } catch { /* nothing further can be done, and nothing further should be attempted */ }
       }
 
       // §AC a rolling local backup, taken by whoever holds the lease. Cheap

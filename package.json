@@ -24,7 +24,7 @@
     "atf:register": "tsx atf-register.ts",
     "build": "tsc",
     "typecheck": "tsc",
-    "lint": "eslint search.ts serve.ts load-env.ts atf-register.ts roame-scraper.ts atf-scraper.ts value-engine.ts value-compare.ts sweet-spots.ts transfer-partners.ts db providers cache observer anomaly discovery tests --ext .ts",
+    "lint": "eslint search.ts serve.ts load-env.ts atf-register.ts roame-scraper.ts atf-scraper.ts value-engine.ts value-compare.ts sweet-spots.ts transfer-partners.ts db providers cache observer anomaly discovery notifications tests --ext .ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:scrapers": "vitest run --config awardwiz-scrapers/vite.config.ts awardwiz-scrapers/scrapers.test.ts",
@@ -42,7 +42,11 @@
     "discovery:openjaw": "tsx discovery/cli.ts openjaw",
     "discovery:positioning": "tsx discovery/cli.ts positioning",
     "discovery:clusters": "tsx discovery/cli.ts clusters",
-    "discovery:pool": "tsx discovery/cli.ts pool"
+    "discovery:pool": "tsx discovery/cli.ts pool",
+    "notify:dry-run": "tsx notifications/cli.ts dry-run",
+    "notify:test": "tsx notifications/cli.ts test",
+    "notify:status": "tsx notifications/cli.ts status",
+    "notify:report": "tsx notifications/cli.ts report"
   },
   "name": "awardwiz",
   "engines": {

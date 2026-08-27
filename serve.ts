@@ -33,6 +33,11 @@ import { listClusters } from "./anomaly/clustering.js"
 import { listDiscoveryJobs, listDiscoveryRuns } from "./discovery/store.js"
 import { projectDiscoveryBudget } from "./discovery/budget.js"
 import { loadDiscoveryConfig } from "./discovery/config.js"
+import { loadNotificationConfig, notificationsEnabled } from "./notifications/config.js"
+import { NtfyChannel } from "./notifications/providers/ntfy.js"
+import { immediatesToday, listEvents, listNotifications, listQueue } from "./notifications/store.js"
+import { isQuiet, localDay } from "./notifications/quiet-hours.js"
+import { credentialWarnings } from "./notifications/credentials.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
@@ -88,8 +93,18 @@ const MIME_TYPES: Record<string, string> = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://localhost:${PORT}`)
   
-  // CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "*")
+  // CORS: only this server's own origins, never "*".
+  //
+  // The wildcard used to go out on EVERY path while the Origin allowlist below
+  // guarded only /api/*, so any page in any tab could read /deals.html and
+  // /alerts.html cross-origin. Those pages carry no secrets by design - but
+  // "carries no secrets today" is a property that quietly stops being true.
+  const selfOrigins = [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]
+  const requestOrigin = req.headers.origin
+  if (requestOrigin && selfOrigins.includes(requestOrigin)) {
+    res.setHeader("Access-Control-Allow-Origin", requestOrigin)
+    res.setHeader("Vary", "Origin")
+  }
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS")
   
   if (req.method === "OPTIONS") {
@@ -102,8 +117,7 @@ const server = http.createServer(async (req, res) => {
   // so refuse cross-origin callers. The dashboard is served from this same
   // origin and sends no Origin header, as does curl.
   if (url.pathname.startsWith("/api/") && req.headers.origin) {
-    const allowed = [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]
-    if (!allowed.includes(req.headers.origin)) {
+    if (!selfOrigins.includes(req.headers.origin)) {
       console.warn(`⚠️ Blocked cross-origin API call from ${req.headers.origin}`)
       res.writeHead(403, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: "Cross-origin API requests are not allowed" }))
@@ -319,6 +333,53 @@ const server = http.createServer(async (req, res) => {
         runs: listDiscoveryRuns(db, { limit: 20 }),
         projection: projectDiscoveryBudget(db),
         clusters: listClusters(db, { minScore: 0, limit: 40 }),
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/alerts — §30 what the notification layer has done and decided.
+  //
+  // GET only, read-only, no side effects, and deliberately NO write route
+  // anywhere in this phase. The /api/ Origin guard only fires when an Origin
+  // header is present, and <img>, <script> and plain navigations send none - so
+  // a forged send would be reachable from any page in any tab. And the damage
+  // is not "an unwanted notification": with a cap of two per day and a 24-hour
+  // cooldown, two forged sends silence the radar for the rest of the day.
+  // Sending stays CLI-only, exactly as observer:start and discovery:run do.
+  //
+  // Nothing here may carry a server, topic, token, credential path or publish
+  // URL. The channel reports its HOST and its status; the topic is withheld.
+  if (url.pathname === "/api/alerts") {
+    try {
+      const db = getDb()
+      const config = loadNotificationConfig()
+      const channel = new NtfyChannel()
+      const health = channel.health()
+      const now = new Date()
+      const day = localDay(now, config)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        checkedAt: now.toISOString(),
+        enabled: notificationsEnabled(config),
+        channel: { name: health.channel, status: health.status, detail: health.detail },
+        policy: {
+          threshold: config.threshold,
+          quietHours: `${config.quietHours.start}-${config.quietHours.end} ${config.quietHours.timezone}`,
+          quietNow: isQuiet(now, config),
+          maxImmediatePerDay: config.rateLimits.maxImmediatePerDay,
+          clusterCooldownHours: config.rateLimits.clusterCooldownHours,
+          extremeBypassScore: config.extremeBypass.minScore,
+        },
+        today: { localDay: day, immediatesUsed: immediatesToday(db, day) },
+        notifications: listNotifications(db, 50),
+        queue: listQueue(db, 50),
+        decisions: listEvents(db, 60, "decision"),
+        recent: listEvents(db, 60),
+        warnings: credentialWarnings(config, now),
       }, null, 2))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })
