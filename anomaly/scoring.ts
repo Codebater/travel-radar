@@ -132,16 +132,24 @@ function extraParts(
   const status = extras?.verificationStatus ?? null
   return {
     absolutePrice: {
-      // A rule that did not MATCH is not a rule that says "bad price". When no
-      // threshold exists for this group and cabin, the component is dropped and
-      // the remaining weights renormalise - scoring it zero would penalise a
-      // route for a gap in OUR config, which is the same mistake the CPP
-      // component was explicitly designed to avoid.
-      raw: extras?.absolute && extras.absolute.tier !== null ? extras.absolute.score : null,
+      // Two situations look alike and must not be treated alike:
+      //
+      //   no rule exists for this group and cabin  -> uncomputable, DROP it.
+      //     Scoring zero would penalise a route for a gap in OUR config, the
+      //     same mistake the CPP component was designed to avoid.
+      //
+      //   a rule ran and said "ordinary"           -> a computed 0, KEEP it.
+      //     That is a real verdict about a real price.
+      //
+      // Discriminating on `tier` conflated them, and since dropping an
+      // 0.18-weight component renormalises the rest, it multiplied the score of
+      // every unremarkable fare by 1/(1-0.18). Fares that belong nowhere near
+      // the feed were pushed over the verification gate and would have spent
+      // metered calls confirming ordinary prices. `rulePath` is the field that
+      // actually means "no rule".
+      raw: extras?.absolute && extras.absolute.rulePath !== "none" ? extras.absolute.score : null,
       weight: weights.absolutePrice ?? 0,
-      detail: extras?.absolute?.tier
-        ? extras.absolute.detail
-        : (extras?.absolute?.detail ?? "no absolute rule for this route and cabin"),
+      detail: extras?.absolute?.detail ?? "no absolute rule for this route and cabin",
     },
     routeDesirability: {
       raw: extras?.routeDesirability ?? null,

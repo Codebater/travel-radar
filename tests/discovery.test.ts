@@ -475,6 +475,31 @@ describe("open jaw", () => {
     expect(findOpenJaws(db, "BKK", options(), config)).toHaveLength(0)
   })
 
+  it("attributes a leg's price to the observation it actually came from", () => {
+    // MIN(price) and MAX(fetched_at) in one GROUP BY forfeits SQLite's
+    // bare-column guarantee, so a 300 USD fare was reported as having come from
+    // the provider that quoted 900, at a timestamp when it did not exist.
+    recordPriceObservations(db, [makeFlight({
+      origin: "PRG", destination: "BKK", cabin: "economy", returnDate: null,
+      departureDate: day(30), price: { amount: 300, currency: "USD" },
+      provider: "cheap_provider", fetchedAt: at(-10),
+    })], { adults: 1 })
+    recordPriceObservations(db, [makeFlight({
+      origin: "PRG", destination: "BKK", cabin: "economy", returnDate: null,
+      departureDate: day(30), price: { amount: 900, currency: "USD" },
+      provider: "expensive_provider", fetchedAt: at(-1),
+    })], { adults: 1 })
+    oneWay("BKK", "VIE", day(37), 200)
+    roundTrip("PRG", "BKK", day(30), day(37), 900)
+
+    const jaws = findOpenJaws(db, "BKK", { ...options(), includeNonQualifying: true }, config)
+    const jaw = jaws.find(j => j.outbound.departureDate === day(30))
+    expect(jaw).toBeDefined()
+    expect(jaw!.outbound.price).toBe(300)
+    expect(jaw!.outbound.provider).toBe("cheap_provider")
+    expect(jaw!.outbound.observedAt).toBe(at(-10))
+  })
+
   it("never builds a leg out of half a return fare", () => {
     // Only round trips exist, so there is nothing legitimate to combine.
     roundTrip("PRG", "BKK", day(30), day(37), 500)
@@ -595,6 +620,50 @@ describe("absolute price rules", () => {
     expect(mediocre.score).toBeLessThan(noRule.score)
   })
 
+  it("KEEPS the absolute component when the rule ran and said 'ordinary'", () => {
+    // The distinction the first fix got wrong, and it inflated every ordinary
+    // fare by 1/(1-0.18):
+    //   no rule for this group/cabin  -> uncomputable, drop it
+    //   rule ran and returned "above the threshold" -> a computed 0, keep it
+    // Dropping the second pushed unremarkable fares over the verification gate,
+    // where they would have spent metered calls confirming ordinary prices.
+    const c = loadAnomalyConfig(true)
+    const baseline = {
+      key: "k", scope: "strict", count: 40, min: 2000, max: 4000, median: 3000,
+      percentile: 5, percentBelowMedian: 30, differenceFromMinimum: 100,
+      firstAt: at(-40), lastAt: at(-2), ageDays: 2,
+      confidence: "HIGHER" as const, confidenceValue: 1,
+      medianTaxes: null, taxesCurrency: null, isNewObservedLow: false,
+    }
+    const input = {
+      price: 2100, currency: "USD", stops: 0,
+      providerConfidence: "medium", verificationLevel: "discovered", baseline,
+    }
+
+    const ordinary = assessCashAbsolute(
+      { price: 2100, currency: "USD", cabin: "business", destinationGroup: "thailand" }, c)
+    expect(ordinary.tier).toBeNull()
+    expect(ordinary.rulePath).not.toBe("none")
+
+    const withVerdict = scoreCash(input, c, {
+      absolute: ordinary, routeDesirability: 1, verificationStatus: "unverified",
+    })
+    expect(withVerdict.components.absolutePrice!.weight).toBeGreaterThan(0)
+    expect(withVerdict.components.absolutePrice!.points).toBe(0)
+
+    // And it must stay clear of the metered verification gate.
+    const gate = loadDiscoveryConfig(true).verification.minScore
+    expect(withVerdict.score).toBeLessThan(gate)
+
+    // A route with no rule at all still drops the component.
+    const noRule = scoreCash(input, c, {
+      absolute: { tier: null, score: 0, thresholdUsed: null, rulePath: "none", detail: "no rule" },
+      routeDesirability: 1, verificationStatus: "unverified",
+    })
+    expect(noRule.components.absolutePrice!.weight).toBe(0)
+    expect(noRule.score).toBeGreaterThan(withVerdict.score)
+  })
+
   it("scores desirability per airport", () => {
     const c = anomalyConfig()
     expect(routeDesirability("BKK", "thailand", c)).toBeGreaterThan(routeDesirability("DOH", "wildcard", c))
@@ -709,6 +778,46 @@ describe("false-positive guards", () => {
     ).get() as any
     expect(later.observed_minimum).toBe(2000)
     expect(later.observed_median).toBe(2000)
+  })
+
+  it("flags an impossible first observation on a route it has never watched", () => {
+    // The failure this prevents: a 12 USD first-class fare arrives on a brand
+    // new route, is skipped for having no baseline, and is therefore never
+    // flagged, never stored and never visible - while remaining that route's
+    // observed minimum for the whole lookback. The guard was switched off in
+    // exactly the situation it was written for.
+    recordPriceObservations(db, [makeFlight({
+      origin: "VIE", destination: "DPS", cabin: "first", returnDate: null,
+      price: { amount: 12, currency: "USD" }, fetchedAt: at(-20),
+    })], { adults: 1 })
+    evaluateNewObservations({ db, quiet: true })
+
+    const flagged = db.prepare(
+      `SELECT sanity, status, sample_size FROM deal_candidates WHERE price_amount = 12`,
+    ).get() as any
+    expect(flagged).toBeDefined()
+    expect(flagged.sanity).toBe("SUSPICIOUS_DATA")
+    expect(flagged.status).toBe("below-threshold")
+
+    // And because it now HAS a row, the baseline exclusion has something to
+    // exclude by: the 12 must never become anybody's observed minimum.
+    for (let i = 0; i < 10; i++) {
+      recordPriceObservations(db, [makeFlight({
+        origin: "VIE", destination: "DPS", cabin: "first", returnDate: null,
+        price: { amount: 4000, currency: "USD" }, fetchedAt: at(-15 + i),
+      })], { adults: 1 })
+    }
+    recordPriceObservations(db, [makeFlight({
+      origin: "VIE", destination: "DPS", cabin: "first", returnDate: null,
+      price: { amount: 2600, currency: "USD" }, fetchedAt: at(0),
+    })], { adults: 1 })
+    evaluateNewObservations({ db, quiet: true })
+
+    const later = db.prepare(
+      `SELECT observed_minimum, observed_median FROM deal_candidates WHERE price_amount = 2600`,
+    ).get() as any
+    expect(later.observed_minimum).toBe(4000)
+    expect(later.observed_median).toBe(4000)
   })
 
   it("asserts the whole comparability guard set in one place", () => {

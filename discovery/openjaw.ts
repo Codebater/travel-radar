@@ -46,19 +46,33 @@ function oneWayLegs(
   maxAgeDays: number,
 ): LegRow[] {
   const since = new Date(Date.parse(asOf) - maxAgeDays * 86_400_000).toISOString()
+  // One row per departure date, and it is THE cheapest row - not a synthetic
+  // blend of one. Mixing MIN(price) with MAX(fetched_at) in one GROUP BY
+  // forfeits SQLite's bare-column guarantee, so the provider and timestamp came
+  // from an arbitrary row: a 300 USD fare was reported as having come from the
+  // provider that quoted 900, at a time when it did not exist. In a module
+  // whose job is provenance that is worse than no answer.
   return db.prepare(`
-    SELECT origin, destination, departure_date, MIN(price_amount) price_amount,
-           price_currency, provider, MAX(fetched_at) fetched_at, cabin
-    FROM flight_prices
+    SELECT origin, destination, departure_date, price_amount,
+           price_currency, provider, fetched_at, cabin
+    FROM flight_prices f
     WHERE origin = ? AND destination = ? AND cabin = ? AND price_currency = ?
       AND return_date IS NULL
       AND departure_date >= ? AND departure_date <= ?
       AND fetched_at <= ? AND fetched_at >= ?
-    GROUP BY departure_date
+      AND id = (
+        SELECT id FROM flight_prices g
+        WHERE g.origin = f.origin AND g.destination = f.destination
+          AND g.cabin = f.cabin AND g.price_currency = f.price_currency
+          AND g.return_date IS NULL AND g.departure_date = f.departure_date
+          AND g.fetched_at <= ? AND g.fetched_at >= ?
+        ORDER BY g.price_amount ASC, g.fetched_at DESC, g.id ASC LIMIT 1
+      )
     ORDER BY departure_date
   `).all(
     origin.toUpperCase(), destination.toUpperCase(), cabin, currency,
     window.from, window.to, asOf, since,
+    asOf, since,
   ) as LegRow[]
 }
 

@@ -164,6 +164,21 @@ export function evaluateCashObservation(
 
   const ctx = contextFor(db, row)
 
+  // §26 believability is checked BEFORE the thin-baseline exit, not after.
+  //
+  // A new route has no history by definition, so an implausible first
+  // observation used to be skipped silently: never flagged, never stored, never
+  // visible - and then permanently the route's observed minimum for the whole
+  // lookback. It also defeated the baseline exclusion, which works by joining
+  // to a candidate row carrying sanity != 'ok'; a skipped observation has no
+  // row to join to. The guard was switched off in exactly the situation it was
+  // written for.
+  const earlySanity = checkCashSanity({
+    price: row.price_amount, currency: row.price_currency, cabin: row.cabin,
+    destinationGroup: ctx.destinationGroup, stops: row.stops,
+    durationMinutes: row.duration_minutes, departureDate: row.departure_date,
+  }, config)
+
   // §21 without this, a wildcard destination could never produce a candidate:
   // it has no history by definition, so the history-only engine would refuse to
   // say anything about the very fares it exists to find. An absolute-price
@@ -174,18 +189,16 @@ export function evaluateCashObservation(
     cabin: row.cabin, destinationGroup: ctx.destinationGroup,
   }, config).tier !== null
 
-  if (!usable && !absoluteOnly) {
+  // A suspicious observation is always recorded, whatever its baseline. It can
+  // never be a candidate - `status` below forces that - but it must exist as a
+  // row so it is visible, and so the baseline exclusion has something to
+  // exclude by.
+  if (!usable && !absoluteOnly && earlySanity.verdict === "ok") {
     return { skipped: measured ? "thin-baseline" : "no-baseline" }
   }
   const baseline = usable ?? noHistoryBaseline(key, asOf)
 
-  // §26 believability first: a price that cannot be real must not be allowed
-  // to become the top of the feed while a reader works out why.
-  const sanity = checkCashSanity({
-    price: row.price_amount, currency: row.price_currency, cabin: row.cabin,
-    destinationGroup: ctx.destinationGroup, stops: row.stops,
-    durationMinutes: row.duration_minutes, departureDate: row.departure_date,
-  }, config)
+  const sanity = earlySanity
 
   // §21 the second axis: is this a good price full stop, not merely a good
   // price for a route this radar happens to have watched.
@@ -317,12 +330,20 @@ export function evaluateAwardObservation(
   const measuredAward = buildBaseline(rows, key, row.points, asOf, config)
   const usableAward = measuredAward && measuredAward.count >= config.minSamplesToEmit ? measuredAward : null
 
+  // Checked before the thin-baseline exit, for the same reason as the cash
+  // path: a new program on a new route has no history, and an absurd points
+  // value there would otherwise vanish instead of being flagged.
+  const earlyAwardSanity = checkAwardSanity({
+    points: row.points, taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
+    stops: row.stops, durationMinutes: row.duration_minutes, departureDate: row.departure_date,
+  }, config)
+
   const absoluteOnlyAward = !usableAward && assessAwardAbsolute({
     points: row.points, cabin: row.cabin, loyaltyProgram: row.loyalty_program,
     taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
   }, config).tier !== null
 
-  if (!usableAward && !absoluteOnlyAward) {
+  if (!usableAward && !absoluteOnlyAward && earlyAwardSanity.verdict === "ok") {
     return { skipped: measuredAward ? "thin-baseline" : "no-baseline" }
   }
   const baseline = usableAward ?? noHistoryBaseline(key, asOf)
@@ -335,10 +356,7 @@ export function evaluateAwardObservation(
 
   const ctx = contextFor(db, row)
 
-  const sanity = checkAwardSanity({
-    points: row.points, taxesAmount: row.taxes_amount, taxesCurrency: row.taxes_currency,
-    stops: row.stops, durationMinutes: row.duration_minutes, departureDate: row.departure_date,
-  }, config)
+  const sanity = earlyAwardSanity
 
   // §22 thresholds are per PROGRAM: 60k means "bargain" in one and "poor" in
   // another, and one number across all of them would be meaningless.
