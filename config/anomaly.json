@@ -1,0 +1,100 @@
+{
+  "description": "Shadow anomaly engine configuration. EXPERIMENTAL — this file tunes what the engine calls exceptional. It never enables notifications: alerts.enabled is honoured by nothing in Phase 5, and the engine contains no notification code path at all.",
+  "updated": "2026-08-27",
+
+  "engineVersion": "shadow-1",
+  "weightsVersion": "shadow-1",
+
+  "candidateThreshold": 70,
+  "storeBelowThreshold": true,
+  "storeBelowThresholdNote": "Sub-threshold decisions are stored too (status 'below-threshold') so false NEGATIVES can be inspected during evaluation, not just false positives. Only >= threshold rows are 'candidate'.",
+
+  "confidenceTiers": [
+    { "label": "INSUFFICIENT", "minSamples": 0,  "value": 0.0 },
+    { "label": "VERY_LOW",     "minSamples": 5,  "value": 0.25 },
+    { "label": "LOW",          "minSamples": 10, "value": 0.5 },
+    { "label": "MEDIUM",       "minSamples": 20, "value": 0.75 },
+    { "label": "HIGHER",       "minSamples": 50, "value": 1.0 }
+  ],
+  "minSamplesToEmit": 5,
+
+  "baseline": {
+    "lookbackDays": 365,
+    "maxBaselineAgeDays": 120,
+    "staleBaselineDays": 45,
+    "relaxationOrder": ["directness", "tripLength"],
+    "relaxationNote": "Origin, destination, cabin and trip type are NEVER relaxed — economy is not comparable with business, and one-way is not comparable with return. Only the softer dimensions are dropped, in this order, when the strict sample is too thin.",
+    "tripLengthBuckets": [
+      { "label": "short",   "maxNights": 7 },
+      { "label": "medium",  "maxNights": 14 },
+      { "label": "long",    "maxNights": 28 },
+      { "label": "extended", "maxNights": 3650 }
+    ]
+  },
+
+  "seasonality": {
+    "enabled": false,
+    "note": "Phase 5 preserves travelMonth / departureWeekday / tripLength / daysUntilDeparture in every candidate's feature set but does NOT partition baselines by them yet. Christmas Bangkok and September Bangkok currently share a baseline; the features are stored so a later phase can split them retroactively."
+  },
+
+  "cash": {
+    "weights": {
+      "priceVsMedian": 0.35,
+      "percentile": 0.20,
+      "sampleConfidence": 0.15,
+      "providerConfidence": 0.10,
+      "absoluteSavings": 0.10,
+      "itineraryQuality": 0.10
+    },
+    "fullCreditPercentBelowMedian": 50,
+    "absoluteSavingsFullCredit": { "USD": 800, "EUR": 750, "CZK": 18000, "default": 800 }
+  },
+
+  "award": {
+    "weights": {
+      "pointsVsMedian": 0.25,
+      "taxes": 0.15,
+      "cpp": 0.20,
+      "percentile": 0.15,
+      "sampleConfidence": 0.10,
+      "providerConfidence": 0.10,
+      "itineraryQuality": 0.05
+    },
+    "fullCreditPercentBelowMedian": 40,
+    "taxes": {
+      "lowFullCredit": { "USD": 100, "EUR": 90, "default": 100 },
+      "highZeroCredit": { "USD": 600, "EUR": 550, "default": 600 }
+    },
+    "cpp": {
+      "zeroCreditCents": 1.0,
+      "fullCreditCentsByCabin": { "economy": 2.5, "premium_economy": 3.5, "business": 5.0, "first": 8.0 },
+      "maxCashComparableAgeDays": 45,
+      "minCashSamples": 3,
+      "weakCashNote": "With no usable cash comparable the CPP component is dropped and the remaining award weights are renormalised — scoring it zero would punish an award for a gap in OUR data. A weak comparable still yields a CPP number but caps the CPP component and adds WEAK_CASH_COMPARATOR."
+    }
+  },
+
+  "providerConfidenceValues": { "high": 1.0, "medium": 0.6, "low": 0.3 },
+  "verificationValues": {
+    "verified": 1.0, "cross-verified": 1.0, "discovered": 0.7, "cached": 0.5
+  },
+
+  "presets": {
+    "note": "CONFIG ONLY — Phase 5 records which preset a candidate WOULD have matched. No alert is produced by any of them. Alerting is a later phase and an explicit decision.",
+    "EXTREME": {
+      "cash": { "minPercentBelowMedian": 35, "minSampleConfidence": "LOW" },
+      "award": { "minPercentBelowMedian": 25, "orMinCpp": 4.0, "minSampleConfidence": "LOW" },
+      "minScore": 80
+    },
+    "WTF": {
+      "cash": { "minPercentBelowMedian": 50, "orNewObservedLow": true, "minSampleConfidence": "MEDIUM" },
+      "award": { "minPercentBelowMedian": 40, "orMinCpp": 6.0, "minSampleConfidence": "MEDIUM" },
+      "minScore": 90
+    }
+  },
+
+  "alerts": {
+    "enabled": false,
+    "note": "Hard-off for Phase 5. There is no notification transport in this codebase — no Telegram, no ntfy, no push, no email. Setting this true does nothing today; enabling alerts is a deliberate future change reviewed on its own."
+  }
+}
