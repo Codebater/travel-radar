@@ -488,8 +488,9 @@
     "itinerary": {
       "maxStops": 4,
       "minDurationMinutes": 45,
-      "maxDurationMinutes": 3000,
-      "requireDepartureDate": true
+      "maxDurationMinutes": 4320,
+      "requireDepartureDate": true,
+      "maxDurationNote": "72 hours. The first calibration used 50 and flagged real award routings - a PRG-CUN itinerary with a 20-hour layover is 52 hours and is awful, not impossible. The check exists to catch a PARSE ERROR (two itineraries joined into one), and three days is where that becomes the likelier explanation. Flagging a real itinerary as suspicious is not a harmless false positive: it poisons the diagnostic that tells us when a provider HAS started returning nonsense."
     },
     "longHaulGroups": [
       "thailand",

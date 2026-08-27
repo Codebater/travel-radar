@@ -517,12 +517,32 @@ describe("false-positive guards", () => {
     }, anomalyConfig()).verdict).toBe("SUSPICIOUS_DATA")
   })
 
+  it("does not flag a real but awful routing", () => {
+    // The first calibration used a 50-hour ceiling and flagged 33 genuine award
+    // routings with long layovers. Mislabelling real data as suspicious is not
+    // a harmless false positive: it poisons the very diagnostic that tells us
+    // when a provider HAS started returning nonsense.
+    expect(checkAwardSanity({
+      points: 63500, taxesAmount: 120, taxesCurrency: "USD",
+      stops: 2, durationMinutes: 3160, departureDate: day(30),
+    }, anomalyConfig()).verdict).toBe("ok")
+  })
+
+  it("still flags a duration that can only be two itineraries joined together", () => {
+    expect(checkAwardSanity({
+      points: 63500, taxesAmount: 120, taxesCurrency: "USD",
+      stops: 2, durationMinutes: 7000, departureDate: day(30),
+    }, anomalyConfig()).verdict).toBe("SUSPICIOUS_DATA")
+  })
+
   it("flags a malformed itinerary", () => {
     const result = checkCashSanity({
       price: 500, currency: "EUR", cabin: "economy", destinationGroup: "thailand",
       stops: 9, durationMinutes: 5, departureDate: null,
     }, anomalyConfig())
     expect(result.verdict).toBe("SUSPICIOUS_DATA")
+    // Nine stops, a five-minute flight and no departure date: three separate
+    // impossibilities, each named rather than collapsed into "looks wrong".
     expect(result.reasons.length).toBeGreaterThanOrEqual(3)
   })
 
