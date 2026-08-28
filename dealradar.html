@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deal Radar</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0f14; color: #d7dde5; font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  header { padding: 18px 22px 10px; border-bottom: 1px solid #1d2733; }
+  h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: 2px; color: #7fd1b9; }
+  .sub { color: #6b7a8c; font-size: 12px; max-width: 900px; }
+  main { padding: 14px 22px 40px; max-width: 1020px; }
+  .sect { margin: 26px 0 10px; font-size: 11px; letter-spacing: 1.5px; color: #6b7a8c; border-bottom: 1px solid #1d2733; padding-bottom: 5px; }
+  .note { color: #55636f; font-size: 11px; margin: -4px 0 10px; }
+  .card { border: 1px solid #1d2733; border-radius: 10px; padding: 14px 16px 10px; margin: 0 0 12px; background: #0f1520; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+  .title { font-size: 16px; color: #eef3f8; font-weight: 700; }
+  .kind { font-size: 10px; letter-spacing: 1px; padding: 2px 8px; border-radius: 9px; border: 1px solid #314052; color: #8fa1b5;
+          display: inline-block; margin-bottom: 6px; }
+  .price { font-size: 21px; color: #ffd479; white-space: nowrap; text-align: right; }
+  .per { font-size: 11px; color: #6b7a8c; }
+  .line { color: #9fb0c0; font-size: 13px; margin-top: 2px; }
+  .status { color: #8fa1b5; font-size: 12.5px; margin-top: 7px; }
+  .status.good { color: #7fd1b9; }
+  .status.warn { color: #ffd479; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; }
+  .btn { font-size: 12px; padding: 5px 14px; border-radius: 6px; border: 1px solid #314052;
+         color: #d7dde5; background: #131b27; cursor: pointer; text-decoration: none; }
+  .btn.primary { border-color: #2c5d4b; color: #7fd1b9; }
+  details { margin-top: 8px; }
+  summary { color: #55636f; font-size: 11.5px; cursor: pointer; user-select: none; }
+  summary:hover { color: #8fa1b5; }
+  .detail-box { border-top: 1px dashed #1d2733; margin-top: 8px; padding-top: 8px; color: #8fa1b5; font-size: 12px; }
+  .detail-box div { margin: 2px 0; }
+  .raw { color: #55636f; }
+  .variant { border-top: 1px dashed #1d2733; margin-top: 6px; padding-top: 6px; display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; font-size: 12.5px; }
+  .variant .vprice { color: #ffd479; }
+  .empty { color: #6b7a8c; padding: 14px 0; font-size: 13px; }
+  .meta { color: #55636f; font-size: 11.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DEAL RADAR</h1>
+  <div class="sub" id="disclaimer">loading…</div>
+</header>
+<main id="main"><div class="empty">loading deals from stored observations…</div></main>
+<script>
+const fmt = new Intl.NumberFormat("en-US")
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))
+const money = (a, c) => (c === "EUR" ? "€" : c === "USD" ? "$" : c + " ") + fmt.format(Math.round(a * 100) / 100)
+
+// ── Presentation-layer translations. The exact internal value is always kept
+//    in the Details box — these change wording, never meaning. ──────────────
+const PLACE = { BKK:"Bangkok", HKT:"Phuket", SIN:"Singapore", KUL:"Kuala Lumpur", HKG:"Hong Kong", NRT:"Tokyo",
+  HND:"Tokyo", ICN:"Seoul", TPE:"Taipei", DPS:"Bali", SGN:"Ho Chi Minh City", HAN:"Hanoi", MNL:"Manila",
+  MLE:"Maldives", DXB:"Dubai", AUH:"Abu Dhabi", DOH:"Doha", MRU:"Mauritius", SEZ:"Seychelles", CPT:"Cape Town",
+  JNB:"Johannesburg", ZNZ:"Zanzibar", JFK:"New York", MIA:"Miami", LAX:"Los Angeles", CUN:"Cancún",
+  SJU:"San Juan", GRU:"São Paulo", EZE:"Buenos Aires", BOG:"Bogotá", MEX:"Mexico City", YYZ:"Toronto",
+  VIE:"Vienna", PRG:"Prague", BUD:"Budapest", BTS:"Bratislava", MUC:"Munich" }
+const place = code => PLACE[code] ? `${PLACE[code]} (${code})` : code
+
+const VERDICT = {
+  INSUFFICIENT_COMPARABILITY: "Price comparison incomplete",
+  UNKNOWN_COSTS_PREVENT_VERDICT: "Missing costs prevent a price verdict",
+  TOO_CLOSE_TO_CALL: "Too close to call",
+  BUY_PACKAGE: "The package wins on price",
+  BUILD_YOURSELF: "Booking it yourself wins on price",
+  ROUGH_CONTEXT_ONLY: "Rough context only — not comparable enough",
+}
+const CABIN = {
+  BUSINESS_FULL: "Business cabin verified",
+  BUSINESS_MIXED: "Mixed cabins on this itinerary",
+  BUSINESS_UNVERIFIED: "Business cabin not independently verified",
+  PREMIUM_ECONOMY: "Premium economy (not business)",
+  ECONOMY: "Economy (not business)",
+}
+const BOARD = { all_inclusive: "All inclusive", half_board: "Half board", full_board: "Full board",
+  breakfast: "Breakfast", room_only: "Room only" }
+const board = b => BOARD[b] ?? b.replace(/_/g, " ")
+const monthDay = d => new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })
+const dates = (a, b) => b ? `${monthDay(a)} – ${monthDay(b)}` : monthDay(a)
+
+// Honest action mapping — identical semantics to trips.html.
+function actionFor(l) {
+  if (!l) return null
+  if (l.navigationQuality === "EXACT_DEEP_LINK" && l.deepLinkUrl)
+    return { url: l.deepLinkUrl, label: "Check & book at provider", cls: "btn primary" }
+  if (l.navigationQuality === "SEARCH_REPLAY_LINK" && l.searchReplayUrl)
+    return { url: l.searchReplayUrl, label: "Open provider search", cls: "btn" }
+  if (l.navigationQuality === "PROVIDER_LANDING_LINK" && l.landingUrl)
+    return { url: l.landingUrl, label: "Open provider page", cls: "btn" }
+  return null
+}
+const actionHtml = l => {
+  const a = actionFor(l)
+  return a ? `<a class="${a.cls}" href="${esc(a.url)}" target="_blank" rel="noopener noreferrer">${a.label}</a>`
+           : `<span class="meta">no trustworthy link</span>`
+}
+const freshText = f => {
+  if (!f) return ""
+  const obs = f.observedAgoMinutes < 90 ? `${f.observedAgoMinutes} min ago` : `${Math.round(f.observedAgoMinutes / 60)} h ago`
+  return `Observed ${obs}${f.verifiedAgoMinutes !== null ? ` · verified ${f.verifiedAgoMinutes < 90 ? f.verifiedAgoMinutes + " min" : Math.round(f.verifiedAgoMinutes / 60) + " h"} ago` : ""}`
+}
+const details = inner => `<details><summary>Why / details</summary><div class="detail-box">${inner}</div></details>`
+
+// ── Packages ─────────────────────────────────────────────────────────────────
+
+function packageStatus(v) {
+  const plain = VERDICT[v.verdict] ?? v.verdict.replace(/_/g, " ")
+  const unknownCost = (v.reasons || []).some(r => /BEFORE the unknown/.test(r))
+  if (v.verdict === "BUY_PACKAGE") return { cls: "good", text: plain }
+  if (unknownCost) return { cls: "warn", text: `${plain} — a required cost is still unknown` }
+  return { cls: "", text: plain }
+}
+
+function packageOffer(label, p) {
+  if (!p) return ""
+  const l = p.locator
+  return `<div class="variant"><span class="meta">${label}</span>
+    <b>${esc(l.operator ?? l.seller)}</b>
+    <span class="vprice">${money(l.nativePrice, l.nativeCurrency)}</span>
+    <span>${dates(l.checkIn ?? l.outboundDate)} · transfer ${esc(l.transferStatus ?? "unknown")}</span>
+    ${actionHtml(l)}
+    <span class="meta">${freshText(p.freshness)}</span></div>`
+}
+
+function packageCard(c) {
+  const v = c.verdict
+  const best = c.bestExact ?? c.bestClose
+  const status = packageStatus(v)
+  const detailInner =
+    (v.reasons || []).map(r => `<div>${esc(r)}</div>`).join("") +
+    `<div class="raw">internal: verdict ${esc(v.verdict)} · comparability ${esc(v.comparability)} · confidence ${esc(v.confidence)}</div>` +
+    (v.diyKnownTotal !== null && v.packageTotal !== null
+      ? `<div class="raw">DIY known total ${money(v.diyKnownTotal, v.comparisonCurrency)} vs package ${money(v.packageTotal, v.comparisonCurrency)}${v.fxObservationIds.length ? ` · FX via stored observation(s) ${v.fxObservationIds.join(", ")} — native amounts preserved` : ""}</div>` : "") +
+    `<div class="raw">trip #${c.tripId} · ${esc(c.tripKey)} · trip score ${c.tripScore}</div>` +
+    packageOffer("SAME TRIP", c.bestExact) +
+    (c.bestClose ? packageOffer("SIMILAR TRIP", c.bestClose) : "") +
+    c.variants.map(x => {
+      const b = x.bestExact ?? x.bestClose
+      return `<div class="variant"><span class="meta">OTHER DATES</span>
+        <span>${dates(x.checkIn, x.checkOut)}</span>
+        ${b ? `<span class="vprice">${money(b.locator.nativePrice, b.locator.nativeCurrency)}</span>` : ""}
+        ${b ? actionHtml(b.locator) : ""}</div>`
+    }).join("")
+  return `<div class="card">
+    <div class="top">
+      <div>
+        <span class="kind">PACKAGE</span>
+        <div class="title">${esc(c.propertyName ?? c.propertyId)}</div>
+        <div class="line">${place(c.destinationAirport)} · from ${place(c.origin)} · ${dates(c.checkIn, c.checkOut)} · ${c.nights} nights · ${esc(board(c.board))}${best?.locator.transferStatus === "included" ? " · transfer included" : ""}</div>
+      </div>
+      ${best ? `<div><div class="price">${money(best.locator.nativePrice, best.locator.nativeCurrency)}</div><div class="per">total, 2 adults</div></div>` : ""}
+    </div>
+    <div class="status ${status.cls}">${esc(status.text)}</div>
+    <div class="actions">${best ? actionHtml(best.locator) : ""}<span class="meta">${best ? freshText(best.freshness) : ""}</span>
+      ${c.variants.length ? `<span class="meta">+${c.variants.length} more date option${c.variants.length > 1 ? "s" : ""} in details</span>` : ""}</div>
+    ${details(detailInner)}
+  </div>`
+}
+
+// ── Fares ────────────────────────────────────────────────────────────────────
+
+function fareStatus(c) {
+  if (c.evidence.kind === "typical" && c.evidence.percentVsTypical < 0)
+    return { cls: "good", text: `${Math.abs(c.evidence.percentVsTypical)}% below the typical fare we have observed` }
+  if (c.evidence.kind === "typical")
+    return { cls: "", text: `Around the typical fare we have observed` }
+  return { cls: "", text: "Cheapest we have observed — price history still building" }
+}
+
+function fareCard(c) {
+  const status = fareStatus(c)
+  const cabinNote = CABIN[c.cabinMix] ?? c.cabinMix
+  const detailInner =
+    `<div>${esc(c.evidence.label)}</div>` +
+    `<div>${esc(cabinNote)} — ${esc(c.cabinMixDetail)}</div>` +
+    ((c.qualityFlags || []).length ? `<div>Itinerary flags: ${c.qualityFlags.map(esc).join(", ")}</div>` : "") +
+    `<div class="raw">internal: cabin_mix ${esc(c.cabinMix)} · deal score ${c.dealScore} · candidate #${c.candidateId}${c.locator ? " · " + esc(c.locator.provider) : ""}</div>` +
+    `<div class="raw">${freshText(c.freshness)}</div>`
+  return `<div class="card">
+    <div class="top">
+      <div>
+        <span class="kind">BUSINESS FARE${c.tripType === "ONE_WAY" ? " · ONE WAY" : ""}</span>
+        <div class="title">${place(c.origin)} → ${place(c.destination)}</div>
+        <div class="line">${esc(c.airline ?? (c.airlines || []).join("+") ?? "?")} · ${c.tripType === "ONE_WAY" ? `${monthDay(c.departureDate)} · one way` : `${dates(c.departureDate, c.returnDate)} · ${c.nights} nights`} · ${c.stops === 0 ? "nonstop" : (c.stops ?? "?") + " stop" + (c.stops === 1 ? "" : "s")}</div>
+      </div>
+      <div><div class="price">${money(c.priceAmount, c.priceCurrency)}</div><div class="per">${c.tripType === "ONE_WAY" ? "one-way" : "round trip"}, per adult</div></div>
+    </div>
+    <div class="status ${status.cls}">${esc(status.text)}${c.cabinMix === "BUSINESS_UNVERIFIED" ? " · business cabin not independently verified" : ""}</div>
+    <div class="actions">${actionHtml(c.locator)}</div>
+    ${details(detailInner)}
+  </div>`
+}
+
+// ── Stays ────────────────────────────────────────────────────────────────────
+
+function stayCard(s) {
+  const c = s.candidate
+  const below = c.percentBelowMedian !== null && c.percentBelowMedian !== undefined
+  const status = below
+    ? { cls: "good", text: `${Math.round(c.percentBelowMedian * 10) / 10}% below its usual rate (${c.sampleSize} observations)` }
+    : { cls: "", text: "Cheapest rate we have observed" }
+  const sighting = c.sourceClass === "meta" ? " · price sighting, not yet confirmed bookable" : ""
+  const detailInner =
+    `<div>Source class ${esc(c.sourceClass)} via ${esc(c.provider)} · taxes ${esc(c.taxesFees)} · verification ${esc(c.verificationStatus)}</div>` +
+    ((c.reasons || []).length ? `<div>${c.reasons.map(esc).join(" · ")}</div>` : "") +
+    `<div class="raw">internal: score ${c.score} · baseline ${esc(c.baselineConfidence)} · median ${c.observedMedian !== null ? money(c.observedMedian, c.priceCurrency) : "—"} · candidate #${c.id}</div>` +
+    `<div class="raw">${freshText(s.freshness)}</div>` +
+    s.variants.map(x => `<div class="variant"><span class="meta">OTHER DATES</span>
+      <span>${dates(x.candidate.checkIn, x.candidate.checkOut)}</span>
+      <span class="vprice">${money(x.candidate.nightlyAmount, x.candidate.priceCurrency)}/nt</span>
+      ${actionHtml(x.locator)}</div>`).join("")
+  return `<div class="card">
+    <div class="top">
+      <div>
+        <span class="kind">HOTEL RATE</span>
+        <div class="title">${esc(c.propertyName)}</div>
+        <div class="line">${dates(c.checkIn, c.checkOut)} · ${c.nights} nights · ${esc(board(c.board))}${sighting}</div>
+      </div>
+      <div><div class="price">${money(c.nightlyAmount, c.priceCurrency)}<span class="per">/night</span></div></div>
+    </div>
+    <div class="status ${status.cls}">${esc(status.text)}</div>
+    <div class="actions">${actionHtml(s.locator)}
+      ${s.variants.length ? `<span class="meta">+${s.variants.length} more date option${s.variants.length > 1 ? "s" : ""} in details</span>` : ""}</div>
+    ${details(detailInner)}
+  </div>`
+}
+
+// ── DIY ──────────────────────────────────────────────────────────────────────
+
+function diyCard(t) {
+  const unknown = (t.unknownCosts || []).length
+  const status = unknown
+    ? { cls: "warn", text: `Total excludes: ${t.unknownCosts.join(", ")}` }
+    : { cls: "", text: "All listed costs included" }
+  const component = (kind, o) => `<div class="variant"><span class="meta">${kind}</span>
+    <b>${esc(o.locator.operator ?? o.locator.provider)}</b>
+    ${o.locator.nativePrice !== null ? `<span class="vprice">${money(o.locator.nativePrice, o.locator.nativeCurrency)}</span>` : ""}
+    ${actionHtml(o.locator)}</div>`
+  const detailInner =
+    ((t.reasons || []).length ? `<div>${t.reasons.map(esc).join(" · ")}</div>` : "") +
+    `<div class="raw">internal: construction ${esc(t.construction)} · score ${t.score} · trip #${t.tripId}</div>` +
+    (t.flights || []).map(o => component("Flight", o)).join("") +
+    (t.stays || []).map(o => component("Hotel", o)).join("") +
+    t.variants.map(x => `<div class="variant"><span class="meta">OTHER DATES</span>
+      <span>${dates(x.checkIn, x.checkOut)}</span>
+      ${x.cashTotal ? `<span class="vprice">${money(x.cashTotal.amount, x.cashTotal.currency)}</span>` : ""}</div>`).join("")
+  return `<div class="card">
+    <div class="top">
+      <div>
+        <span class="kind">BOOK IT YOURSELF</span>
+        <div class="title">${esc(t.propertyName ?? t.propertyId)}</div>
+        <div class="line">${place(t.destinationAirport)} · from ${place(t.origin)} · ${dates(t.checkIn, t.checkOut)} · ${t.nights} nights · ${esc(board(t.board))}${t.cabin ? " · " + esc(t.cabin) + " flight" : ""}</div>
+      </div>
+      ${t.cashTotal ? `<div><div class="price">${money(t.cashTotal.amount, t.cashTotal.currency)}</div><div class="per">flight + hotel, 2 adults</div></div>` : ""}
+    </div>
+    <div class="status ${status.cls}">${esc(status.text)}</div>
+    <div class="actions">${(t.flights || []).slice(0, 1).map(o => actionHtml(o.locator)).join("")}${(t.stays || []).slice(0, 1).map(o => actionHtml(o.locator)).join("")}
+      ${t.variants.length ? `<span class="meta">+${t.variants.length} more date option${t.variants.length > 1 ? "s" : ""} in details</span>` : ""}</div>
+    ${details(detailInner)}
+  </div>`
+}
+
+// ── Page ─────────────────────────────────────────────────────────────────────
+
+async function load() {
+  const res = await fetch("/api/dealradar")
+  const feed = await res.json()
+  if (feed.error) throw new Error(feed.error)
+  document.getElementById("disclaimer").textContent =
+    "Deals found in this radar's own price observations — evidence-based, no seller claims. Recheck before booking."
+  const section = (title, note, inner) =>
+    `<div class="sect">${title}</div>${note ? `<div class="note">${esc(note)}</div>` : ""}${inner || '<div class="empty">no stored observations qualify yet</div>'}`
+  document.getElementById("main").innerHTML =
+    section("PACKAGE DEALS", null, feed.packages.map(packageCard).join("")) +
+    section("BUSINESS FARES — ROUND TRIP", null, feed.faresRoundTrip.cards.map(fareCard).join("")) +
+    section("BUSINESS FARES — ONE WAY", "One-way and round-trip fares are different products and are never compared.",
+      feed.faresOneWay.cards.map(fareCard).join("")) +
+    section("HOTEL RATES & DIY TRIPS", null,
+      (feed.stays.map(stayCard).join("") + feed.diy.map(diyCard).join("")) || "")
+}
+
+load().catch(err => {
+  document.getElementById("main").innerHTML = '<div class="empty">failed to load: ' + esc(err.message) + "</div>"
+})
+</script>
+</body>
+</html>

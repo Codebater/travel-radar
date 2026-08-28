@@ -47,6 +47,7 @@ import { getPackageObservation, latestComparisonsForTrip, packageTotals } from "
 import { currentMarketVerdictsForTrip, marketVerdictTotals } from "./market/verdict.js"
 import { assembleAllTripOffers } from "./offers/assemble.js"
 import { loadFareRadarConfig, parseTripType, TRIP_TYPES } from "./fareradar/config.js"
+import { buildDealRadarFeed } from "./dealradar/feed.js"
 import { recheckTopFares, runFareRadar } from "./fareradar/engine.js"
 import { candidatesForRun, latestFareRadarRun } from "./fareradar/store.js"
 import { getLocator as getOfferLocator } from "./offers/locators.js"
@@ -428,6 +429,22 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       const status = err instanceof BadRequest ? 400 : 500
       res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/dealradar — Phase 8l-a discovery feed. READ-ONLY over
+  // decisions that already exist: package verdicts, fare candidates + typical
+  // fares, stay candidates and composed trips. Runs no search, spends nothing;
+  // the only writes are the same deterministic locator upserts /api/offers does.
+  if (url.pathname === "/api/dealradar") {
+    try {
+      const db = getDb()
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(buildDealRadarFeed(db), null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
     return

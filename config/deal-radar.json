@@ -1,0 +1,27 @@
+{
+  "description": "Deal Radar policy — a READ-ONLY discovery layer over decisions the radar has already made. Section sizes and admission floors live here, never in code. The feed re-scores nothing: package verdicts, stay scores, fare deal scores, trip scores, comparability, confidence, maturity refusals and bounded verdict language all come from their owning modules verbatim.",
+  "updated": "2026-08-28",
+
+  "sections": {
+    "packages": {
+      "limit": 3,
+      "allInclusiveMinNights": 7,
+      "note": "One card per trip that has current-batch market verdicts; the lead verdict's reasons (incl. bounded statements) pass through VERBATIM. Best EXACT and best CLOSE are shown separately — a cheaper CLOSE never hides an EXACT. All-inclusive package DISCOVERY requires a real holiday length: all_inclusive cards below allInclusiveMinNights are excluded from THIS section only (a feed projection — the observations stay untouched and remain visible in the trips/market tooling); other boards and other sections are unaffected."
+    },
+    "fares": {
+      "limit": 5,
+      "businessFamilyOnly": true,
+      "note": "Cheapest-first from the latest finished run of EACH trip type. ROUND_TRIP and ONE_WAY are different products and never share a section, a baseline or a difference framed as a saving. Below typical-fare maturity a card says 'cheapest observed', never 'deal'."
+    },
+    "stays": {
+      "limit": 4,
+      "minScore": 35,
+      "note": "Top stay candidates by their EXISTING 8c-8e score; suspicious rows excluded. Meta quotes stay labelled as sightings, never as bookable rates."
+    },
+    "diy": {
+      "limit": 3,
+      "minScore": 40,
+      "note": "Top composed trips by their EXISTING 8f score; unknown costs are listed by name, never zeroed."
+    }
+  }
+}
