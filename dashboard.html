@@ -117,7 +117,15 @@ tailwind.config = {
   <section id="searchForm" class="mb-8 fade-in">
     <div class="bg-card rounded-xl p-6 border border-gray-700/50">
       <h2 class="text-lg font-bold mb-4 flex items-center gap-2">🔍 Search Flights</h2>
-      <form onsubmit="handleSearch(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-7 gap-4">
+      <form onsubmit="handleSearch(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-4">
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Trip</label>
+          <select id="inputTripType" onchange="tripTypeChanged()"
+            class="w-full px-3 py-2.5 rounded-lg text-sm bg-surface border border-gray-700 text-white">
+            <option value="ROUND_TRIP" selected>Round trip</option>
+            <option value="ONE_WAY">One way</option>
+          </select>
+        </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1">From</label>
           <input type="text" id="inputFrom" value="LAX" placeholder="LAX" maxlength="3"
@@ -133,8 +141,8 @@ tailwind.config = {
           <input type="date" id="inputDate" value="2026-04-28"
             class="w-full px-3 py-2.5 rounded-lg text-sm" />
         </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">Return <span class="text-gray-600">(optional)</span></label>
+        <div id="returnField">
+          <label class="block text-xs text-gray-400 mb-1">Return</label>
           <input type="date" id="inputReturn" value=""
             class="w-full px-3 py-2.5 rounded-lg text-sm" />
         </div>
@@ -567,7 +575,7 @@ function renderFlightCard(flight, idx) {
     const programName = programDisplayNames[flight.pointsProgram] || flight.pointsProgram;
     const cppClass = flight.cppValue ? getCppClass(flight.cppValue) : 'cpp-low';
     const seats = flight.availableSeats ? `${flight.availableSeats} seat${flight.availableSeats > 1 ? 's' : ''}` : '';
-    
+
     let statusBadge = '';
     if (dashboardData?.balances && flight.pointsProgram) {
       const bal = dashboardData.balances.find(b => b.programKey === flight.pointsProgram);
@@ -987,19 +995,40 @@ async function handleSearch(event) {
  * Issue one search against the API and render whatever comes back.
  * `refresh` bypasses the cache; `verify` asks the metered provider to confirm.
  */
+// Trip shape: ONE_WAY is a single outbound search — the return field
+// disappears so a return date can never ride along by accident.
+function tripTypeChanged() {
+  const oneWay = document.getElementById('inputTripType').value === 'ONE_WAY';
+  const field = document.getElementById('returnField');
+  field.style.display = oneWay ? 'none' : '';
+  if (oneWay) document.getElementById('inputReturn').value = '';
+}
+
 async function runSearchRequest({ from, to, date, refresh = false, verify = false }) {
-  const ret = document.getElementById('inputReturn').value;
+  const tripType = document.getElementById('inputTripType').value;
+  const ret = tripType === 'ONE_WAY' ? '' : document.getElementById('inputReturn').value;
   const cls = document.getElementById('inputClass').value;
+
+  // Explicit ROUND_TRIP requires its return date — the API would 400 anyway;
+  // say so here instead of a failed request.
+  const retInput = document.getElementById('inputReturn');
+  retInput.classList.remove('ring-2', 'ring-red-500');
+  if (tripType === 'ROUND_TRIP' && !ret) {
+    retInput.classList.add('ring-2', 'ring-red-500');
+    retInput.focus();
+    return;
+  }
 
   document.getElementById('loadingSection').classList.remove('hidden');
   document.getElementById('resultsSection').classList.add('hidden');
 
   const flexLabel = flexDays > 0 ? ` (±${flexDays} day${flexDays > 1 ? 's' : ''})` : '';
   document.getElementById('loadingText').textContent =
-    `${refresh ? 'Refreshing live prices for' : 'Searching'} ${from} → ${to}${flexLabel} across all programs...`;
+    `${refresh ? 'Refreshing live prices for' : 'Searching'} ${from} → ${to}${tripType === 'ONE_WAY' ? ' (one way)' : ''}${flexLabel} across all programs...`;
 
   try {
-    const params = new URLSearchParams({ from, to, date, return: ret, class: cls, flex: String(flexDays) });
+    const params = new URLSearchParams({ from, to, date, return: ret, class: cls, flex: String(flexDays), tripType });
+    if (tripType === 'ONE_WAY') params.delete('return');
     if (refresh) params.set('refresh', '1');
     if (verify) params.set('verify', '1');
     const searchUrl = './api/search?' + params.toString();
@@ -1103,7 +1132,7 @@ function displayResults() {
   `;
   
   const dateStr = new Date(m.departureDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  const retStr = m.returnDate ? ` → ${new Date(m.returnDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ' (one-way)';
+  const retStr = m.returnDate ? ` → ${new Date(m.returnDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ' · ONE WAY';
   document.getElementById('routeSubtitle').textContent = `${dateStr}${retStr}`;
   document.title = `${m.origin} → ${m.destination} Flight Search`;
   
@@ -1160,6 +1189,9 @@ async function init() {
         document.getElementById('inputTo').value = dashboardData.meta.destination || 'DXB';
         if (dashboardData.meta.departureDate) document.getElementById('inputDate').value = dashboardData.meta.departureDate;
         if (dashboardData.meta.returnDate) document.getElementById('inputReturn').value = dashboardData.meta.returnDate;
+        // Reflect the loaded search's trip shape in the selector.
+        document.getElementById('inputTripType').value = dashboardData.meta.returnDate ? 'ROUND_TRIP' : 'ONE_WAY';
+        tripTypeChanged();
       }
       
       displayResults();

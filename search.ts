@@ -31,9 +31,64 @@ import { getBalances, type PointsBalance } from "./providers/balances/index.js"
 import { buildRedemptionComparisons, type RedemptionComparison } from "./value-compare.js"
 import { getDb } from "./db/index.js"
 import { recordSearchRequest, saveSearchResult } from "./db/repositories.js"
+import { parseTripType, TRIP_TYPES, type TripType } from "./fareradar/config.js"
 
 // .env is loaded by the shared side-effect module so every entry point sees it.
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
+
+// ─── Trip shape (dashboard contract) ─────────────────────────────────────────
+// The main comparison flow is two one-way searches merged: awards price per
+// leg, and the reversed return-leg search exists only for round trips. These
+// helpers make that contract explicit and validated — reusing the Phase 8k
+// TripType, never a second enum.
+
+export interface TripSearchResolution {
+  tripType: TripType | null
+  error: string | null
+}
+
+/**
+ * Resolve the dashboard search's trip shape. An explicit tripType is strict
+ * (ONE_WAY forbids a return date, ROUND_TRIP requires one); an omitted one
+ * keeps the legacy contract — return present = round trip, absent = one way —
+ * so existing clients keep working unchanged.
+ */
+export function resolveTripSearch(tripTypeRaw: string | null, returnDate: string): TripSearchResolution {
+  if (tripTypeRaw === null || tripTypeRaw === "") {
+    return { tripType: returnDate ? "ROUND_TRIP" : "ONE_WAY", error: null }
+  }
+  const tripType = parseTripType(tripTypeRaw)
+  if (!tripType) {
+    return { tripType: null, error: `unknown tripType "${tripTypeRaw}" — expected one of ${TRIP_TYPES.join(", ")}` }
+  }
+  if (tripType === "ONE_WAY" && returnDate) {
+    return { tripType: null, error: "tripType ONE_WAY does not take a return date — remove it" }
+  }
+  if (tripType === "ROUND_TRIP" && !returnDate) {
+    return { tripType: null, error: "tripType ROUND_TRIP requires a return date" }
+  }
+  return { tripType, error: null }
+}
+
+export interface SearchLegPlan {
+  tripType: TripType
+  outbound: { origin: string; destination: string; departureDate: string; returnDate: string | undefined }
+  /** The reversed return-leg search — null for ONE_WAY: exactly one search,
+   *  no second reversed route, so a one-way payload can never contain a
+   *  return-direction flight (and the dashboard never shows step 2). */
+  returnLeg: { origin: string; destination: string; departureDate: string } | null
+}
+
+export function planSearchLegs(tripType: TripType, from: string, to: string, date: string, ret: string): SearchLegPlan {
+  if (tripType === "ONE_WAY") {
+    return { tripType, outbound: { origin: from, destination: to, departureDate: date, returnDate: undefined }, returnLeg: null }
+  }
+  return {
+    tripType,
+    outbound: { origin: from, destination: to, departureDate: date, returnDate: ret },
+    returnLeg: { origin: to, destination: from, departureDate: ret },
+  }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

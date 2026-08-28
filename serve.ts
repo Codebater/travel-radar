@@ -16,7 +16,7 @@ import http from "http"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
-import { runSearch, type SearchConfig, type DashboardResults } from "./search.ts"
+import { runSearch, resolveTripSearch, planSearchLegs, type SearchConfig, type DashboardResults } from "./search.ts"
 import { providerHealth } from "./providers/cash-flights/index.js"
 import { awardProviderHealth } from "./providers/award-flights/index.js"
 import { balancesHealth } from "./providers/balances/index.js"
@@ -906,6 +906,7 @@ const server = http.createServer(async (req, res) => {
   // Route: /api/search — trigger a live search
   if (url.pathname === "/api/search") {
     let from: string, to: string, date: string, ret: string, cls: string, flex: number, sources: string[]
+    let tripType: import("./fareradar/config.js").TripType
     let refresh = false, verify = false
     try {
       from = iata(url.searchParams.get("from") || "LAX", "from")
@@ -913,6 +914,11 @@ const server = http.createServer(async (req, res) => {
       date = isoDate(url.searchParams.get("date") || "2026-04-28", "date")
       const retRaw = url.searchParams.get("return") || ""
       ret = retRaw ? isoDate(retRaw, "return") : ""
+      // Explicit tripType is strict; omitted keeps the legacy inference
+      // (return present = round trip, absent = one way). Phase 8k enum reused.
+      const resolution = resolveTripSearch(url.searchParams.get("tripType"), ret)
+      if (resolution.error) throw new BadRequest(resolution.error)
+      tripType = resolution.tripType!
       cls = url.searchParams.get("class") || "both"
       if (!VALID_CLASSES.includes(cls)) throw new BadRequest(`Invalid class: expected one of ${VALID_CLASSES.join(", ")}`)
       const flexRaw = parseInt(url.searchParams.get("flex") || "0")
@@ -936,7 +942,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     console.log(
-      `🔍 API search: ${from}→${to} ${date}${ret ? ` ↩${ret}` : ''} ${cls} flex±${flex}` +
+      `🔍 API search: ${from}→${to} ${date}${ret ? ` ↩${ret}` : ' ONE WAY'} ${cls} flex±${flex}` +
       `${refresh ? " [refresh]" : ""}${verify ? " [verify]" : ""}`
     )
 
@@ -958,12 +964,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      // Build outbound search config
+      // Build outbound search config from the validated leg plan: ONE_WAY is
+      // exactly one search with no return date; ROUND_TRIP keeps its reversed
+      // return-leg search below, unchanged.
+      const legPlan = planSearchLegs(tripType, from, to, date, ret)
       const outboundConfig: SearchConfig = {
-        origin: from,
-        destination: to,
-        departureDate: date,
-        returnDate: ret || undefined,
+        origin: legPlan.outbound.origin,
+        destination: legPlan.outbound.destination,
+        departureDate: legPlan.outbound.departureDate,
+        returnDate: legPlan.outbound.returnDate,
         searchClass: cls as any,
         sources,
         output: path.join(ROOT, "results.json"),
@@ -997,12 +1006,12 @@ const server = http.createServer(async (req, res) => {
       }
       
       // If round trip, also search return direction
-      if (ret) {
-        console.log(`🔍 Searching return: ${to}→${from} ${ret}`)
+      if (legPlan.returnLeg) {
+        console.log(`🔍 Searching return: ${legPlan.returnLeg.origin}→${legPlan.returnLeg.destination} ${legPlan.returnLeg.departureDate}`)
         const returnConfig: SearchConfig = {
-          origin: to,
-          destination: from,
-          departureDate: ret,
+          origin: legPlan.returnLeg.origin,
+          destination: legPlan.returnLeg.destination,
+          departureDate: legPlan.returnLeg.departureDate,
           searchClass: cls as any,
           sources,
           output: path.join(ROOT, "results-return.json"),
