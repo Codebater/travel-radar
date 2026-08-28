@@ -25,6 +25,7 @@ import { allUsage, priceHistory, awardPriceHistory, latestSearchResult, saveSear
 import { listJobs, listRuns, readLease } from "./observer/store.js"
 import { projectMonthlyBudget } from "./observer/budget.js"
 import { observerHealth } from "./observer/health.js"
+import { buildObserverOverview } from "./observer/overview.js"
 import { listCandidates, getCandidate, recordFeedback } from "./anomaly/store.js"
 import { buildReport } from "./anomaly/report.js"
 import { loadAnomalyConfig } from "./anomaly/config.js"
@@ -210,6 +211,20 @@ const server = http.createServer(async (req, res) => {
           : { running: false },
         jobs, runs, projection, usage, observationTotals,
       }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/observer/overview — the PROJECT-WIDE observation status
+  // umbrella: which domain is scheduled where, last runs, observation counts.
+  // Pure reporting over existing ledgers — schedules nothing, invents nothing.
+  if (url.pathname === "/api/observer/overview") {
+    try {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(buildObserverOverview(getDb()), null, 2))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
