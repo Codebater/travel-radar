@@ -48,9 +48,10 @@
       "kind": "membership",
       "program": "IHG_ONE_REWARDS",
       "acquisitionCost": { "amount": 225, "currency": "USD" },
+      "acquisitionAlternatives": [{ "amount": 45000, "pointsProgram": "IHG_ONE_REWARDS" }],
       "sourceUrl": "https://www.ihg.com/intercontinental/content/us/en/ambassador/terms-conditions",
       "verifiedAt": "2026-08-28",
-      "note": "Paid annual InterContinental Ambassador membership. VERIFIED against the official T&C on 2026-08-28: purchase and renewal are each 'USD 225 or 45,000 IHG One Rewards points'. The points alternative cannot be encoded in acquisitionCost (single amount+currency) — this note is its record. This cost MUST be included whenever an Ambassador perk enters any later arithmetic. Purchase/renewal awards the annual Complimentary Weekend Night certificate."
+      "note": "Paid annual InterContinental Ambassador membership. VERIFIED against the official T&C on 2026-08-28: purchase and renewal are each 'USD 225 or 45,000 IHG One Rewards points' — the points alternative is machine-encoded in acquisitionAlternatives (cash and points stay separate; the optimizer may choose either, never mix). This cost MUST be included whenever an Ambassador perk enters any later arithmetic. Purchase/renewal awards the annual Complimentary Weekend Night certificate."
     }
   ],
   "certificates": []

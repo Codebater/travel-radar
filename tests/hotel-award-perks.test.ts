@@ -36,6 +36,11 @@ function rule(over: Partial<HotelPerkRule> = {}): HotelPerkRule {
     verifiedAt: "2026-08-28",
     verification: "source_page",
     affectsArithmetic: true,
+    repetition: "once_per_stay",
+    requiresCertificate: null,
+    requiredRateName: null,
+    constraints: [],
+    exclusions: [],
     ...over,
   }
 }
@@ -87,6 +92,49 @@ describe("the shipped configs", () => {
     expect(byId["hyatt-globalist-benefits"].verification).toBe("knowledge_encoded")
   })
 
+  it("the shipped rules carry machine-readable optimizer semantics exactly matching their verified conditions", () => {
+    const byId = Object.fromEntries(loadHotelPerkRules(true).rules.map(r => [r.id, r]))
+    // Marriott S5P4: once per redemption stay, one reservation, standard rooms, certs excluded.
+    const m = byId["marriott-award-5th-night-free"]
+    expect(m.repetition).toBe("once_per_stay")
+    expect(m.constraints).toEqual(["single_reservation", "standard_room_only"])
+    expect(m.exclusions).toEqual(["free_night_certificate"])
+    // Hilton 5th night: conservative once_per_stay floor; standard room, 100% Points.
+    const h = byId["hilton-award-5th-night-free"]
+    expect(h.repetition).toBe("once_per_stay")
+    expect(h.constraints).toEqual(["standard_room_only", "full_points_only"])
+    // IHG card: conservative once_per_stay floor; same reservation.
+    expect(byId["ihg-card-4th-night-free"].repetition).toBe("once_per_stay")
+    expect(byId["ihg-card-4th-night-free"].constraints).toEqual(["single_reservation"])
+    // Ambassador: certificate-consuming, named rate, weekend stay, no award/free-night combos.
+    const a = byId["ihg-ambassador-weekend-night"]
+    expect(a.repetition).toBe("once_per_certificate")
+    expect(a.requiresCertificate).toEqual({ type: "IHG_AMBASSADOR_WEEKEND_NIGHT", quantity: 1 })
+    expect(a.requiredRateName).toBe("Ambassador Complimentary Weekend Night")
+    expect(a.constraints).toEqual(["weekend_stay"])
+    expect(a.exclusions).toEqual(["award_redemption", "other_free_night_offers"])
+    // Benefit-only rules carry no arithmetic semantics at all.
+    for (const id of ["hilton-gold-fnb-credit", "marriott-platinum-welcome-gift", "hyatt-globalist-benefits"]) {
+      expect(byId[id].repetition).toBeNull()
+      expect(byId[id].requiresCertificate).toBeNull()
+      expect(byId[id].requiredRateName).toBeNull()
+      expect(byId[id].constraints).toEqual([])
+      expect(byId[id].exclusions).toEqual([])
+    }
+  })
+
+  it("the Ambassador purchasable badge echoes the verified points-priced acquisition alternative", () => {
+    const badges = applicablePerks(
+      stay({ program: "IHG_ONE_REWARDS", chain: "InterContinental", nights: 2 }),
+      loadHotelPerkRules(true), loadEntitlements(true),
+    )
+    const b = badges.find(x => x.ruleId === "ihg-ambassador-weekend-night")
+    expect(b).toBeDefined()
+    expect(b!.eligibility).toBe("purchasable")
+    expect(b!.acquisition!.cost).toEqual({ amount: 225, currency: "USD" })
+    expect(b!.acquisition!.alternatives).toEqual([{ amount: 45000, pointsProgram: "IHG_ONE_REWARDS" }])
+  })
+
   it("entitlements.json parses and holds NOTHING by default — entitlement is declared, never inferred", () => {
     const cfg = loadEntitlements(true)
     expect(validateEntitlements(cfg)).toEqual([])
@@ -101,7 +149,7 @@ describe("the shipped configs", () => {
     expect(b).toBeDefined()
     expect(b!.badgeLabel).toBe("5TH NIGHT BENEFIT")
     expect(b!.eligibility).toBe("purchasable")
-    expect(b!.acquisition).toEqual({ key: "MARRIOTT_BONVOY", cost: { amount: 0, currency: "USD" } })
+    expect(b!.acquisition).toEqual({ key: "MARRIOTT_BONVOY", cost: { amount: 0, currency: "USD" }, alternatives: [] })
   })
 
   it("a 5-night Hilton award stay needs status: badge is 'requires' — no free join can satisfy a status rule", () => {
@@ -224,7 +272,7 @@ describe("eligibility states", () => {
     })
     const [b] = applicablePerks(stay(), cfg, e)
     expect(b.eligibility).toBe("purchasable")
-    expect(b.acquisition).toEqual({ key: "MARRIOTT_BONVOY", cost: { amount: 0, currency: "USD" } })
+    expect(b.acquisition).toEqual({ key: "MARRIOTT_BONVOY", cost: { amount: 0, currency: "USD" }, alternatives: [] })
   })
 
   it("'requires' when nothing is held and no acquisition path is configured", () => {
@@ -239,6 +287,87 @@ describe("eligibility states", () => {
   })
 })
 
+// ── Machine-readable optimizer semantics ─────────────────────────────────────
+
+describe("optimizer-semantics validation", () => {
+  it("an arithmetic rule must state its repetition — prose notes are not machine-readable", () => {
+    const problems = validatePerkRules(rulesConfig([rule({ repetition: null })]))
+    expect(problems.some(p => p.includes("must state its repetition"))).toBe(true)
+  })
+
+  it("a benefit-only rule must not carry repetition semantics", () => {
+    const problems = validatePerkRules(rulesConfig([rule({ affectsArithmetic: false, repetition: "once_per_stay" })]))
+    expect(problems.some(p => p.includes("benefit-only rule"))).toBe(true)
+  })
+
+  it("certificate consumption and once_per_certificate must always travel together", () => {
+    expect(validatePerkRules(rulesConfig([rule({ repetition: "once_per_certificate", requiresCertificate: null })]))
+      .some(p => p.includes("requires requiresCertificate"))).toBe(true)
+    expect(validatePerkRules(rulesConfig([rule({ repetition: "once_per_stay", requiresCertificate: { type: "X_CERT", quantity: 1 } })]))
+      .some(p => p.includes("once_per_certificate"))).toBe(true)
+  })
+
+  it("refuses malformed certificate requirements, rate names, and unknown or duplicate constraint/exclusion values", () => {
+    const problems = validatePerkRules(rulesConfig([
+      rule({ id: "bad-cert", repetition: "once_per_certificate", requiresCertificate: { type: "lower", quantity: 0 } }),
+      rule({ id: "bad-rate", requiredRateName: "   " }),
+      rule({ id: "bad-constraint", constraints: ["breakfast_included" as never] }),
+      rule({ id: "dup-exclusion", exclusions: ["award_redemption", "award_redemption"] }),
+    ]))
+    expect(problems.some(p => p.includes("requiresCertificate.type"))).toBe(true)
+    expect(problems.some(p => p.includes("requiresCertificate.quantity"))).toBe(true)
+    expect(problems.some(p => p.includes("requiredRateName"))).toBe(true)
+    expect(problems.some(p => p.includes('unknown constraints value "breakfast_included"'))).toBe(true)
+    expect(problems.some(p => p.includes("must not contain duplicates"))).toBe(true)
+  })
+
+  it("refuses malformed acquisition alternatives", () => {
+    const problems = validateEntitlements(ents({
+      purchasable: [{
+        key: "X", kind: "membership", acquisitionCost: { amount: 225, currency: "USD" },
+        acquisitionAlternatives: [{ amount: 0, pointsProgram: "ihg points" }],
+        sourceUrl: "https://x.example", verifiedAt: "2026-08-28",
+      }],
+    }))
+    expect(problems.some(p => p.includes("acquisitionAlternatives[0].amount"))).toBe(true)
+    expect(problems.some(p => p.includes("acquisitionAlternatives[0].pointsProgram"))).toBe(true)
+  })
+})
+
+describe("certificate gating in the matcher", () => {
+  const certRule = rulesConfig([rule({
+    program: "IHG_ONE_REWARDS",
+    eligibility: { anyOf: ["membership:IHG_AMBASSADOR"] },
+    repetition: "once_per_certificate",
+    requiresCertificate: { type: "IHG_AMBASSADOR_WEEKEND_NIGHT", quantity: 1 },
+    stayPattern: { minNights: 2 },
+  })])
+  const bkk = stay({ program: "IHG_ONE_REWARDS", chain: "InterContinental", nights: 2 })
+
+  it("holding the membership without the declared certificate is NOT eligible — the missing certificate is named", () => {
+    const [b] = applicablePerks(bkk, certRule, ents({ held: { memberships: ["IHG_AMBASSADOR"], statuses: [], cards: [] } }))
+    expect(b.eligibility).toBe("requires")
+    expect(b.requires).toContain("certificate:IHG_AMBASSADOR_WEEKEND_NIGHT")
+  })
+
+  it("membership plus a declared certificate of sufficient quantity is eligible", () => {
+    const [b] = applicablePerks(bkk, certRule, ents({
+      held: { memberships: ["IHG_AMBASSADOR"], statuses: [], cards: [] },
+      certificates: [{ key: "IHG_AMBASSADOR_WEEKEND_NIGHT", program: "IHG_ONE_REWARDS", quantity: 1 }],
+    }))
+    expect(b.eligibility).toBe("eligible")
+    expect(b.requires).not.toContain("certificate:IHG_AMBASSADOR_WEEKEND_NIGHT")
+  })
+
+  it("badges pass the machine semantics through verbatim", () => {
+    const [b] = applicablePerks(bkk, certRule, ents())
+    expect(b.repetition).toBe("once_per_certificate")
+    expect(b.requiresCertificate).toEqual({ type: "IHG_AMBASSADOR_WEEKEND_NIGHT", quantity: 1 })
+    expect(b.constraints).toEqual([])
+    expect(b.exclusions).toEqual([])
+  })
+})
+
 // ── Doctrine: badges are display-only ────────────────────────────────────────
 
 describe("badges never carry a synthesized number", () => {
@@ -246,7 +375,9 @@ describe("badges never carry a synthesized number", () => {
     const [b] = applicablePerks(stay(), rulesConfig([rule()]), loadEntitlements(true))
     expect(Object.keys(b).sort()).toEqual([
       "acquisition", "affectsArithmetic", "appliesTo", "badgeLabel", "bookingChannel",
-      "displayBenefit", "eligibility", "perkType", "requires", "ruleId", "verification", "verifiedAt",
+      "constraints", "displayBenefit", "eligibility", "exclusions", "perkType",
+      "repetition", "requiredRateName", "requires", "requiresCertificate", "ruleId",
+      "verification", "verifiedAt",
     ])
     expect(b.affectsArithmetic).toBe(true) // a marker for a later phase — nothing here computed with it
   })

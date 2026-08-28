@@ -38,6 +38,38 @@ const ENTITLEMENTS_PATH = path.join(ROOT, "config", "entitlements.json")
 export type PerkApplicability = "award" | "cash" | "both"
 export type EntitlementKind = "membership" | "status" | "card"
 
+/** How often an arithmetic-relevant perk may apply. MACHINE-READABLE — the
+ *  future optimizer reads this field, never prose notes:
+ *    once_per_stay        — at most once per qualifying stay/reservation;
+ *    per_block            — repeats every stayPattern.minNights nights of the
+ *                           same qualifying stay (no current rule is source-
+ *                           verified for this yet — conservative floors below);
+ *    once_per_certificate — consumes exactly one certificate per use.
+ *  Required for affectsArithmetic rules; must be null on benefit-only rules. */
+export type PerkRepetition = "once_per_stay" | "per_block" | "once_per_certificate"
+
+/** A perk that consumes a certificate names its type (matched EXACTLY against
+ *  entitlements certificates[].key) and how many one use consumes. */
+export interface CertificateRequirement { type: string; quantity: number }
+
+/** Source-stated booking constraints — presence means the source states the
+ *  constraint; absence means the source does not state it (never permission). */
+export const PERK_CONSTRAINTS = [
+  "single_reservation",   // must be one reservation/confirmation number
+  "standard_room_only",   // standard rooms only, never premium
+  "full_points_only",     // 100% points redemption, not points+cash
+  "weekend_stay",         // the qualifying nights must be weekend nights
+] as const
+export type PerkConstraint = (typeof PERK_CONSTRAINTS)[number]
+
+/** Source-stated exclusions — stay shapes this perk can NEVER combine with. */
+export const PERK_EXCLUSIONS = [
+  "free_night_certificate",  // certificate-redemption stays are not eligible
+  "award_redemption",        // points/Reward-Night stays are not eligible
+  "other_free_night_offers", // not combinable with any other free-night offer
+] as const
+export type PerkExclusion = (typeof PERK_EXCLUSIONS)[number]
+
 export interface HotelPerkRule {
   id: string
   program: string
@@ -63,6 +95,19 @@ export interface HotelPerkRule {
   verificationEvidence?: string
   affectsArithmetic: boolean
   arithmeticNote?: string
+
+  // ── Machine-readable optimizer semantics (never prose-only) ──
+  /** Non-null exactly when affectsArithmetic — see PerkRepetition. */
+  repetition: PerkRepetition | null
+  /** Certificate this perk consumes; implies repetition once_per_certificate. */
+  requiresCertificate: CertificateRequirement | null
+  /** The exact named rate the booking must use, when the source dictates one
+   *  (e.g. the Ambassador 'Complimentary Weekend Night' rate); null = none. */
+  requiredRateName: string | null
+  /** Source-stated booking constraints (see PERK_CONSTRAINTS). */
+  constraints: PerkConstraint[]
+  /** Source-stated exclusions (see PERK_EXCLUSIONS). */
+  exclusions: PerkExclusion[]
 }
 
 export interface HotelPerkRulesConfig {
@@ -74,12 +119,19 @@ export interface HotelPerkRulesConfig {
 
 export interface AcquisitionCost { amount: number; currency: string }
 
+/** A points-denominated acquisition alternative, kept SEPARATE from cash
+ *  (cash and points never blend): e.g. Ambassador for 45,000 IHG points. */
+export interface AcquisitionAlternative { amount: number; pointsProgram: string }
+
 export interface PurchasableEntitlement {
   key: string
   kind: EntitlementKind
   program?: string
   /** Declared price — echoed on badges, never computed with. Null = price unknown. */
   acquisitionCost: AcquisitionCost | null
+  /** Declared points-priced alternatives to acquisitionCost, verbatim from
+   *  the source; the optimizer may choose either, never mix them. */
+  acquisitionAlternatives?: AcquisitionAlternative[]
   sourceUrl: string
   verifiedAt: string
   note?: string
@@ -140,6 +192,31 @@ export function validatePerkRules(config: HotelPerkRulesConfig): string[] {
     if (!r.sourceUrl?.startsWith("https://")) problems.push(`${at}: sourceUrl must be an https URL`)
     if (r.verification !== "source_page" && r.verification !== "knowledge_encoded") problems.push(`${at}: verification must be source_page|knowledge_encoded`)
     if (typeof r.affectsArithmetic !== "boolean") problems.push(`${at}: affectsArithmetic must be a boolean`)
+
+    // Machine-readable optimizer semantics — refused loudly, never defaulted.
+    const REPS: (PerkRepetition | null)[] = ["once_per_stay", "per_block", "once_per_certificate", null]
+    if (!REPS.includes(r.repetition)) problems.push(`${at}: repetition must be once_per_stay|per_block|once_per_certificate|null`)
+    if (r.affectsArithmetic === true && r.repetition === null) problems.push(`${at}: an arithmetic rule must state its repetition — prose notes are not machine-readable`)
+    if (r.affectsArithmetic === false && r.repetition !== null) problems.push(`${at}: a benefit-only rule must not carry repetition semantics`)
+    if (r.requiresCertificate !== null && r.requiresCertificate !== undefined) {
+      const c = r.requiresCertificate
+      if (!c.type || !KEY.test(c.type)) problems.push(`${at}: requiresCertificate.type must be UPPER_SNAKE`)
+      if (!Number.isInteger(c.quantity) || c.quantity < 1) problems.push(`${at}: requiresCertificate.quantity must be an integer ≥ 1`)
+      if (r.repetition !== "once_per_certificate") problems.push(`${at}: a certificate-consuming rule must have repetition once_per_certificate`)
+    } else if (r.repetition === "once_per_certificate") {
+      problems.push(`${at}: repetition once_per_certificate requires requiresCertificate`)
+    }
+    if (r.requiredRateName !== null && (typeof r.requiredRateName !== "string" || !r.requiredRateName.trim())) {
+      problems.push(`${at}: requiredRateName must be null or a non-empty rate name`)
+    }
+    for (const [field, list, vocab] of [
+      ["constraints", r.constraints, PERK_CONSTRAINTS as readonly string[]],
+      ["exclusions", r.exclusions, PERK_EXCLUSIONS as readonly string[]],
+    ] as const) {
+      if (!Array.isArray(list)) { problems.push(`${at}: ${field} must be an array (empty is valid)`); continue }
+      list.forEach(v => { if (!vocab.includes(v)) problems.push(`${at}: unknown ${field} value "${v}" — a typo here would silently drop an optimizer constraint`) })
+      if (new Set(list).size !== list.length) problems.push(`${at}: ${field} must not contain duplicates`)
+    }
   })
   return problems
 }
@@ -161,6 +238,13 @@ export function validateEntitlements(config: EntitlementsConfig): string[] {
     if (!KINDS.includes(p.kind)) problems.push(`${at}: kind must be membership|status|card`)
     if (p.acquisitionCost !== null && (typeof p.acquisitionCost?.amount !== "number" || p.acquisitionCost.amount < 0 || !p.acquisitionCost.currency?.trim())) {
       problems.push(`${at}: acquisitionCost must be null or {amount ≥ 0, currency}`)
+    }
+    if (p.acquisitionAlternatives !== undefined) {
+      if (!Array.isArray(p.acquisitionAlternatives)) problems.push(`${at}: acquisitionAlternatives must be an array`)
+      else p.acquisitionAlternatives.forEach((alt, j) => {
+        if (!Number.isInteger(alt?.amount) || alt.amount < 1) problems.push(`${at}: acquisitionAlternatives[${j}].amount must be an integer ≥ 1`)
+        if (!alt?.pointsProgram || !KEY.test(alt.pointsProgram)) problems.push(`${at}: acquisitionAlternatives[${j}].pointsProgram must be an UPPER_SNAKE program key`)
+      })
     }
     if (!p.sourceUrl?.startsWith("https://")) problems.push(`${at}: sourceUrl must be an https URL`)
     if (!DATE.test(p.verifiedAt ?? "")) problems.push(`${at}: verifiedAt must be YYYY-MM-DD`)
@@ -209,15 +293,23 @@ export interface PerkBadge {
   displayBenefit: string
   appliesTo: PerkApplicability
   eligibility: PerkEligibilityState
-  /** The rule's anyOf keys, verbatim — what would satisfy it. */
+  /** The rule's anyOf keys verbatim, plus `certificate:TYPE` when a declared
+   *  certificate is missing — what would satisfy it. */
   requires: string[]
   /** Declared acquisition price of the cheapest configured purchasable
-   *  satisfier — a config echo, present only on 'purchasable' badges. */
-  acquisition: { key: string; cost: AcquisitionCost | null } | null
+   *  satisfier plus its declared points-priced alternatives — config echoes,
+   *  present only on 'purchasable' badges. */
+  acquisition: { key: string; cost: AcquisitionCost | null; alternatives: AcquisitionAlternative[] } | null
   bookingChannel: string | null
   affectsArithmetic: boolean
   verifiedAt: string
   verification: HotelPerkRule["verification"]
+  // Machine-readable optimizer semantics, passed through verbatim.
+  repetition: PerkRepetition | null
+  requiresCertificate: CertificateRequirement | null
+  requiredRateName: string | null
+  constraints: PerkConstraint[]
+  exclusions: PerkExclusion[]
 }
 
 /** The observation fields matching needs — a subset of NormalizedHotelAward. */
@@ -276,7 +368,21 @@ export function applicablePerks(
         .sort((a, b) => (a.acquisitionCost?.amount ?? Infinity) - (b.acquisitionCost?.amount ?? Infinity))
       if (options.length > 0) {
         state = "purchasable"
-        acquisition = { key: options[0].key, cost: options[0].acquisitionCost }
+        acquisition = { key: options[0].key, cost: options[0].acquisitionCost, alternatives: options[0].acquisitionAlternatives ?? [] }
+      }
+    }
+
+    // A certificate-consuming perk is only 'eligible' when the DECLARED
+    // certificate stock covers one use — declared, never inferred. A
+    // 'purchasable' state stands on its own (whether purchase awards the
+    // certificate is the purchasable entry's business, not guessed here).
+    const requires = [...rule.eligibility.anyOf]
+    const cert = rule.requiresCertificate
+    if (cert && state === "eligible") {
+      const declared = ents.certificates.find(c => c.key === cert.type)?.quantity ?? 0
+      if (declared < cert.quantity) {
+        state = "requires"
+        requires.push(`certificate:${cert.type}`)
       }
     }
 
@@ -287,12 +393,17 @@ export function applicablePerks(
       displayBenefit: rule.displayBenefit,
       appliesTo: rule.appliesTo,
       eligibility: state,
-      requires: [...rule.eligibility.anyOf],
+      requires,
       acquisition,
       bookingChannel: rule.bookingChannel,
       affectsArithmetic: rule.affectsArithmetic,
       verifiedAt: rule.verifiedAt,
       verification: rule.verification,
+      repetition: rule.repetition,
+      requiresCertificate: rule.requiresCertificate,
+      requiredRateName: rule.requiredRateName,
+      constraints: [...rule.constraints],
+      exclusions: [...rule.exclusions],
     })
   }
 
