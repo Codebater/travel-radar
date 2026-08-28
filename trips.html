@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trip Composer — complete trips</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0f14; color: #d7dde5; font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  header { padding: 18px 22px 10px; border-bottom: 1px solid #1d2733; }
+  h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: 2px; color: #d9a7ff; }
+  .sub { color: #6b7a8c; font-size: 12px; }
+  .totals { padding: 10px 22px; color: #8fa1b5; font-size: 12px; border-bottom: 1px solid #141c26; }
+  main { padding: 14px 22px 40px; max-width: 1020px; }
+  .card { border: 1px solid #1d2733; border-radius: 8px; padding: 16px 18px; margin: 0 0 16px; background: #0f1520; }
+  .head { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline; }
+  .score { font-size: 24px; color: #d9a7ff; min-width: 64px; }
+  .route { font-size: 16px; color: #eef3f8; }
+  .klass { color: #7fd1b9; }
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 22px; margin-top: 12px; font-size: 13px; }
+  .cols h3 { margin: 0 0 4px; font-size: 11px; letter-spacing: 1px; color: #6b7a8c; }
+  .total { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #1d2733; font-size: 15px; color: #ffd479; }
+  .miles { color: #6fa8dc; }
+  .unknown { color: #8fa1b5; font-size: 12px; }
+  .badges { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid #314052; color: #a9bacd; }
+  .badge.good { border-color: #2c5d4b; color: #7fd1b9; }
+  .badge.warn { border-color: #6b5327; color: #ffd479; }
+  .empty { color: #6b7a8c; padding: 30px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>TRIP COMPOSER — COMPLETE TRIPS</h1>
+  <div class="sub">SHADOW MODE — composed from this radar's own observations. Meta prices are sightings, not confirmed
+  bookable rates. Cash and miles are separate figures by design. Unknown costs are named, never zeroed.</div>
+</header>
+<div class="totals" id="totals">loading…</div>
+<main id="main"><div class="empty">loading…</div></main>
+<script>
+const fmt = new Intl.NumberFormat("en-US")
+const money = (n, c) => (c === "USD" ? "$" : c + " ") + fmt.format(Math.round(n))
+
+async function load() {
+  const res = await fetch("/api/trips?limit=30&all")
+  const data = await res.json()
+  const t = data.totals
+  document.getElementById("totals").textContent =
+    `${t.trips} composed trips · ${t.interesting} interesting · ${t.rejected} rejected · top score ${t.topScore ?? "n/a"}`
+
+  const main = document.getElementById("main")
+  main.innerHTML = ""
+  if (!data.trips.length) {
+    main.innerHTML = '<div class="empty">No composed trips — run trips:compose.</div>'
+    return
+  }
+
+  for (const trip of data.trips) {
+    const card = document.createElement("div")
+    card.className = "card"
+    const fd = trip.flightDetail || {}
+    const sd = trip.stayDetail || {}
+    const legs = (fd.legs || []).map(l => {
+      const price = l.price ? money(l.price.amount, l.price.currency) + "/person" : null
+      const pts = l.points ? fmt.format(l.points.miles) + " " + l.points.program + "/person" : null
+      const tax = l.taxes ? " + " + money(l.taxes.amount, l.taxes.currency) + " taxes" : ""
+      return `${l.direction}: ${l.airline ?? "?"} ${pts ?? price ?? "?"}${tax}${l.stops != null ? " · " + l.stops + " stop(s)" : ""}`
+    }).join("<br>")
+    const miles = (trip.milesComponents || []).map(m => fmt.format(m.miles) + " " + m.program).join(" + ")
+    const cash = trip.cashTotal ? money(trip.cashTotal.amount, trip.cashTotal.currency)
+      : (trip.cashComponents || []).map(c => money(c.amount, c.currency)).join(" + ")
+
+    card.innerHTML = `
+      <div class="head">
+        <span class="score">${trip.score}</span>
+        <span class="route">${trip.origin} → ${trip.destinationAirport} · ${trip.nights} nights</span>
+        <span class="klass">${(trip.cabin ?? "?").toUpperCase()} + ${trip.board.replace(/_/g, " ")}</span>
+        ${trip.status === "rejected" ? '<span class="badge warn">REJECTED: ' + (trip.rejectionReason ?? "") + "</span>" : ""}
+      </div>
+      <div class="cols">
+        <div><h3>FLIGHT (${trip.construction})</h3>${legs || "?"}<br><span class="unknown">out ${trip.outboundDeparture}${trip.returnDeparture ? " · back " + trip.returnDeparture : ""} · quality ${trip.flightScore ?? "—"}</span></div>
+        <div><h3>STAY</h3>${sd.propertyName ?? trip.propertyId}<br>${sd.nightly} ${sd.currency}/night (${sd.verificationStatus === "verified" ? "verified" : sd.verificationStatus ?? ""})<br>${money(sd.stayTotal ?? 0, sd.currency ?? "USD")} total · ${trip.board.replace(/_/g, " ")} · taxes ${sd.taxStatus}<br><span class="unknown">${trip.checkIn} → ${trip.checkOut} · quality ${trip.stayScore ?? "—"}</span></div>
+      </div>
+      <div class="total">TOTAL: ${cash}${miles ? ' <span class="miles">+ ' + miles + "</span>" : ""}
+        ${trip.unknownCosts.length ? '<div class="unknown">unknown: ' + trip.unknownCosts.join("; ") + "</div>" : ""}
+      </div>
+      <div class="badges">${(trip.reasons || []).map(r =>
+        `<span class="badge ${/EXCEPTIONAL|VERIFIED|ALL_INCLUSIVE|DATES_ALIGN|ANOMALY|WTF|EXTREME/.test(r) ? "good" : /UNKNOWN|COMPLEXITY|OVERPRICED/.test(r) ? "warn" : ""}">${r}</span>`).join("")}
+      </div>`
+    main.appendChild(card)
+  }
+}
+load().catch(err => {
+  document.getElementById("main").innerHTML = '<div class="empty">failed to load: ' + err.message + "</div>"
+})
+</script>
+</body>
+</html>

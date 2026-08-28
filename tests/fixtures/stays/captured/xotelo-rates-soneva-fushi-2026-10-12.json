@@ -1,0 +1,29 @@
+{
+  "error": null,
+  "result": {
+    "chk_in": "2026-10-12",
+    "chk_out": "2026-10-17",
+    "currency": "USD",
+    "rates": [
+      {
+        "code": "BookingCom",
+        "name": "Booking.com",
+        "rate": 2422,
+        "tax": null
+      },
+      {
+        "code": "CtripTA",
+        "name": "Trip.com",
+        "rate": 2872,
+        "tax": null
+      },
+      {
+        "code": "Vio",
+        "name": "Vio.com",
+        "rate": 2588,
+        "tax": null
+      }
+    ]
+  },
+  "timestamp": 1787906453934
+}

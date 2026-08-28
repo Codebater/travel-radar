@@ -1,0 +1,17 @@
+{
+  "error": null,
+  "result": {
+    "chk_in": "2026-12-28",
+    "chk_out": "2027-01-02",
+    "currency": "USD",
+    "rates": [
+      {
+        "code": "BookingCom",
+        "name": "Booking.com",
+        "rate": 18991,
+        "tax": null
+      }
+    ]
+  },
+  "timestamp": 1787906476914
+}

@@ -1,0 +1,15 @@
+{
+  "error": null,
+  "result": {
+    "hotel_key": "g3252668-d301967",
+    "currency": "USD",
+    "chk_in": "2026-11-10",
+    "chk_out": "2026-11-15",
+    "rates": [
+      { "code": "BookingCom", "name": "Booking.com", "rate": 2393, "tax": null },
+      { "code": "CtripTA", "name": "Trip.com", "rate": 2872, "tax": null },
+      { "code": "Expedia", "name": "Expedia.com", "rate": 2510, "tax": 310 }
+    ]
+  },
+  "timestamp": 1787654321
+}

@@ -1,0 +1,102 @@
+{
+  "propertyName": "Lily Beach Resort & Spa - All Inclusive",
+  "propertyId": 41483,
+  "propertyType": "hotel",
+  "cityId": 17759,
+  "countryId": 34,
+  "searchCriteriaDescription": "Nov 10 - Nov 15, 2 guests",
+  "searchToken": "CgYIgL3J1wYSBgiA7OPXBhgFIIvEAioKCAIYAUoECgIIAjIGCgIIARIA",
+  "isSoldOut": false,
+  "rooms": [
+    {
+      "typeId": 3132669,
+      "isSoldOut": false,
+      "name": "Lagoon Villa",
+      "features": [
+        { "text": "90 m²/969 ft²", "type": "ROOM_SIZE" },
+        { "text": "Max 2 adults", "type": "MAX_OCCUPANCY" },
+        { "text": "1 king bed", "type": "BEDROOM_LAYOUT" }
+      ],
+      "offers": [
+        {
+          "typeId": 3132669,
+          "name": "Premium All Inclusive - Platinum Plan with Unlimited Benefits",
+          "stayPackageType": "AGODA_SPECIAL_OFFER",
+          "filterTags": ["breakfast-include", "book-now-pay-later", "free-cancellation", "king-bed"],
+          "price": {
+            "original": { "amount": "1,123", "currency": "USD", "text": "USD 1,123" },
+            "final": { "amount": "937", "currency": "USD", "text": "USD 937", "amountNumber": 937 },
+            "priceInfo": ["per night incl. taxes & fees"]
+          },
+          "benefits": [
+            { "text": "Breakfast Included" },
+            { "text": "Lunch included" },
+            { "text": "Dinner included" },
+            { "text": "All Inclusive" },
+            { "text": "Water Activities" }
+          ],
+          "policies": [
+            { "name": "Payment", "descriptions": ["Pay nothing until Oct 25, 2026"] },
+            {
+              "name": "Cancellation policy",
+              "descriptions": [
+                "Free Cancellation",
+                "Stay flexible! Cancel for free before Oct 27, 2026\nAny cancellation received within 14 days prior to the arrival date will be charged for the entire stay."
+              ]
+            }
+          ],
+          "bookingDetails": {
+            "isInclusive": true,
+            "isBreakfastIncluded": true,
+            "isFreeCancellation": true,
+            "isBookNowPayLater": true,
+            "isEasyCancel": false
+          }
+        },
+        {
+          "typeId": 3132669,
+          "name": "Room Only - Saver",
+          "price": {
+            "final": { "amount": "610", "currency": "USD", "text": "USD 610", "amountNumber": 610 },
+            "priceInfo": ["per night before taxes"]
+          },
+          "benefits": [],
+          "policies": [
+            { "name": "Cancellation policy", "descriptions": ["Non-refundable rate. No changes or cancellation."] }
+          ],
+          "bookingDetails": {
+            "isBreakfastIncluded": false,
+            "isFreeCancellation": false
+          }
+        }
+      ]
+    },
+    {
+      "typeId": 3132700,
+      "isSoldOut": false,
+      "name": "Deluxe Water Villa",
+      "features": [{ "text": "125 m²", "type": "ROOM_SIZE" }],
+      "offers": [
+        {
+          "typeId": 3132700,
+          "name": "Platinum Plan",
+          "price": {
+            "final": { "amount": "1,412", "currency": "USD", "text": "USD 1,412", "amountNumber": 1412 },
+            "priceInfo": ["per night incl. taxes & fees"]
+          },
+          "benefits": [{ "text": "All Inclusive" }],
+          "policies": [],
+          "bookingDetails": { "isFreeCancellation": true }
+        },
+        {
+          "typeId": 3132700,
+          "name": "Mystery Deal",
+          "price": { "final": { "text": "see site" } },
+          "benefits": [],
+          "policies": [],
+          "bookingDetails": {}
+        }
+      ]
+    }
+  ]
+}

@@ -26,6 +26,14 @@ process.env.ATF_API_KEY = ""
 process.env.SERPAPI_MONTHLY_BUDGET ??= "90"
 process.env.SERPAPI_RESERVE_CALLS ??= "10"
 
+// Xotelo is KEYLESS, so blanking a credential cannot protect us. Point its
+// base URL at an unroutable loopback port instead: a stay test that forgets
+// to inject a fetch stub fails fast with a connection error rather than
+// quietly hammering a donation-run public API from CI.
+process.env.XOTELO_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
+process.env.AGODA_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
+process.env.SERPAPI_HOTELS_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
+
 // Backups go to a throwaway directory for the same reason the database does.
 // Without this, any test that runs the scheduler writes a snapshot of the test
 // database into the operator's REAL backup set — which then looks like the

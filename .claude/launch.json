@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "travel-radar",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "serve.ts"],
+      "port": 8888
+    }
+  ]
+}

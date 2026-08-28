@@ -1,0 +1,61 @@
+{
+  "search_metadata": { "id": "test", "status": "Success" },
+  "search_parameters": {
+    "engine": "google_hotels",
+    "q": "Lily Beach Resort & Spa",
+    "check_in_date": "2026-11-15",
+    "check_out_date": "2026-11-20",
+    "adults": 2,
+    "currency": "USD"
+  },
+  "properties": [
+    {
+      "type": "hotel",
+      "name": "Sun Siyam Vilu Reef",
+      "property_token": "tok_other",
+      "rate_per_night": { "lowest": "$451", "extracted_lowest": 451 },
+      "total_rate": { "lowest": "$2,255", "extracted_lowest": 2255 },
+      "prices": [
+        { "source": "Booking.com", "rate_per_night": { "lowest": "$451", "extracted_lowest": 451 } }
+      ]
+    },
+    {
+      "type": "hotel",
+      "name": "Lily Beach Resort & Spa - All Inclusive",
+      "property_token": "tok_lily",
+      "hotel_class": "5-star hotel",
+      "extracted_hotel_class": 5,
+      "rate_per_night": {
+        "lowest": "$1,088",
+        "extracted_lowest": 1088,
+        "before_taxes_fees": "$944",
+        "extracted_before_taxes_fees": 944
+      },
+      "total_rate": {
+        "lowest": "$5,440",
+        "extracted_lowest": 5440,
+        "before_taxes_fees": "$4,720",
+        "extracted_before_taxes_fees": 4720
+      },
+      "prices": [
+        {
+          "source": "Official site",
+          "num_guests": 2,
+          "rate_per_night": { "lowest": "$1,088", "extracted_lowest": 1088, "before_taxes_fees": "$944", "extracted_before_taxes_fees": 944 }
+        },
+        {
+          "source": "Booking.com",
+          "num_guests": 2,
+          "rate_per_night": { "lowest": "$1,112", "extracted_lowest": 1112 }
+        },
+        {
+          "source": "Agoda",
+          "num_guests": 2,
+          "rate_per_night": { "lowest": "$1,095", "extracted_lowest": 1095, "before_taxes_fees": "$950", "extracted_before_taxes_fees": 950 }
+        },
+        { "source": "Ghost OTA" },
+        { "rate_per_night": { "lowest": "$1", "extracted_lowest": 0 } }
+      ]
+    }
+  ]
+}

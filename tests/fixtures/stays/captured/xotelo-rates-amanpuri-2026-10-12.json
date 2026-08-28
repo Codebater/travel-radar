@@ -1,0 +1,17 @@
+{
+  "error": null,
+  "result": {
+    "chk_in": "2026-10-12",
+    "chk_out": "2026-10-16",
+    "currency": "USD",
+    "rates": [
+      {
+        "code": "DerbySoft",
+        "name": "Official Site",
+        "rate": 1856,
+        "tax": null
+      }
+    ]
+  },
+  "timestamp": 1787906425853
+}

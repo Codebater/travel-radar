@@ -38,6 +38,11 @@ import { NtfyChannel } from "./notifications/providers/ntfy.js"
 import { immediatesToday, listEvents, listNotifications, listQueue } from "./notifications/store.js"
 import { isQuiet, localDay } from "./notifications/quiet-hours.js"
 import { credentialWarnings } from "./notifications/credentials.js"
+import { listStayCandidates, stayCandidateTotals } from "./stays/candidates.js"
+import { loadStaysConfig } from "./stays/config.js"
+import { listStayWindows } from "./stays/windows.js"
+import { buildStayOpportunities } from "./stays/opportunities.js"
+import { listTrips, tripTotals } from "./trips/store.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
@@ -244,6 +249,65 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       const status = err instanceof BadRequest ? 400 : 500
       res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/stays/deals — Phase 8c stay opportunities. Read-only over
+  // decisions that already exist: runs no search, spends no budget. Meta
+  // (Xotelo) and retail (Agoda) numbers are DIFFERENT PRODUCTS and are served
+  // labelled, never blended — the page must not present a meta quote as
+  // bookable unless a retail confirmation exists.
+  if (url.pathname === "/api/stays/deals") {
+    try {
+      const db = getDb()
+      const config = loadStaysConfig()
+      const minRaw = url.searchParams.get("min")
+      const limitRaw = Number(url.searchParams.get("limit") ?? 25)
+      const candidates = listStayCandidates(db, {
+        minScore: minRaw !== null && Number.isFinite(Number(minRaw)) ? Number(minRaw) : 0,
+        limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 25,
+      }).filter(c => c.status !== "suspicious")
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        mode: "shadow",
+        disclaimer: "EXPERIMENTAL — scores are this radar's own opinion of its own observations. Meta prices are aggregator sightings, not confirmed bookable rates.",
+        threshold: config.anomaly.candidateThreshold,
+        engineVersion: config.anomaly.engineVersion,
+        totals: stayCandidateTotals(db),
+        windows: listStayWindows(db, { limit: 15 }),
+        opportunities: buildStayOpportunities(db, { limit: 15 }),
+        candidates,
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/trips — Phase 8f composed complete-trip opportunities.
+  // Read-only over stored compositions: runs no search, spends no budget.
+  // Cash and miles are served as SEPARATE figures, never blended.
+  if (url.pathname === "/api/trips") {
+    try {
+      const db = getDb()
+      const limitRaw = Number(url.searchParams.get("limit") ?? 20)
+      const minRaw = url.searchParams.get("min")
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        mode: "shadow",
+        disclaimer: "EXPERIMENTAL — composed from this radar's own observations. Meta prices are sightings, not confirmed bookable rates; unknown costs are named, never zeroed.",
+        totals: tripTotals(db),
+        trips: listTrips(db, {
+          minScore: minRaw !== null && Number.isFinite(Number(minRaw)) ? Number(minRaw) : 0,
+          limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20,
+          status: url.searchParams.get("all") !== null ? undefined : "interesting",
+        }),
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
     return

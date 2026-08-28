@@ -1,0 +1,79 @@
+{
+  "description": "Trip Composer policy. Config, never code. The composer judges COMPLETE trips: a mediocre hotel deal can form an exceptional trip with an exceptional flight and vice versa — but ordinary × ordinary must stay silent, and an absurdly overpriced component must be able to kill a trip regardless of its partner.",
+  "updated": "2026-08-28",
+
+  "travellers": {
+    "adults": 2,
+    "adultsNote": "Trip costs are for the whole party: airfare × adults + one room. Matches the stay radar's 2-adult observation posture."
+  },
+
+  "origins": ["VIE", "PRG"],
+
+  "matching": {
+    "maxArrivalLeadDays": 2,
+    "maxArrivalLeadNote": "A flight departing up to this many days before check-in counts as compatible (long-haul overnight arrivals land next day). Departure on the check-in date itself is compatible only for same-day-arrival routes — we cannot see arrival times reliably, so the buffer is conservative and the exact dates are always shown. Nothing is ever manufactured: only stored flight dates match stored stay windows.",
+    "maxReturnLagDays": 2,
+    "maxFlightAgeDays": 14,
+    "maxFlightAgeNote": "A flight observation older than this is a memory, not an offer — excluded from composition.",
+    "maxStayWindows": 20,
+    "maxFlightsPerStay": 5,
+    "maxTripsPerCompose": 200,
+    "ceilingNote": "Hard combination ceilings: the composer starts from strong components and joins plausible neighbours; it never Cartesian-products the tables. Every ceiling that bites is reported."
+  },
+
+  "admission": {
+    "description": "Gates INTO scoring. Components below their standalone candidate thresholds are deliberately admissible — the trip is the unit of judgement — but at least one of these gates must pass. Quality inputs are 0..1.",
+    "exceptionalComponent": 0.6,
+    "reasonableComponent": 0.25,
+    "strongPair": 0.45,
+    "tripAbsoluteAlone": 0.7,
+    "gates": [
+      "EXCEPTIONAL_FLIGHT_REASONABLE_STAY",
+      "EXCEPTIONAL_STAY_REASONABLE_FLIGHT",
+      "STRONG_FLIGHT_STRONG_STAY",
+      "EXCEPTIONAL_TRIP_ABSOLUTE_VALUE"
+    ]
+  },
+
+  "scoring": {
+    "weights": {
+      "strongestComponent": 0.3,
+      "weakerComponent": 0.15,
+      "tripAbsolute": 0.2,
+      "dateCompatibility": 0.1,
+      "evidence": 0.15,
+      "usability": 0.1
+    },
+    "weightsNote": "NOT an average of flight and stay scores: the strongest component carries twice the weaker one, so one exceptional side can carry a reasonable partner, while tripAbsolute rewards the complete vacation being objectively cheap. Uncomputable components drop and renormalise; computed zeros keep their weight (flight-radar doctrine).",
+    "complexityPenalties": {
+      "positioning": 0.08,
+      "openJaw": 0.08,
+      "airportChange": 0.05,
+      "longLayover": 0.03,
+      "maxTotal": 0.2,
+      "penaltyNote": "Subtracted from the assembled score (×100), never a component — a penalty cannot be outvoted by a discount."
+    },
+    "overpricedKill": {
+      "multipleOfMedian": 1.25,
+      "capScore": 25,
+      "note": "A component priced at or above this multiple of its OWN comparable median is absurd for a deal radar; the trip is capped here and marked COMPONENT_OVERPRICED regardless of how good the partner is. No median on record = no kill (unknown is not absurd)."
+    },
+    "flightQualityNote": "Flight quality (0..1) = the flight candidate's stored score/100 where the anomaly engine judged it, else the flight ABSOLUTE rules ramp (config/anomaly.json), else 0 — with 'reasonable' meaning sane and within sanity bounds, not scored."
+  },
+
+  "absolute": {
+    "currency": "USD",
+    "description": "Trip-class bars: is the COMPLETE vacation objectively cheap? Judged as all-known-cash-per-night for the whole party ((airfare × adults + stay total) / nights), single-currency only — mixed-currency trips are uncomputable here, never converted. Award trips are judged on their CASH portion only, with the miles shown beside it; a cash bar cannot price miles. Bars derived conservatively 2026-08-28 from the radar's own observations (Lily ~$833-1000/nt AI verified + typical VIE⇄MLE fares) and set BELOW plausible normals so ordinary vacations cannot fire them.",
+    "rules": {
+      "maldives|all_inclusive|business": { "interesting": 1450, "extreme": 1200, "wtf": 950 },
+      "maldives|all_inclusive|economy": { "interesting": 1000, "extreme": 820, "wtf": 650 },
+      "maldives|any|business": { "interesting": 1800, "extreme": 1450, "wtf": 1100 },
+      "maldives|any|economy": { "interesting": 1200, "extreme": 950, "wtf": 750 },
+      "riviera-maya|all_inclusive|business": { "interesting": 1100, "extreme": 900, "wtf": 700 },
+      "riviera-maya|all_inclusive|economy": { "interesting": 750, "extreme": 600, "wtf": 470 },
+      "thailand-beach|any|economy": { "interesting": 650, "extreme": 520, "wtf": 400 },
+      "thailand-beach|any|business": { "interesting": 1100, "extreme": 880, "wtf": 680 }
+    },
+    "historyNote": "trip_opportunities rows are the future trip-baseline substrate. v1 does NOT judge from that history — there is none — and when a later phase does, it must use the same no-look-ahead discipline as every other baseline in this repo."
+  }
+}

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stay Radar — opportunities</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0f14; color: #d7dde5; font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  header { padding: 18px 22px 10px; border-bottom: 1px solid #1d2733; }
+  h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: 2px; color: #7fd1b9; }
+  .sub { color: #6b7a8c; font-size: 12px; }
+  .totals { padding: 10px 22px; color: #8fa1b5; font-size: 12px; border-bottom: 1px solid #141c26; }
+  main { padding: 14px 22px 40px; max-width: 1080px; }
+  .card { border: 1px solid #1d2733; border-radius: 8px; padding: 14px 16px; margin: 0 0 14px; background: #0f1520; }
+  .card.candidate { border-color: #2c5d4b; }
+  .row1 { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+  .score { font-size: 22px; color: #7fd1b9; min-width: 62px; }
+  .prop { font-size: 15px; color: #eef3f8; }
+  .group { color: #6b7a8c; }
+  .dates { color: #b8c4d1; }
+  .price { font-size: 16px; color: #ffd479; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 6px 18px; margin-top: 10px; font-size: 12.5px; }
+  .grid b { color: #9fb2c6; font-weight: 600; }
+  .badges { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid #314052; color: #a9bacd; }
+  .badge.good { border-color: #2c5d4b; color: #7fd1b9; }
+  .badge.warn { border-color: #6b5327; color: #ffd479; }
+  .srcline { margin-top: 10px; font-size: 12px; color: #8fa1b5; border-top: 1px dashed #1d2733; padding-top: 8px; }
+  .meta-tag { color: #6fa8dc; }
+  .retail-tag { color: #93c47d; }
+  .caution { color: #e6b26b; }
+  .empty { color: #6b7a8c; padding: 30px 0; }
+  a { color: #6fa8dc; }
+</style>
+</head>
+<body>
+<header>
+  <h1>STAY RADAR — OPPORTUNITIES</h1>
+  <div class="sub">SHADOW MODE — the radar's own opinion of its own observations. Nothing here sends alerts or spends budget.
+  Meta prices are aggregator sightings, <b>not</b> confirmed bookable rates.</div>
+</header>
+<div class="totals" id="totals">loading…</div>
+<main id="main"><div class="empty">loading…</div></main>
+<script>
+const fmt = new Intl.NumberFormat("en-US")
+const money = (n, c) => n == null ? "—" : `${fmt.format(Math.round(n))} ${c}`
+
+async function load() {
+  const res = await fetch("/api/stays/deals?limit=40")
+  const data = await res.json()
+  const t = data.totals
+  document.getElementById("totals").textContent =
+    `${t.decisions} decisions · ${t.candidates} candidates ≥ ${data.threshold} · ` +
+    `evidence: ${t.metaOnly} meta-only / ${t.retailConfirmed} meta+retail-confirmed / ${t.retail} retail · ` +
+    `top score ${t.topScore ?? "n/a"} · engine ${data.engineVersion}`
+
+  const main = document.getElementById("main")
+  main.innerHTML = ""
+  if (!data.candidates.length) {
+    main.innerHTML = '<div class="empty">No stay decisions stored yet — run stays:evaluate.</div>'
+    return
+  }
+
+  for (const c of data.candidates) {
+    const cross = (c.evidence && c.evidence.crossSource) || {}
+    const card = document.createElement("div")
+    card.className = "card" + (c.status === "candidate" ? " candidate" : "")
+
+    const baseline = c.sampleSize > 0
+      ? `${money(c.observedMedian, c.priceCurrency)}/nt median · ${c.percentBelowMedian}% below · ` +
+        `${c.percentile}th pct of ${c.sampleSize} obs (${c.baselineConfidence}${c.baselineScope !== "strict" ? ", " + c.baselineScope : ""})`
+      : "no baseline (capped decision)"
+
+    const sourceLabel = c.sourceClass === "retail"
+      ? `<span class="retail-tag">RETAIL (Agoda) — room-level, bookable-grade quote</span>`
+      : `<span class="meta-tag">META (Xotelo/TripAdvisor via ${c.rateSource ?? "?"}) — aggregator sighting, not verified bookable</span>`
+
+    const crossLine = c.sourceClass === "retail"
+      ? ""
+      : cross.retailMinNightly != null
+        ? `<div>retail check (same window, labelled separately — different product, never blended): ` +
+          `cheapest Agoda room <b class="retail-tag">${money(cross.retailMinNightly, cross.retailCurrency)}/nt</b>` +
+          (cross.retailSpreadPercent != null ? ` (${cross.retailSpreadPercent > 0 ? "+" : ""}${cross.retailSpreadPercent}% vs meta${cross.retailSpreadHigh ? ' — <span class="caution">meta price may not be bookable at retail</span>' : ""})` : "") +
+          `</div>`
+        : `<div class="caution">meta-only: no retail confirmation on record for this window</div>`
+
+    card.innerHTML = `
+      <div class="row1">
+        <span class="score">${c.score}</span>
+        <span class="prop">${c.propertyName}</span>
+        <span class="group">${c.destinationGroup}</span>
+        <span class="dates">${c.checkIn} → ${c.checkOut} (${c.nights}n, ${c.board.replace(/_/g, " ")})</span>
+        <span class="price">${money(c.nightlyAmount, c.priceCurrency)}/nt</span>
+        <span class="group">${c.stayTotal != null ? "stay " + money(c.stayTotal, c.priceCurrency) : ""} ${c.taxesFees === "included" ? "· taxes included" : c.taxesFees === "unknown" ? "· taxes unknown" : "· taxes " + c.taxesFees}</span>
+      </div>
+      <div class="grid">
+        <div><b>room</b> ${c.roomName ?? "(property-level quote)"} ${c.roomClass ? "· " + c.roomClass : ""}</div>
+        <div><b>baseline</b> ${baseline}</div>
+        <div><b>absolute</b> ${c.absoluteTier ? c.absoluteTier.toUpperCase() + " (" + c.absoluteRulePath + ")" : c.absoluteRulePath === "none" ? "no rule for this product" : "ordinary"}</div>
+        <div><b>evidence</b> ${c.verificationLevel} · ${c.confirmationState.replace(/_/g, " ")}${c.verificationStatus === "verified" ? " · GOOGLE-VERIFIED" : ""}</div>
+        <div><b>concepts</b> rel ${c.relativeScore ?? "—"} · abs ${c.absoluteValueScore ?? "—"} · evid ${c.evidenceScore ?? "—"} · act ${c.actionabilityScore ?? "—"}</div>
+      </div>
+      <div class="badges">${c.reasons.map(r =>
+        `<span class="badge ${/CONFIRMED|TAX_INCLUDED|ALL_INCLUSIVE_UNDER|NEW_OBSERVED/.test(r) ? "good" : /THIN|META_ONLY|SPREAD_HIGH|STALE|NO_BASELINE|PROPERTY_DEFAULT/.test(r) ? "warn" : ""}">${r}</span>`).join("")}
+      </div>
+      <div class="srcline">${sourceLabel}${crossLine}</div>`
+    main.appendChild(card)
+  }
+}
+load().catch(err => {
+  document.getElementById("main").innerHTML = '<div class="empty">failed to load: ' + err.message + "</div>"
+})
+</script>
+</body>
+</html>
