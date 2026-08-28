@@ -1,0 +1,41 @@
+# What must never be baked into an image.
+#
+# Secrets and live data first: the image is content-addressable and copies of
+# it outlive intentions. A database layer in an image is a stale fork waiting
+# to be mistaken for the real one; a .env layer is a leak with a checksum.
+.env
+backups/
+*.db
+*.db-wal
+*.db-shm
+
+# results*.json carry real loyalty balances (a Phase 1 finding - they were
+# committed to a public repo once already; they do not get a second chance).
+results.json
+results-*.json
+serpapi-usage.json
+
+# Build noise and things the runtime never touches.
+# data/ is three different things: the live database (mounted at /data, never
+# in the image), logs, and three static reference JSONs the app reads from
+# /app/data and the dashboard serves. Excluding the directory wholesale removed
+# the reference files - the review caught /data/hub-connections.json 404ing.
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.log
+data/backups/
+
+node_modules/
+.git/
+.gitignore
+.venv/
+__pycache__/
+*.pyc
+.hybrid-squad/
+.claude/
+coverage/
+Dockerfile
+compose.yaml
+.dockerignore
+.env.example

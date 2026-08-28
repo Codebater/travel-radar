@@ -46,7 +46,9 @@
     "notify:dry-run": "tsx notifications/cli.ts dry-run",
     "notify:test": "tsx notifications/cli.ts test",
     "notify:status": "tsx notifications/cli.ts status",
-    "notify:report": "tsx notifications/cli.ts report"
+    "notify:report": "tsx notifications/cli.ts report",
+    "production:health": "tsx scripts/production-health.ts",
+    "db:verify": "tsx scripts/db-verify.ts"
   },
   "name": "awardwiz",
   "engines": {

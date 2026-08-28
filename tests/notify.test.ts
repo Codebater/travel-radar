@@ -810,6 +810,50 @@ describe("secret handling", () => {
   })
 })
 
+// ─── deployment plumbing: the env-gated overrides ───────────────────────────
+
+describe("deployment overrides", () => {
+  afterEach(() => {
+    delete process.env.NTFY_ALLOW_HTTP_HOST
+    delete process.env.NTFY_SERVER
+    delete process.env.NTFY_TOPIC
+    delete process.env.NOTIFY_BASE_URL
+    loadNotificationConfig(true)
+  })
+
+  it("allows plain http to exactly the one named internal host, and nothing else", () => {
+    process.env.NTFY_TOPIC = "some-topic"
+    process.env.NTFY_SERVER = "http://ntfy:2586"
+
+    // Without the opt-in, the Docker-internal hostname is refused - the rule
+    // that protects the token stays the default.
+    expect(readNtfyConfig().ok).toBe(false)
+
+    process.env.NTFY_ALLOW_HTTP_HOST = "ntfy"
+    const allowed = readNtfyConfig()
+    expect(allowed.ok).toBe(true)
+    if (allowed.ok) expect(allowed.config.origin).toBe("http://ntfy:2586")
+
+    // The allowance is EXACT: naming one host does not open http generally.
+    process.env.NTFY_SERVER = "http://evil.example"
+    expect(readNtfyConfig().ok).toBe(false)
+    process.env.NTFY_SERVER = "http://ntfy.example.com"
+    expect(readNtfyConfig().ok).toBe(false)
+  })
+
+  it("overrides the deep-link base URL from the environment, still validated", () => {
+    process.env.NOTIFY_BASE_URL = "https://vault71.tailec23df.ts.net:8888"
+    const overridden = loadNotificationConfig(true)
+    expect(deepLinkFor(42, overridden)).toBe(
+      "https://vault71.tailec23df.ts.net:8888/deals.html#candidate=42")
+
+    // A malformed override yields NO link rather than a wrong one - the same
+    // buildLink assertions apply to the env value as to the committed file.
+    process.env.NOTIFY_BASE_URL = "not a url"
+    expect(deepLinkFor(42, loadNotificationConfig(true))).toBeNull()
+  })
+})
+
 // ─── the test message, and what a dry run may do ────────────────────────────
 
 describe("operational commands", () => {

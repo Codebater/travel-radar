@@ -1,0 +1,128 @@
+# Travel Radar on the Synology DS723+ (Vault71).
+#
+# Its own compose project, deliberately separate from the media stack: the two
+# share nothing, fail differently, and "always ask before changing the live
+# stack" is easiest to honour when this file cannot touch it.
+#
+# Reachability is LAN + tailnet only. The published ports land on the NAS,
+# which has no port forwarding and no UPnP; Tailscale Serve fronts both
+# services with tailnet-only HTTPS by proxying to 127.0.0.1. Nothing here is
+# public, and nothing here makes anything public.
+#
+# Security posture, per the deployment brief:
+#   - no Docker socket mount, no privileged mode, anywhere
+#   - both containers run as uid 1000, with no-new-privileges
+#   - secrets live in .env next to this file (chmod 600), never in the image,
+#     never in this file, never in git
+
+services:
+  travel-radar:
+    image: travel-radar:phase7
+    container_name: travel-radar
+    # The lease holder is "pid@hostname"; a stable hostname makes
+    # `observer:health` read as travel-radar, not a random container id.
+    hostname: travel-radar
+    restart: unless-stopped
+    # The scheduler checks its stop flag between ticks (60s) and releases the
+    # database lease in a finally-block on the way out. Ten seconds of default
+    # grace would SIGKILL it mid-sleep and strand the lease for the 90-second
+    # stale takeover on the next start.
+    stop_grace_period: 120s
+    # service_started, deliberately NOT service_healthy. Notifications are
+    # downstream of data collection; a broken ntfy container must never be able
+    # to keep the scheduler from starting. The radar treats an unreachable
+    # channel as a retryable delivery failure, which is the Phase 7 isolation
+    # principle doing its job.
+    depends_on:
+      ntfy:
+        condition: service_started
+    env_file: .env
+    environment:
+      # Paths inside the container; the volumes below make them NAS folders.
+      DATABASE_PATH: /data/travel-radar.db
+      BACKUP_DIR: /backups
+      # The radar publishes to the ntfy CONTAINER over the compose-internal
+      # bridge - plain http that never touches a wire. NTFY_ALLOW_HTTP_HOST is
+      # the explicit opt-in for exactly this one hostname; any other http
+      # destination is still refused by the channel.
+      NTFY_SERVER: http://ntfy:2586
+      NTFY_ALLOW_HTTP_HOST: ntfy
+      # Where a notification deep-links to: the URL the PHONE can reach.
+      NOTIFY_BASE_URL: https://vault71.tailec23df.ts.net:8888
+      # The two non-loopback origins a browser may use the dashboard from.
+      RADAR_TRUSTED_ORIGINS: http://192.168.0.37:8888,https://vault71.tailec23df.ts.net:8888
+    ports:
+      # LAN + tailnet. The NAS is not internet-reachable, and Tailscale Serve
+      # proxies the tailnet side to 127.0.0.1:8888.
+      - "8888:8888"
+    volumes:
+      # The database NEVER lives inside the disposable container.
+      - /volume1/docker/travel-radar/data:/data
+      - /volume1/docker/travel-radar/backups:/backups
+      # Config mounted from the NAS so thresholds - and the notifications
+      # enabled flag - are an edit-and-restart, not an image rebuild.
+      - /volume1/docker/travel-radar/config:/app/config:ro
+      # Roame / AwardWallet / ATF session files, read-only.
+      - /volume1/docker/travel-radar/credentials:/home/node/.openclaw/credentials:ro
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 1536m
+    healthcheck:
+      # The dashboard answering proves the serve process; the scheduler is
+      # covered by the entrypoint contract (either process dying exits the
+      # container) and by `observer:health`'s lease heartbeat.
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8888/observer.html"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  ntfy:
+    image: binwiederhier/ntfy:v2.28.0
+    container_name: ntfy
+    restart: unless-stopped
+    command: serve
+    environment:
+      # What subscribers use - the tailnet HTTPS URL, because that is what the
+      # iPhone polls after an APNs push. Publishing from the radar uses the
+      # internal hostname instead; base-url does not constrain publishers.
+      NTFY_BASE_URL: https://vault71.tailec23df.ts.net:2586
+      # iOS on a self-hosted server REQUIRES this (docs.ntfy.sh/config, checked
+      # 2026-08-28 against v2.28.0): the iOS app cannot hold a background
+      # socket, so the self-hosted server forwards a poll request upstream -
+      # carrying ONLY the message id and a SHA256 of the topic URL, never the
+      # message - ntfy.sh relays it through Apple's push service, and the phone
+      # then fetches the actual message from THIS server over Tailscale.
+      NTFY_UPSTREAM_BASE_URL: https://ntfy.sh
+      # 2586 inside and out: binding a low port as uid 1000 works on this
+      # Docker but is exactly the kind of default that changes under you.
+      NTFY_LISTEN_HTTP: :2586
+      NTFY_BEHIND_PROXY: "true"
+      # deny-all: nothing is readable or writable without credentials, so the
+      # topic name is not the only lock on the door.
+      NTFY_AUTH_FILE: /var/lib/ntfy/auth.db
+      NTFY_AUTH_DEFAULT_ACCESS: deny-all
+      NTFY_CACHE_FILE: /var/lib/ntfy/cache.db
+      # Long enough that a phone that was off overnight can still poll the
+      # message content behind a morning digest.
+      NTFY_CACHE_DURATION: 72h
+      NTFY_ENABLE_LOGIN: "true"
+    ports:
+      # Loopback only. Nothing on the LAN needs raw ntfy: the phone reaches it
+      # through Tailscale Serve (which proxies from 127.0.0.1), and the radar
+      # publishes over the compose-internal network. Publishing plain HTTP on
+      # every interface was surface with no customer.
+      - "127.0.0.1:2586:2586"
+    volumes:
+      - /volume1/docker/travel-radar/ntfy:/var/lib/ntfy
+    user: "1000:1000"
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:2586/v1/health | grep -q '\"healthy\":true'"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

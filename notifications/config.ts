@@ -111,6 +111,15 @@ let cached: NotificationConfig | null = null
 export function loadNotificationConfig(force = false): NotificationConfig {
   if (cached && !force) return cached
   cached = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as NotificationConfig
+  // Deployment plumbing: the committed config says localhost, but a deployed
+  // notification must deep-link to the URL the PHONE can reach - the Tailscale
+  // hostname. An env override keeps that out of the committed file, and the
+  // value still passes through buildLink's origin assertions like any other,
+  // so a malformed override yields no link rather than a wrong one.
+  const baseUrlOverride = (process.env.NOTIFY_BASE_URL || "").trim()
+  if (baseUrlOverride) {
+    cached = { ...cached, deepLink: { ...cached.deepLink, baseUrl: baseUrlOverride } }
+  }
   return cached
 }
 

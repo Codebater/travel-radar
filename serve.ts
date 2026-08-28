@@ -41,6 +41,24 @@ import { credentialWarnings } from "./notifications/credentials.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
+
+// Deployment plumbing, not a policy change. In the Docker deployment the
+// dashboard is reached via the LAN IP and the Tailscale hostname, and the
+// container sees every client as the bridge gateway rather than as loopback -
+// so both the Origin allowlist and the feedback write gate need to know which
+// non-local origins the OPERATOR trusts. Empty by default, which leaves the
+// original loopback-only behaviour byte-for-byte intact. The trust boundary
+// this extends to is the LAN plus the tailnet; nothing here is ever public.
+const TRUSTED_ORIGINS = (process.env.RADAR_TRUSTED_ORIGINS || "")
+  .split(",")
+  .map(o => o.trim().replace(/\/+$/, ""))
+  .filter(o => {
+    if (!o) return false
+    try {
+      const url = new URL(o)
+      return (url.protocol === "http:" || url.protocol === "https:") && url.origin === o
+    } catch { return false }
+  })
 // Bind to loopback by default — this is a local dev tool holding live loyalty
 // sessions and paid API budgets. Pass --host 0.0.0.0 to expose it deliberately.
 const HOST = process.argv.find((_, i, a) => a[i-1] === "--host") || "127.0.0.1"
@@ -99,7 +117,7 @@ const server = http.createServer(async (req, res) => {
   // guarded only /api/*, so any page in any tab could read /deals.html and
   // /alerts.html cross-origin. Those pages carry no secrets by design - but
   // "carries no secrets today" is a property that quietly stops being true.
-  const selfOrigins = [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]
+  const selfOrigins = [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`, ...TRUSTED_ORIGINS]
   const requestOrigin = req.headers.origin
   if (requestOrigin && selfOrigins.includes(requestOrigin)) {
     res.setHeader("Access-Control-Allow-Origin", requestOrigin)
@@ -418,7 +436,14 @@ const server = http.createServer(async (req, res) => {
     }
     const remote = req.socket.remoteAddress || ""
     const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1"
-    if (!isLoopback) {
+    // Behind Docker the client is never loopback - the bridge NAT rewrites it -
+    // so a browser on a trusted origin proves itself with its Origin header
+    // instead. Browsers always send Origin on POST and never let a page forge
+    // it; a non-browser caller on the LAN could, but a LAN caller can equally
+    // run the CLI, which is the same trust boundary.
+    const trustedWrite = TRUSTED_ORIGINS.length > 0
+      && TRUSTED_ORIGINS.includes(req.headers.origin || "")
+    if (!isLoopback && !trustedWrite) {
       console.warn(`⚠️ Blocked non-loopback feedback write from ${remote}`)
       res.writeHead(403, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: "feedback may only be recorded from this machine" }))

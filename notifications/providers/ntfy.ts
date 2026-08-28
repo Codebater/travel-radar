@@ -86,7 +86,15 @@ export function readNtfyConfig(): ConfigResult {
   }
 
   const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]"
-  if (url.protocol !== "https:" && !loopback) {
+  // Deployment plumbing: in the Docker deployment the radar publishes to the
+  // ntfy container over the compose-internal network as http://ntfy, which is
+  // neither https nor loopback. That single, exact, operator-named host may be
+  // plain http - the traffic never leaves the bridge network. Everything else
+  // keeps the rule, because http to any other host puts the bearer token and
+  // the deal on the wire in the clear.
+  const allowedHttpHost = (process.env.NTFY_ALLOW_HTTP_HOST || "").trim()
+  const namedInternalHost = allowedHttpHost !== "" && url.hostname === allowedHttpHost
+  if (url.protocol !== "https:" && !loopback && !namedInternalHost) {
     return {
       ok: false, reason: "invalid",
       detail: `NTFY_SERVER must be https (or a loopback address for testing) - ` +
