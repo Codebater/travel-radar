@@ -9,6 +9,30 @@ import { fileURLToPath } from "url"
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)))
 const CONFIG_PATH = path.join(ROOT, "config", "fare-radar.json")
 
+/**
+ * The trip shapes the radar can search. A hard dimension everywhere it
+ * appears: a long-haul ONE_WAY is not half a ROUND_TRIP, so the two never
+ * share candidates, baselines or rankings. (SPLIT_ROUND_TRIP / OPEN_JAW are
+ * deliberately NOT here — later phases construct them from stored one-way
+ * observations, never as a provider search shape.)
+ */
+export type TripType = "ROUND_TRIP" | "ONE_WAY"
+
+export const TRIP_TYPES: readonly TripType[] = ["ROUND_TRIP", "ONE_WAY"]
+
+/**
+ * Strict parse at external boundaries (CLI flags, API params). Accepts the
+ * canonical enum spelling and its kebab form — nothing else. Returns null for
+ * anything unknown so the caller can reject with its own error shape.
+ */
+export function parseTripType(raw: string): TripType | null {
+  switch (raw.trim().toUpperCase().replace(/-/g, "_")) {
+    case "ROUND_TRIP": return "ROUND_TRIP"
+    case "ONE_WAY": return "ONE_WAY"
+    default: return null
+  }
+}
+
 export interface FareRadarConfig {
   homeAirports: {
     primary: string[]

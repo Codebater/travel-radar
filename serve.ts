@@ -46,7 +46,7 @@ import { listTrips, tripTotals } from "./trips/store.js"
 import { getPackageObservation, latestComparisonsForTrip, packageTotals } from "./packages/store.js"
 import { currentMarketVerdictsForTrip, marketVerdictTotals } from "./market/verdict.js"
 import { assembleAllTripOffers } from "./offers/assemble.js"
-import { loadFareRadarConfig } from "./fareradar/config.js"
+import { loadFareRadarConfig, parseTripType, TRIP_TYPES } from "./fareradar/config.js"
 import { recheckTopFares, runFareRadar } from "./fareradar/engine.js"
 import { candidatesForRun, latestFareRadarRun } from "./fareradar/store.js"
 import { getLocator as getOfferLocator } from "./offers/locators.js"
@@ -328,6 +328,7 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify({
       homeAirports: cfg.homeAirports,
       watchlists: Object.fromEntries(Object.entries(cfg.watchlists).filter(([, v]) => Array.isArray(v))),
+      tripTypes: TRIP_TYPES,
       window: cfg.window,
       budget: { maxSearchesPerRun: cfg.budget.maxSearchesPerRun, currency: cfg.budget.currency },
     }, null, 2))
@@ -378,7 +379,18 @@ const server = http.createServer(async (req, res) => {
       const destination = url.searchParams.get("destination") ?? undefined
       const watchlistName = url.searchParams.get("watchlist") ?? undefined
       const anywhere = boolParam(url.searchParams.get("anywhere"))
+      // tripType is a strict enum; absent = ROUND_TRIP (existing clients keep
+      // their pre-8k behaviour). ONE_WAY rejects nights — no trip length exists.
+      const tripTypeRaw = url.searchParams.get("tripType")
+      const tripType = tripTypeRaw === null ? undefined : parseTripType(tripTypeRaw)
+      if (tripTypeRaw !== null && !tripType) {
+        throw new BadRequest(`unknown tripType "${tripTypeRaw}" — expected one of ${TRIP_TYPES.join(", ")}`)
+      }
+      if (tripType === "ONE_WAY" && (url.searchParams.get("minNights") || url.searchParams.get("maxNights"))) {
+        throw new BadRequest("minNights/maxNights do not apply to tripType ONE_WAY — a one-way has no trip length")
+      }
       const summary = await runFareRadar(getDb(), {
+        tripType: tripType ?? undefined,
         origins: origins.length ? origins.map(o => iata(o, "origins")) : undefined,
         destination: destination ? iata(destination, "destination") : undefined,
         watchlistName,

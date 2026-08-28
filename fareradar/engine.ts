@@ -17,6 +17,7 @@ import {
   loadFareRadarConfig,
   watchlist,
   type FareRadarConfig,
+  type TripType,
 } from "./config.js"
 import {
   buildSearchPlan,
@@ -48,6 +49,9 @@ export interface EngineDeps {
 }
 
 export interface FareRadarParams {
+  /** Omitted = ROUND_TRIP: the pre-8k external contract, kept for every
+   *  existing caller. Everything downstream of this resolution is explicit. */
+  tripType?: TripType
   origins?: string[]
   destination?: string
   watchlistName?: string
@@ -87,23 +91,32 @@ export async function runFareRadar(db: DB, params: FareRadarParams = {}, deps: E
   const sleep = deps.sleep ?? (ms => new Promise(r => setTimeout(r, ms)))
   const log = deps.log ?? (line => console.log(line))
 
+  // External compatibility boundary: an absent tripType is the pre-8k
+  // contract and means ROUND_TRIP. Everything below is explicit.
+  const tripType: TripType = params.tripType ?? "ROUND_TRIP"
+  if (tripType === "ONE_WAY" && (params.minNights !== undefined || params.maxNights !== undefined)) {
+    throw new Error("minNights/maxNights do not apply to a ONE_WAY radar — remove them (a one-way has no trip length)")
+  }
+
   const origins = params.origins?.length ? params.origins.map(o => o.toUpperCase()) : homeAirports(cfg, params.includeExtended)
   const { destinations, destinationMode } = resolveDestinations(cfg, params)
   const cabin: CabinClass = params.cabin ?? "business"
   const adults = params.adults ?? 1
   const windowStart = params.windowStart ?? shiftDate(new Date().toISOString().slice(0, 10), 1)
   const windowEnd = shiftDate(windowStart, (params.nextDays ?? cfg.window.defaultNextDays) - 1)
-  const minNights = params.minNights ?? cfg.window.minNights
-  const maxNights = params.maxNights ?? cfg.window.maxNights
+  // 0/0 for ONE_WAY: NOT_APPLICABLE request descriptors (see migration 022) —
+  // never read as a trip length anywhere downstream.
+  const minNights = tripType === "ONE_WAY" ? 0 : (params.minNights ?? cfg.window.minNights)
+  const maxNights = tripType === "ONE_WAY" ? 0 : (params.maxNights ?? cfg.window.maxNights)
 
   const plan = buildSearchPlan(cfg, {
-    origins, destinations, windowStart, windowEnd, minNights, maxNights,
+    tripType, origins, destinations, windowStart, windowEnd, minNights, maxNights,
     maxSearches: params.maxSearches,
   })
   for (const line of plan.lines) log(line)
 
   const runId = createFareRadarRun(db, {
-    origins, destinations: plan.destinations, destinationMode,
+    tripType, origins, destinations: plan.destinations, destinationMode,
     windowStart, windowEnd, minNights, maxNights,
     cabin, adults, currency: cfg.budget.currency,
     plan: { lines: plan.lines, reductions: plan.reductions, sparseCalls: plan.sparseCalls, refineReserve: plan.refineReserve, confirmReserve: plan.confirmReserve, cap: plan.cap },
@@ -112,6 +125,7 @@ export async function runFareRadar(db: DB, params: FareRadarParams = {}, deps: E
   })
 
   const collected: Collected[] = []
+  const droppedByQuality: Record<string, number> = {}
   let searchesIssued = 0
   let callsSpent = 0
 
@@ -119,7 +133,9 @@ export async function runFareRadar(db: DB, params: FareRadarParams = {}, deps: E
     const query: CashFlightQuery = {
       origin: probe.origin, destination: probe.destination,
       departureDate: probe.departureDate,
-      returnDate: shiftDate(probe.departureDate, probe.nights),
+      // A ONE_WAY probe has no nights and the provider is asked for exactly
+      // that — a return date is NEVER synthesized for it.
+      returnDate: probe.nights === null ? null : shiftDate(probe.departureDate, probe.nights),
       cabin, adults, currency: cfg.budget.currency,
     }
     const searchRequestId = recordSearchRequest(db, query, params.source === "api" ? "api" : "cli")
@@ -130,7 +146,16 @@ export async function runFareRadar(db: DB, params: FareRadarParams = {}, deps: E
     })
     searchesIssued++
     callsSpent += outcome.callsSpent
-    for (const flight of outcome.flights) collected.push({ flight, searchRequestId, fromProbe: probe })
+    for (const flight of outcome.flights) {
+      // Echo-check the trip shape: a provider answering a one-way request
+      // with a return-dated itinerary is a mismatch — counted and excluded,
+      // never quietly turned into a round trip (or vice versa).
+      if (tripType === "ONE_WAY" && flight.returnDate !== null) {
+        droppedByQuality["TRIP_TYPE_ECHO_MISMATCH"] = (droppedByQuality["TRIP_TYPE_ECHO_MISMATCH"] ?? 0) + 1
+        continue
+      }
+      collected.push({ flight, searchRequestId, fromProbe: probe })
+    }
     if (!outcome.fromCache) await sleep(1200)   // politeness toward the free provider
   }
 
@@ -150,7 +175,6 @@ export async function runFareRadar(db: DB, params: FareRadarParams = {}, deps: E
   }
 
   // ── Candidates: dedupe, classify, flag, score, locate ─────────────────────
-  const droppedByQuality: Record<string, number> = {}
   const deduped = dedupe(collected)
   const enriched = deduped.flatMap(entry => {
     const quality = assessQuality(entry.flight, cfg)
@@ -169,8 +193,14 @@ export async function runFareRadar(db: DB, params: FareRadarParams = {}, deps: E
   const candidates: FareCandidateInput[] = []
   for (const entry of enriched.slice(0, 200)) {
     const f = entry.flight
-    const returnDate = f.returnDate ?? shiftDate(f.departureDate, entry.fromProbe.nights)
-    const nights = Math.round((Date.parse(returnDate) - Date.parse(f.departureDate)) / 86_400_000)
+    // ONE_WAY: null return, null nights — the schema CHECKs make anything
+    // else unpersistable, and no fallback may invent a return here.
+    const returnDate = tripType === "ONE_WAY"
+      ? null
+      : f.returnDate ?? shiftDate(f.departureDate, entry.fromProbe.nights!)
+    const nights = returnDate === null
+      ? null
+      : Math.round((Date.parse(returnDate) - Date.parse(f.departureDate)) / 86_400_000)
     const scored = scoreCandidate(
       f.price.amount, cheapestQualifying, entry.cabinMix.mix,
       f.stops, f.durationMinutes, entry.quality.flags, cfg,
@@ -185,6 +215,7 @@ export async function runFareRadar(db: DB, params: FareRadarParams = {}, deps: E
       runId,
       flightPriceId: priceRow?.id ?? null,
       itineraryHash: f.itineraryHash,
+      tripType,
       origin: f.origin, destination: f.destination,
       departureDate: f.departureDate, returnDate, nights, adults,
       cabin, cabinMix: entry.cabinMix.mix, cabinMixDetail: entry.cabinMix.detail,
@@ -241,12 +272,17 @@ function promisingCells(collected: Collected[], requested: string): RefinementCe
   return [...byCell.values()].sort((a, b) => a.cheapestObserved - b.cheapestObserved)
 }
 
-/** One candidate per (route, dates, airline set): the cheapest sighting. */
+/**
+ * One candidate per (trip shape, route, dates, airline set): the cheapest
+ * sighting. The explicit OW/RT marker means a one-way and a round trip on the
+ * same departure day can never collide — even though a run is single-shape
+ * today, the key does not rely on that.
+ */
 function dedupe(collected: Collected[]): Collected[] {
   const best = new Map<string, Collected>()
   for (const entry of collected) {
     const f = entry.flight
-    const key = [f.origin, f.destination, f.departureDate, f.returnDate ?? "-", f.airlines.join("+") || f.airline || "?", f.stops ?? "?"].join("|")
+    const key = [f.returnDate === null ? "OW" : "RT", f.origin, f.destination, f.departureDate, f.returnDate ?? "-", f.airlines.join("+") || f.airline || "?", f.stops ?? "?"].join("|")
     const existing = best.get(key)
     if (!existing || f.price.amount < existing.flight.price.amount) best.set(key, entry)
   }

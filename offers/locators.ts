@@ -244,9 +244,12 @@ export interface FlightPriceRow {
  */
 export function buildFlightLocator(row: FlightPriceRow): BuiltLocator {
   const storedUrl = safeProviderUrl(row.provider, row.booking_url)
+  // A missing return date MUST say "one way" explicitly — the same semantics
+  // the provider's own stored URL uses. Without it Google parses the query as
+  // an open-return round trip and the replay reopens the wrong search shape.
   const params: Record<string, string | number> = {
     q: `Flights ${row.origin} to ${row.destination} on ${row.departure_date}`
-      + (row.return_date ? ` returning ${row.return_date}` : ""),
+      + (row.return_date ? ` returning ${row.return_date}` : " one way"),
   }
   const constructed = safeProviderUrl(row.provider, buildQueryUrl("https://www.google.com/travel/flights", params))
   const replay = storedUrl ?? constructed

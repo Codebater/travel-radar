@@ -57,7 +57,7 @@
     "refineNightsVariants": 3,
     "confirmFinalists": 5,
     "currency": "EUR",
-    "note": "Hard ceiling per run, planned BEFORE any request and printed as a visible plan. All tiers use the FREE provider (fast_flights) — politeness-capped, zero billing; the metered SerpAPI provider is NEVER touched by the radar (allowMeteredFallback:false everywhere), so the production flight budget cannot be dented. When the plan exceeds the cap, breadth reduces in order: fewer probes per route → fewer refinement cells → fewer destinations, and every reduction is named in the plan. Currency EUR to match the market layer's comparison currency; flight_prices rows record it per-row (currency is a hard baseline dimension)."
+    "note": "Hard ceiling per run, planned BEFORE any request and printed as a visible plan. All tiers use the FREE provider (fast_flights) — politeness-capped, zero billing; the metered SerpAPI provider is NEVER touched by the radar (allowMeteredFallback:false everywhere), so the production flight budget cannot be dented. When the plan exceeds the cap, breadth reduces in order: fewer probes per route → fewer refinement cells → fewer destinations, and every reduction is named in the plan. For ONE_WAY runs refineNightsVariants buys neighbour DATES per cell instead of trip-length variants (a one-way has no trip length) — the arithmetic and the cap are identical. Currency EUR to match the market layer's comparison currency; flight_prices rows record it per-row (currency is a hard baseline dimension)."
   },
 
   "baselines": {

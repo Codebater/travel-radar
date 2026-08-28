@@ -3,11 +3,14 @@
  * Business fare radar (Phase 8j).
  *
  *   npx tsx fareradar/cli.ts radar --origins VIE,PRG --destination BKK --next-days 30
+ *                                  [--trip-type round-trip|one-way | --one-way]
  *                                  [--min-nights 4] [--max-nights 14] [--cabin business]
  *                                  [--watchlist asia | --anywhere] [--max-calls N]
  *                                  [--extended] [--dry-run]
  *        Plan + run a flexible sweep. FREE provider only; --dry-run prints the
- *        plan and issues ZERO requests.
+ *        plan and issues ZERO requests. Without a trip type the sweep is a
+ *        ROUND_TRIP (the pre-8k contract); --min/--max-nights are rejected for
+ *        ONE_WAY — a one-way has no trip length.
  *   npx tsx fareradar/cli.ts report            the latest run: cheapest, best value,
  *                                              per-destination and home-airport diffs
  *   npx tsx fareradar/cli.ts recheck [--top 5] re-confirm the finalists (LIVE, free)
@@ -17,7 +20,7 @@
 
 import "../load-env.js"
 import { getDb } from "../db/index.js"
-import { loadFareRadarConfig, homeAirports } from "./config.js"
+import { loadFareRadarConfig, homeAirports, parseTripType, type TripType } from "./config.js"
 import { buildSearchPlan, shiftDate } from "./planner.js"
 import { recheckTopFares, runFareRadar } from "./engine.js"
 import { candidatesForRun, latestFareRadarRun, typicalFareFor, type StoredFareCandidate } from "./store.js"
@@ -39,14 +42,16 @@ function printCandidate(db: ReturnType<typeof getDb>, c: StoredFareCandidate, ra
   const locator = c.locatorId !== null ? getLocator(db, c.locatorId) : null
   const url = locator ? (locator.deepLinkUrl ?? locator.searchReplayUrl ?? locator.landingUrl) : null
   console.log(`#${rank} — ${c.priceCurrency} ${c.priceAmount}`)
-  console.log(`  ${c.origin} → ${c.destination}  ${c.departureDate} → ${c.returnDate}  (${c.nights} nights)`)
+  console.log(c.tripType === "ONE_WAY"
+    ? `  ${c.origin} → ${c.destination}  ${c.departureDate}  ONE WAY`
+    : `  ${c.origin} → ${c.destination}  ${c.departureDate} → ${c.returnDate}  (${c.nights} nights)`)
   console.log(`  ${c.airline ?? (c.airlines.join("+") || "?")} · ${c.cabinMix}${c.cabinMix !== "BUSINESS_FULL" ? ` (${c.cabinMixDetail})` : ""}`)
   console.log(`  ${c.stops ?? "?"} stop(s) · ${hours} · score ${c.dealScore}` +
     (c.qualityFlags.length ? ` · flags: ${c.qualityFlags.join(", ")}` : ""))
   console.log(`  provider ${c.provider} · observed ${c.observedAt.slice(0, 16)}`)
   console.log(`  navigation: ${locator ? locator.navigationQuality : "UNAVAILABLE"}${url ? `\n  URL: ${url}` : ""}`)
   const typical = typicalFareFor(db, {
-    origin: c.origin, destination: c.destination, nights: c.nights,
+    tripType: c.tripType, origin: c.origin, destination: c.destination, nights: c.nights,
     cabin: c.cabin, currency: c.priceCurrency,
   })
   if (typical.mature) {
@@ -61,7 +66,25 @@ async function main() {
 
   switch (command) {
     case "radar": {
+      // Trip type is an explicit external contract: absent = ROUND_TRIP
+      // (pre-8k behaviour); --trip-type one-way (or the --one-way shorthand)
+      // switches the sweep's shape. Arbitrary values are rejected.
+      const tripTypeRaw = flag("trip-type")
+      let tripType: TripType | undefined
+      if (tripTypeRaw !== undefined) {
+        const parsed = parseTripType(tripTypeRaw)
+        if (!parsed) throw new Error(`unknown --trip-type "${tripTypeRaw}" — use round-trip or one-way`)
+        tripType = parsed
+      }
+      if (has("one-way")) {
+        if (tripType === "ROUND_TRIP") throw new Error("--one-way contradicts --trip-type round-trip")
+        tripType = "ONE_WAY"
+      }
+      if (tripType === "ONE_WAY" && (flag("min-nights") !== undefined || flag("max-nights") !== undefined)) {
+        throw new Error("--min-nights/--max-nights do not apply to a ONE_WAY radar — a one-way has no trip length")
+      }
       const params = {
+        tripType,
         origins: flag("origins")?.split(",").map(s => s.trim()).filter(Boolean),
         destination: flag("destination"),
         watchlistName: flag("watchlist"),
@@ -81,11 +104,13 @@ async function main() {
           : params.anywhere ? anywhereDestinations(cfg) : []
         if (!destinations.length) throw new Error("a destination, --watchlist or --anywhere is required")
         const windowStart = shiftDate(new Date().toISOString().slice(0, 10), 1)
+        const dryTripType: TripType = tripType ?? "ROUND_TRIP"
         const plan = buildSearchPlan(cfg, {
+          tripType: dryTripType,
           origins, destinations,
           windowStart, windowEnd: shiftDate(windowStart, (params.nextDays ?? cfg.window.defaultNextDays) - 1),
-          minNights: params.minNights ?? cfg.window.minNights,
-          maxNights: params.maxNights ?? cfg.window.maxNights,
+          minNights: dryTripType === "ONE_WAY" ? 0 : (params.minNights ?? cfg.window.minNights),
+          maxNights: dryTripType === "ONE_WAY" ? 0 : (params.maxNights ?? cfg.window.maxNights),
           maxSearches: params.maxSearches,
         })
         for (const line of plan.lines) console.log(line)
@@ -104,8 +129,11 @@ async function main() {
       const run = latestFareRadarRun(db)
       if (!run) { console.log("No finished fare-radar run — run flights:radar first."); break }
       const candidates = candidatesForRun(db, run.id)
-      console.log(`Run #${run.id} (${run.destinationMode}) ${run.origins.join(",")} → ${run.destinations.join(",")}`)
-      console.log(`  window ${run.windowStart}..${run.windowEnd}, ${run.minNights}-${run.maxNights} nights, ${run.cabin}, ${run.currency}`)
+      const tripLabel = run.tripType === "ONE_WAY" ? "ONE WAY" : "ROUND TRIP"
+      console.log(`Run #${run.id} (${tripLabel}, ${run.destinationMode}) ${run.origins.join(",")} → ${run.destinations.join(",")}`)
+      console.log(run.tripType === "ONE_WAY"
+        ? `  window ${run.windowStart}..${run.windowEnd}, one-way, ${run.cabin}, ${run.currency}`
+        : `  window ${run.windowStart}..${run.windowEnd}, ${run.minNights}-${run.maxNights} nights, ${run.cabin}, ${run.currency}`)
       console.log(`  ${run.searchesIssued} searches issued (planned ${run.callsPlanned}, billable calls ${run.callsSpent}) → ${run.candidatesFound} candidates\n`)
 
       console.log("── CHEAPEST ──")
@@ -117,7 +145,8 @@ async function main() {
       if (byDest.size > 1) {
         console.log("── CHEAPEST BUSINESS-CLASS DESTINATIONS ──")
         for (const [dest, c] of [...byDest.entries()].sort((a, b) => a[1].priceAmount - b[1].priceAmount)) {
-          console.log(`  ${dest}  ${c.priceCurrency} ${c.priceAmount}  (${c.origin}, ${c.departureDate}, ${c.nights}n, ${c.cabinMix})`)
+          const shape = c.tripType === "ONE_WAY" ? "one-way" : `${c.nights}n`
+          console.log(`  ${dest}  ${c.priceCurrency} ${c.priceAmount}  (${c.origin}, ${c.departureDate}, ${shape}, ${c.cabinMix})`)
         }
         console.log("")
       }

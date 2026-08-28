@@ -154,11 +154,33 @@ export class FastFlightsProvider implements CashFlightProvider {
 
     // One clock reading for the whole search - see normalise().
     const fetchedAt = new Date().toISOString()
-    const flights = payload.flights
-      .filter(f => typeof f.price === "number" && f.price > 0)
-      .map(f => this.normalise(f, query, fetchedAt))
+    const priced = payload.flights.filter(f => typeof f.price === "number" && f.price > 0)
+
+    // Currency defence: a price is only stored under the REQUESTED currency
+    // when the helper states exactly that currency for it. A stated different
+    // currency is a proven mismatch and an unstated one is unknown — neither
+    // is ever relabelled as the requested currency, and a currency is never
+    // invented. (The helper echoes the requested currency today, so this
+    // costs nothing in normal operation and bites only when that changes.)
+    const wanted = query.currency.trim().toUpperCase()
+    const currencyProblems = new Set<string>()
+    const flights: NormalizedCashFlight[] = []
+    for (const f of priced) {
+      const stated = (f.currency || payload.currency || "").trim().toUpperCase()
+      if (!stated) { currencyProblems.add("unstated"); continue }
+      if (stated !== wanted) { currencyProblems.add(stated); continue }
+      flights.push(this.normalise(f, query, fetchedAt, stated))
+    }
 
     if (flights.length === 0) {
+      if (currencyProblems.size > 0) {
+        return {
+          provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs,
+          reason: "provider-error",
+          error: `currency could not be established as ${wanted} `
+            + `(provider stated: ${[...currencyProblems].join(", ")}) — refusing to label prices`,
+        }
+      }
       return {
         provider: this.name, ok: false, flights: [], callsSpent: 0, latencyMs,
         reason: "no-results", error: "provider returned no priced itineraries",
@@ -168,7 +190,7 @@ export class FastFlightsProvider implements CashFlightProvider {
     return { provider: this.name, ok: true, flights, callsSpent: 0, latencyMs }
   }
 
-  private normalise(f: FFItinerary, query: CashFlightQuery, fetchedAt: string): NormalizedCashFlight {
+  private normalise(f: FFItinerary, query: CashFlightQuery, fetchedAt: string, currency: string): NormalizedCashFlight {
     const segments: NormalizedSegment[] = f.segments.map(s => ({
       origin: s.origin || query.origin,
       destination: s.destination || query.destination,
@@ -213,7 +235,7 @@ export class FastFlightsProvider implements CashFlightProvider {
       segments,
       cabin: query.cabin,
       durationMinutes: f.durationMinutes,
-      price: { amount: f.price!, currency: f.currency || query.currency },
+      price: { amount: f.price!, currency },   // validated against the request in search()
       // Not exposed by this source — left null rather than guessed.
       taxes: null,
       baggage: null,

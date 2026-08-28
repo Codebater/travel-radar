@@ -11,7 +11,7 @@
  * run, so "what did this cost and why" is always answerable.
  */
 
-import { type FareRadarConfig } from "./config.js"
+import { type FareRadarConfig, type TripType } from "./config.js"
 
 /** Capability profile per cash provider — data, never special-cased names. */
 export interface ProviderPlanProfile {
@@ -29,11 +29,12 @@ export const PROVIDER_PROFILES: ProviderPlanProfile[] = [
 ]
 
 export interface PlanParams {
+  tripType: TripType           // explicit — the planner never guesses a shape
   origins: string[]
   destinations: string[]
   windowStart: string          // YYYY-MM-DD
   windowEnd: string
-  minNights: number
+  minNights: number            // NOT_APPLICABLE (0) for ONE_WAY — never read there
   maxNights: number
   maxSearches?: number
 }
@@ -42,17 +43,21 @@ export interface SparseProbe {
   origin: string
   destination: string
   departureDate: string
-  nights: number
+  /** Trip length for ROUND_TRIP probes; null for ONE_WAY — a one-way sweep
+   *  is a curve over departure dates only, never dates × lengths. */
+  nights: number | null
 }
 
 export interface SearchPlan {
+  tripType: TripType
   origins: string[]
   destinations: string[]
   windowStart: string
   windowEnd: string
   minNights: number
   maxNights: number
-  representativeNights: number
+  /** null for ONE_WAY — there is no trip length to represent. */
+  representativeNights: number | null
   probesPerRoute: number
   sparse: SparseProbe[]
   sparseCalls: number
@@ -103,7 +108,11 @@ export function buildSearchPlan(cfg: FareRadarConfig, params: PlanParams): Searc
   const cap = Math.max(3, params.maxSearches ?? cfg.budget.maxSearchesPerRun)
   const reductions: string[] = []
   const windowDays = Math.max(1, nightsBetweenDates(params.windowStart, params.windowEnd) + 1)
-  const repNights = representativeNights(cfg, params.minNights, params.maxNights)
+  // ONE_WAY has no trip length: probes carry nights=null and the Tier-1
+  // reserve buys neighbour DATES instead of length variants (same arithmetic,
+  // same cap — a different shape is never an excuse to spend more).
+  const oneWay = params.tripType === "ONE_WAY"
+  const repNights = oneWay ? null : representativeNights(cfg, params.minNights, params.maxNights)
 
   const destinations = [...params.destinations]
   let probes = Math.min(cfg.budget.sparseProbesPerRoute, windowDays)
@@ -143,6 +152,7 @@ export function buildSearchPlan(cfg: FareRadarConfig, params: PlanParams): Searc
   }
 
   const plan: SearchPlan = {
+    tripType: params.tripType,
     origins: params.origins,
     destinations,
     windowStart: params.windowStart,
@@ -161,10 +171,15 @@ export function buildSearchPlan(cfg: FareRadarConfig, params: PlanParams): Searc
     lines: [],
   }
   plan.lines = [
-    `Search plan: ${params.origins.length} origins × ${destinations.length} destinations, ` +
-      `${windowDays}-day window, ${params.minNights}–${params.maxNights} nights (representative ${repNights})`,
+    oneWay
+      ? `Search plan (ONE WAY): ${params.origins.length} origins × ${destinations.length} destinations, ` +
+          `${windowDays}-day window — a curve over departure dates, no trip length`
+      : `Search plan: ${params.origins.length} origins × ${destinations.length} destinations, ` +
+          `${windowDays}-day window, ${params.minNights}–${params.maxNights} nights (representative ${repNights})`,
     `  Tier 0 sparse discovery: ${plan.sparseCalls} searches (${offsets.length} probe dates/route)`,
-    `  Tier 1 refinement reserve: ${plan.refineReserve} searches (${refineCells} cells × ${refinePerCell} variants)`,
+    oneWay
+      ? `  Tier 1 date-refinement reserve: ${plan.refineReserve} searches (${refineCells} cells × ${refinePerCell} neighbour dates)`
+      : `  Tier 1 refinement reserve: ${plan.refineReserve} searches (${refineCells} cells × ${refinePerCell} variants)`,
     `  Tier 2 confirmation reserve: ${plan.confirmReserve} searches`,
     `  Total planned: ${plan.callsPlanned} (cap ${cap}) — free provider only, metered NEVER touched`,
     ...reductions.map(r => `  REDUCED: ${r}`),
@@ -179,14 +194,21 @@ export interface RefinementCell {
   cheapestObserved: number
 }
 
-/** Refinement probes for the winning cells: length variants + one neighbour date. */
+/**
+ * Refinement probes for the winning cells.
+ *
+ * ROUND_TRIP: length variants + one neighbour date (unchanged).
+ * ONE_WAY: pure DATE DENSIFICATION — length variants are meaningless, so the
+ * same per-cell budget buys deterministic neighbour dates around each
+ * promising departure (±half the Tier-0 stride, then ±1 day, then outward),
+ * deduplicated and clamped to the requested window. Never a fake trip length.
+ */
 export function refinementProbes(
   cfg: FareRadarConfig,
   plan: SearchPlan,
   cells: RefinementCell[],
 ): SparseProbe[] {
   const perCell = cfg.budget.refineNightsVariants
-  const variants = nightsVariants(cfg, plan.minNights, plan.maxNights, perCell + 1)
   const windowDays = nightsBetweenDates(plan.windowStart, plan.windowEnd) + 1
   const halfStride = Math.max(1, Math.round(windowDays / Math.max(1, plan.probesPerRoute) / 2))
 
@@ -198,6 +220,32 @@ export function refinementProbes(
     seen.add(key)
     probes.push(p)
   }
+
+  if (plan.tripType === "ONE_WAY") {
+    // Deterministic neighbour offsets, nearest-information first. More
+    // offsets than the budget exist so window-clamped dates do not silently
+    // shrink a cell's refinement below its reserve.
+    const offsets: number[] = []
+    const addOffset = (o: number) => { if (o !== 0 && !offsets.includes(o)) offsets.push(o) }
+    addOffset(halfStride); addOffset(-halfStride); addOffset(1); addOffset(-1)
+    for (let d = 2; offsets.length < perCell * 2 && d <= windowDays; d++) {
+      addOffset(d); addOffset(-d)
+    }
+    for (const cell of cells) {
+      let added = 0
+      for (const offset of offsets) {
+        if (added >= perCell) break
+        const date = shiftDate(cell.departureDate, offset)
+        if (date < plan.windowStart || date > plan.windowEnd) continue
+        const before = probes.length
+        push({ origin: cell.origin, destination: cell.destination, departureDate: date, nights: null })
+        if (probes.length > before) added++
+      }
+    }
+    return probes
+  }
+
+  const variants = nightsVariants(cfg, plan.minNights, plan.maxNights, perCell + 1)
   for (const cell of cells) {
     let added = 0
     for (const nights of variants) {

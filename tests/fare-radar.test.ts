@@ -90,7 +90,7 @@ describe("configuration — airports are data, never code", () => {
 })
 
 describe("the search planner", () => {
-  const base = { origins: ["VIE", "PRG"], windowStart: "2026-10-01", windowEnd: "2026-10-30", minNights: 4, maxNights: 14 }
+  const base = { tripType: "ROUND_TRIP" as const, origins: ["VIE", "PRG"], windowStart: "2026-10-01", windowEnd: "2026-10-30", minNights: 4, maxNights: 14 }
 
   it("spreads probe dates across the next-N-days window at a representative trip length", () => {
     const plan = buildSearchPlan(CFG, { ...base, destinations: ["BKK"] })
@@ -242,7 +242,7 @@ describe("the engine end-to-end (stubbed provider)", () => {
   })
 
   it("fare-window keys use strict dimensions for the future baseline substrate", () => {
-    const key = fareWindowKey({ origin: "VIE", destination: "BKK", departureDate: "2026-10-08", nights: 9, cabin: "business", adults: 1, priceCurrency: "EUR" })
+    const key = fareWindowKey({ tripType: "ROUND_TRIP", origin: "VIE", destination: "BKK", departureDate: "2026-10-08", nights: 9, cabin: "business", adults: 1, priceCurrency: "EUR" })
     expect(key).toMatch(/^fare\|VIE\|BKK\|d\d+\|medium\|business\|1a\|EUR$/)
   })
 
@@ -250,7 +250,7 @@ describe("the engine end-to-end (stubbed provider)", () => {
     const { fn } = stubSearch(q => [fareFor(q, 1742)])
     const summary = await runFareRadar(db, RADAR, { search: fn, log: () => {} })
     const c = summary.cheapest[0]
-    const typical = typicalFareFor(db, { origin: c.origin, destination: c.destination, nights: c.nights, cabin: c.cabin, currency: c.priceCurrency })
+    const typical = typicalFareFor(db, { tripType: c.tripType, origin: c.origin, destination: c.destination, nights: c.nights, cabin: c.cabin, currency: c.priceCurrency })
     expect(typical.mature).toBe(false)
     // A second run with DIFFERENT prices appends rows; existing rows survive
     // byte-identical (append-only, no in-place repricing anywhere).
