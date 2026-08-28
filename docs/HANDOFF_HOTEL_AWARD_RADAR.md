@@ -5,8 +5,8 @@ Written 2026-08-28 at the end of the Hotel Award Radar session. Audience: the ne
 ## Current checkpoint
 
 - Branch: `extreme-travel-radar`, no upstream — **nothing pushed**.
-- HEAD: `3e46452` ("feat: add verified hotel award perks"), on top of `7441c71` (hotel award radar readout).
-- Tests: **994/994 passing** (41 files, `npx vitest run`, verified at this HEAD).
+- HEAD: `9d52f2f` ("feat: add optimizer-ready hotel perk semantics"), on top of `3e46452` (verified hotel award perks) and `7441c71` (hotel award radar readout).
+- Tests: **1004/1004 passing** (41 files, `npx vitest run`, verified at this HEAD).
 - Typecheck (`npx tsc --noEmit`): **clean**.
 - Lint (`npm run lint`): **0 errors, 5 pre-existing unused-var warnings** (searchClass, ROOT, balances, config, job) — not from this session's work, leave them unless asked.
 - Nothing deployed. **Vault71 (NAS) still runs the pre-Phase-8 flight radar only** — everything from Phase 8a onward (stays, packages, market, fare radar, deal radar, promos, hotel awards) is local-only on this Windows machine.
@@ -56,13 +56,23 @@ The perk foundation from this handoff's original NEXT STEP items 1–2 now EXIST
 - **`/api/hotel-awards`** enriches each observation with `perks[]` (fail-soft: config error → `perksError`, never a broken read-out); **`hotel-awards.html`** renders the badges — and only `source_page` rules may present as verified; `knowledge_encoded` rules render "· unverified" with downgraded styling.
 - Tests: `tests/hotel-award-perks.test.ts` + extended `tests/hotel-awards-api.test.ts` pin all of the above, including that observations are exposed unchanged and no total is ever synthesized.
 
-### Five optimizer-blocking schema limitations (found during verification — resolve before optimizer work, do not paper over)
+### Machine-readable optimizer semantics (added `9d52f2f`, 2026-08-29 — the five former blocking limitations are RESOLVED)
 
-1. **No certificate linkage**: a rule cannot require "one unused annual certificate" (Ambassador weekend night; Marriott's cert-exclusion from S5P4 is an inexpressible interaction).
-2. **Brand × region × choice matrices** are not encodable (Marriott Elite Welcome Gift, per-property Hilton F&B amounts) — affected rules deliberately claim only the umbrella benefit.
-3. **`acquisitionCost` cannot express alternatives** ("USD 225 *or* 45,000 points") — the points alternative lives only in the note.
-4. **No machine-checkable rate-code requirement** (Ambassador's mandatory named rate lives in free-text `bookingChannel`).
-5. **No repetition semantics** for nth-night rules (once per stay vs per N-night block — Marriott is once per stay per T&C; IHG's recurrence needs the card's full benefit terms). Both carry explicit `arithmeticNote` warnings.
+Optimizer-critical conditions are now typed fields on every rule (validated refuse-loudly in `perks.ts`, passed through onto `PerkBadge`), never prose-only:
+
+- `repetition: once_per_stay | per_block | once_per_certificate | null` — required on arithmetic rules, null on benefit-only; `per_block` means "repeats every `stayPattern.minNights` nights".
+- `requiresCertificate: {type, quantity} | null` — type matches `entitlements certificates[].key`; must travel with (and only with) `once_per_certificate`. The matcher downgrades "eligible" to "requires" (naming `certificate:TYPE`) when declared certificate stock is insufficient.
+- `requiredRateName` — exact named rate the booking must use (Ambassador's "Ambassador Complimentary Weekend Night").
+- `constraints` (closed vocab: `single_reservation`, `standard_room_only`, `full_points_only`, `weekend_stay`) and `exclusions` (`free_night_certificate`, `award_redemption`, `other_free_night_offers`) — presence = source-stated; absence = unstated, never permission; unknown values are validation errors.
+- Entitlements: `acquisitionAlternatives` (points-priced, kept separate from cash) — Ambassador: USD 225 OR 45,000 IHG points.
+
+Current assignments: Marriott S5P4 = once_per_stay + single_reservation/standard_room_only + excludes free_night_certificate; Hilton 5th = once_per_stay + standard_room_only/full_points_only; IHG card 4th = once_per_stay + single_reservation; Ambassador = once_per_certificate + cert{IHG_AMBASSADOR_WEEKEND_NIGHT,1} + named rate + weekend_stay + excludes award_redemption/other_free_night_offers; the three benefit-only rules carry all-null/empty semantics (enforced).
+
+### Remaining schema gaps (non-blocking, do not paper over)
+
+1. **Repetition floors**: Hilton 5th-night and IHG-card 4th-night are encoded `once_per_stay` as a conservative floor — their verified sources state the benefit singularly. Upgrading to `per_block` requires reading each program's full T&C recurrence language first.
+2. **Brand × region × choice matrices** (Marriott Elite Welcome Gift, per-property Hilton F&B amounts) remain unencoded — benefit-only rules, never enter arithmetic.
+3. **"Weekend night" calendar definition** (which days count) is program-specific and not encoded — the `weekend_stay` constraint flags the requirement; its semantics belong to the optimizer design.
 
 ## Hotel points promos
 
@@ -110,12 +120,11 @@ Example perk types: nth-night-free award benefits; Marriott "Stay for 5, Pay for
 
 ## NEXT STEP
 
-Original inspection items 1–2 (perk-rule data, entitlements) are DONE — see the verified perk layer section above. What remains, in order, all still gated on review before implementation:
+Perk-rule data, entitlements, and machine-readable perk semantics are DONE (see above). What remains, in order, all still gated on review before implementation:
 
-1. **Resolve the five schema limitations above** (certificate linkage first — the Ambassador rule and free-night certificates both need it) so perk rules can become optimizer-grade.
-2. **Long-date-window searching**: decouple Roame's `minNights` from the window length (currently hardcoded to the full window at `providers/hotel-awards/roame.ts` search(); config-capped), producing the segment inventory a 30-night window needs; Gondola stays the exact-window verifier under its budget caps, emitting `night_clamped` where measured.
-3. **Explicit Gondola/Roame → `stay_properties` ref mappings** for the target city (all observations still have `propertyId: null`; name-matching stays forbidden) so cash and award sides can join.
-4. **Consecutive-night optimizer** as a READ-ONLY projection (Deal Radar precedent): cover-every-night-exactly-once DAG over verified segments; cash and points totals reported separately; rule-supported constructions only, each citing its rule id; a Gondola confirmation pass for the winning plan only.
+1. **Long-window Roame discovery** — THE next step: decouple Roame's `minNights` from the window length (currently hardcoded to the full window in `providers/hotel-awards/roame.ts` search(); make it config-capped), so a wide `stayDateRange` (e.g. Bangkok, Nov 1 → Dec 1) yields the per-property segment inventory (`offerPeriods` with their own `startDate` + `nights`) a 30-night plan needs. Gondola stays the exact-window verifier under its budget caps, emitting `night_clamped` where measured. No search-behavior change lands without its design being reviewed first.
+2. **Explicit Gondola/Roame → `stay_properties` ref mappings** for the target city (all observations still have `propertyId: null`; name-matching stays forbidden) so cash and award sides can join.
+3. **Consecutive-night optimizer** as a READ-ONLY projection (Deal Radar precedent): cover-every-night-exactly-once DAG over verified segments; cash and points totals reported separately; rule-supported constructions only, each citing its rule id and honoring the machine semantics (repetition, certificates, named rates, constraints, exclusions); a Gondola confirmation pass for the winning plan only.
 
 **Do not implement any step until its design is reviewed.** Hard doctrine in "IMPORTANT NEXT PRODUCT DIRECTION" above is unchanged and binding.
 
@@ -135,6 +144,7 @@ Original inspection items 1–2 (perk-rule data, entitlements) are DONE — see 
 
 ## Recent commits (most relevant, newest first)
 
+- `9d52f2f` feat: add optimizer-ready hotel perk semantics (repetition, certificates, named rates, constraints/exclusions, acquisition alternatives)
 - `3e46452` feat: add verified hotel award perks (perk rules + entitlements configs, perks.ts, API/UI badges, tests)
 - `7441c71` feat: add hotel award radar readout (`hotel-awards.html`, `/api/hotel-awards`, observer overview row)
 - `180cc75` feat: add roame hotel award provider (Encore GraphQL, per-night semantics)
