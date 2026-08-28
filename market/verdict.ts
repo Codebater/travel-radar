@@ -226,7 +226,11 @@ export function runMarket(db: DB, opts: { minTripScore?: number; now?: Date } = 
   const now = opts.now ?? new Date()
   const packagesCfg = loadPackagesConfig()
   const market = loadMarketConfig()
-  const computeBatch = nowIso()
+  // The batch is stamped from the run's OWN clock (`now` is already the
+  // authority for everything else in this run). Stamping a second wall-clock
+  // reading here let two same-millisecond runs share one compute_batch and
+  // merge into a single "current" set — breaking batch supersession.
+  const computeBatch = now.toISOString()
 
   const trips = listTrips(db, { minScore: opts.minTripScore ?? 0, limit: 500, status: "interesting" })
   const variants = latestPackageObservations(db, { maxAgeDays: packagesCfg.competition.maxPackageAgeDays })

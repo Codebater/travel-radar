@@ -315,8 +315,9 @@ describe("runCompetition", () => {
   it("re-running appends new rows; the latest per pair wins the read", () => {
     insertTrip()
     recordPackageObservations(db, [makeOffer()], null)
-    runCompetition(db)
-    runCompetition(db)
+    // Distinct injected clocks — same-millisecond runs must not share a batch.
+    runCompetition(db, { now: new Date("2026-08-28T10:00:00.000Z") })
+    runCompetition(db, { now: new Date("2026-08-28T11:00:00.000Z") })
     const all = db.prepare("SELECT COUNT(*) n FROM package_comparisons").get() as { n: number }
     expect(all.n).toBe(2)
     expect(latestComparisonsForTrip(db, 1)).toHaveLength(1)

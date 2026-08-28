@@ -24,7 +24,7 @@
  *                                    difference is shown, the blocker named
  */
 
-import { nowIso, type DB } from "../db/index.js"
+import { type DB } from "../db/index.js"
 import { listTrips, type StoredTrip } from "../trips/store.js"
 import { loadPackagesConfig } from "./config.js"
 import {
@@ -186,8 +186,11 @@ export interface CompetitionSummary {
  * observations for its property (hotel-specific) and destination (context).
  * Appends comparison rows; never mutates trips or observations.
  */
-export function runCompetition(db: DB, opts: { minTripScore?: number } = {}): CompetitionSummary {
-  const computeBatch = nowIso()
+export function runCompetition(db: DB, opts: { minTripScore?: number; now?: Date } = {}): CompetitionSummary {
+  // Same injectable-clock pattern as runMarket: two same-millisecond runs
+  // must never share a compute_batch, or their rows merge into one "current"
+  // set. Default behavior is unchanged.
+  const computeBatch = (opts.now ?? new Date()).toISOString()
   const cfg = loadPackagesConfig().competition
   const trips = listTrips(db, { minScore: opts.minTripScore ?? 0, limit: 500, status: "interesting" })
   const fresh = latestPackageObservations(db, { maxAgeDays: cfg.maxPackageAgeDays })

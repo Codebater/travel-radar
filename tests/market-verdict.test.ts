@@ -234,7 +234,9 @@ describe("batch supersession — history stays, rankings stay clean", () => {
     insertTripRow(db)
     storedPkg({ transfer: "included" })
     seedFx(db, { rate: 0.9 })
-    runMarket(db)
+    // Distinct injected clocks: back-to-back in-process runs otherwise land
+    // in the same millisecond and would share a compute_batch.
+    runMarket(db, { now: new Date("2026-08-28T10:00:00.000Z") })
     const first = currentMarketVerdictsForTrip(db, 1)
     expect(first[0].diyKnownTotal).toBe(4365.9)           // 4851 × 0.9
 
@@ -242,7 +244,7 @@ describe("batch supersession — history stays, rankings stay clean", () => {
     const firstRowAfter = db.prepare("SELECT diy_known_total FROM market_verdicts WHERE id = ?").get(first[0].id) as { diy_known_total: number }
     expect(firstRowAfter.diy_known_total).toBe(4365.9)    // history untouched
 
-    runMarket(db)
+    runMarket(db, { now: new Date("2026-08-28T11:00:00.000Z") })
     const second = currentMarketVerdictsForTrip(db, 1)
     expect(second[0].diyKnownTotal).toBe(3880.8)          // new batch, new arithmetic (1446×0.8 + 3405×0.8)
     expect(second[0].id).not.toBe(first[0].id)
