@@ -1,0 +1,29 @@
+{
+  "description": "Trip-market comparison policy. Config, never code. The market layer decides BUILD_YOURSELF vs BUY_PACKAGE only when the evidence supports a number: one explicit comparison currency, FX through stored observations only (native prices are never overwritten, conversions reference the exact FX row used), and UNKNOWN costs block a winner instead of counting as zero.",
+  "updated": "2026-08-28",
+
+  "comparisonCurrency": "EUR",
+  "comparisonCurrencyNote": "Every cross-construction number is expressed here. EUR because the package sellers quote EUR natively — the package side then needs no FX at all, and only the USD-era DIY components convert.",
+
+  "fx": {
+    "provider": "frankfurter_ecb",
+    "apiBase": "https://api.frankfurter.dev/v1",
+    "providerNote": "Frankfurter serves the ECB's official euro reference rates: keyless, free, suitable for light usage, and the underlying data is a central-bank publication rather than a commercial feed. The provider name in fx_rate_observations records this lineage. Host measured 2026-08-28: api.frankfurter.app now 301-redirects (the provider refuses redirects by design) — api.frankfurter.dev/v1 is canonical and accepts the from/to params.",
+    "pairs": [["USD", "EUR"]],
+    "pairsNote": "Only pairs the ledger actually needs. Every stored native currency that must reach the comparison currency needs its pair here; a missing pair is a named refusal, never an implicit chain through a third currency.",
+    "maxAgeDays": 7,
+    "maxAgeNote": "ECB reference rates are business-daily; 7 days tolerates weekends and holiday clusters. An FX observation older than this is STALE: comparisons refuse a numeric winner and say why, they never silently reuse an old rate."
+  },
+
+  "confidence": {
+    "tooCloseToCallPct": 5,
+    "tooCloseNote": "Below this percentage gap between two computable totals the verdict is TOO_CLOSE_TO_CALL — two moving quote streams cannot support a winner inside their own noise.",
+    "materialCategories": ["transfers", "hotel_taxes_fees"],
+    "materialNote": "An UNKNOWN in one of these on the DIY side, while the package INCLUDES it, is a material cost asymmetry: if DIY leads on knowns the verdict is INSUFFICIENT with a bounded statement (\"DIY is currently X lower BEFORE the unknown transfer\") — never a savings claim. If the package leads anyway, DIY unknowns could only widen its margin, so the package verdict stands with the margin as a floor.",
+    "softCategories": ["baggage"],
+    "softNote": "Asymmetries here are real but second-order (a checked bag, not a seaplane): they downgrade HIGH confidence to MEDIUM and are named, but do not block a numeric verdict.",
+    "levelsNote": "HIGH = EXACT_MATCH product, no material asymmetry, at most soft ones resolved; MEDIUM = CLOSE_MATCH or soft asymmetry present; LOW = bounded-statement territory (material asymmetry with DIY leading, or destination-level context); INSUFFICIENT = no honest number exists (currency unbridgeable, FX stale/missing, miles on the DIY side, NOT_COMPARABLE products). Numeric savings are shown at HIGH and MEDIUM only."
+  },
+
+  "requoteNote": "Future comparable STAY observations are collected in EUR natively (config/stays.json observation.currency; Xotelo/Agoda/SerpAPI all accept EUR — currency is a hard baseline dimension, so EUR baselines start fresh and USD history remains valid through the FX layer, exactly as designed). Cash-flight collection stays USD: the flight radar is a production system with USD baselines on the NAS; its components convert through FX with full provenance. Old rows are NEVER re-quoted just to normalize them."
+}

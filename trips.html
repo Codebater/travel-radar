@@ -28,6 +28,28 @@
   .badge.good { border-color: #2c5d4b; color: #7fd1b9; }
   .badge.warn { border-color: #6b5327; color: #ffd479; }
   .empty { color: #6b7a8c; padding: 30px 0; }
+  .pkg { margin-top: 12px; padding-top: 10px; border-top: 1px dashed #1d2733; }
+  .pkg h3 { margin: 0 0 6px; font-size: 11px; letter-spacing: 1px; color: #6b7a8c; }
+  .pkg-row { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: 13px; margin: 2px 0; }
+  .pkg-seller { color: #7fd1b9; min-width: 110px; }
+  .pkg-price { color: #ffd479; }
+  .verdict { margin-top: 8px; font-size: 13px; padding: 6px 10px; border-radius: 6px; border: 1px solid #314052; }
+  .verdict.buy { border-color: #6b5327; color: #ffd479; }
+  .verdict.diy { border-color: #2c5d4b; color: #7fd1b9; }
+  .verdict.blocked { color: #8fa1b5; }
+  .verdict .why { color: #6b7a8c; font-size: 12px; margin-top: 2px; }
+  .offer { border: 1px solid #1d2733; border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+  .offer .row1 { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: baseline; }
+  .offer .fresh { color: #6b7a8c; font-size: 11px; margin-top: 2px; }
+  .offer .changed { color: #ffd479; font-size: 12px; margin-top: 4px; border-top: 1px dashed #6b5327; padding-top: 4px; }
+  .btn { display: inline-block; font-size: 11px; padding: 3px 10px; border-radius: 6px; border: 1px solid #314052;
+         color: #d7dde5; background: #131b27; cursor: pointer; text-decoration: none; }
+  .btn.primary { border-color: #2c5d4b; color: #7fd1b9; }
+  .btn:hover { background: #1a2534; }
+  .btn[disabled] { opacity: .5; cursor: default; }
+  .sect { margin: 10px 0 4px; font-size: 11px; letter-spacing: 1px; color: #6b7a8c; }
+  .navq { font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid #314052; color: #8fa1b5; }
+  .navq.exact { border-color: #2c5d4b; color: #7fd1b9; }
 </style>
 </head>
 <body>
@@ -42,9 +64,148 @@
 const fmt = new Intl.NumberFormat("en-US")
 const money = (n, c) => (c === "USD" ? "$" : c + " ") + fmt.format(Math.round(n))
 
+const AGO = m => m == null ? "never" : m < 60 ? m + " min ago" : m < 2880 ? Math.round(m / 60) + " h ago" : Math.round(m / 1440) + " d ago"
+
+// The action label must reflect what we actually KNOW. A landing page is
+// never "Book now"; EXACT means the provider returned that URL for that offer.
+function actionFor(o) {
+  const l = o.locator
+  if (l.navigationQuality === "EXACT_DEEP_LINK" && l.deepLinkUrl)
+    return { url: l.deepLinkUrl, label: "Check & book at provider", cls: "btn primary" }
+  if (l.navigationQuality === "SEARCH_REPLAY_LINK" && l.searchReplayUrl)
+    return { url: l.searchReplayUrl, label: "Open provider search", cls: "btn" }
+  if (l.navigationQuality === "PROVIDER_LANDING_LINK" && l.landingUrl)
+    return { url: l.landingUrl, label: "Open provider page", cls: "btn" }
+  return null
+}
+
+function sellerName(p) {
+  return p === "tui_packages" ? "TUI" : p === "check24_packages" ? "CHECK24"
+    : p === "fast_flights" ? "Google Flights" : p === "xotelo" ? "TripAdvisor (meta)" : p
+}
+
+function freshLine(o) {
+  const f = o.freshness
+  const observed = "Observed " + AGO(f.observedAgoMinutes)
+  const verified = f.verifiedAgoMinutes != null ? "Verified " + AGO(f.verifiedAgoMinutes) : "Not recently verified"
+  return observed + " · " + verified + (f.staleObservation ? " · STALE — recheck before booking" : "")
+}
+
+const RECHECKABLE = l => l.kind === "package" || (l.kind === "stay" && l.provider === "xotelo")
+
+function offerRow(o, title, extra) {
+  const l = o.locator
+  const action = actionFor(o)
+  const v = o.verification
+  const changed = v && v.status === "changed" && v.currentPrice != null
+    ? `<div class="changed">PRICE CHANGED · Observed: ${l.nativeCurrency} ${fmt.format(l.nativePrice)} · Current: ${v.currentCurrency} ${fmt.format(v.currentPrice)} · Difference: ${v.currentPrice - l.nativePrice >= 0 ? "+" : "−"}${l.nativeCurrency} ${fmt.format(Math.abs(Math.round((v.currentPrice - l.nativePrice) * 100) / 100))} · Checked: ${v.checkedAt.slice(0, 16)}</div>`
+    : v && v.status === "unavailable"
+      ? `<div class="changed">OFFER NOT FOUND at last recheck (${v.checkedAt.slice(0, 16)}) — historical observation kept</div>` : ""
+  const navLabel = l.navigationQuality.replace(/_/g, " ").toLowerCase()
+  return `<div class="offer" data-loc="${l.id}">
+    <div class="row1">
+      <span class="pkg-seller">${title}</span>
+      <span class="pkg-price">${l.nativeCurrency ?? "?"} ${l.nativePrice != null ? fmt.format(l.nativePrice) : "?"}</span>
+      ${extra ?? ""}
+      <span class="navq ${l.navigationQuality === "EXACT_DEEP_LINK" ? "exact" : ""}">${navLabel}</span>
+      <span class="unknown">${o.state}</span>
+      ${action ? `<a class="${action.cls}" href="${action.url}" target="_blank" rel="noopener noreferrer">${action.label}</a>` : `<span class="unknown">no trustworthy link</span>`}
+      ${RECHECKABLE(l) ? `<button class="btn" onclick="recheck(${l.id}, this)">Recheck price</button>` : ""}
+    </div>
+    <div class="fresh">${freshLine(o)}</div>
+    ${changed}
+  </div>`
+}
+
+async function recheck(locatorId, btn) {
+  btn.disabled = true; btn.textContent = "Checking…"
+  try {
+    const res = await fetch(`/api/offers/recheck?id=${locatorId}`, { method: "POST" })
+    const r = await res.json()
+    btn.textContent = r.status === "verified" ? "Verified ✓"
+      : r.status === "changed" ? "PRICE CHANGED" : r.status
+    load()   // re-render with the new verification state
+  } catch (e) {
+    btn.textContent = "recheck failed"
+  }
+}
+
+// Sectioned offer panel: best exact / best close / DIY components — sellers
+// are never collapsed; two providers quoting the same operator stay separate.
+function offersPanel(tripId, offersByTripId) {
+  const bundle = offersByTripId[tripId]
+  if (!bundle) return ""
+  const order = { EXACT_MATCH: 0, CLOSE_MATCH: 1, DESTINATION_LEVEL_ONLY: 2 }
+  const pkgs = [...(bundle.packages || [])].sort((a, b) =>
+    (order[a.verdict.comparability] ?? 9) - (order[b.verdict.comparability] ?? 9)
+    || (a.locator.nativePrice ?? Infinity) - (b.locator.nativePrice ?? Infinity))
+  const sections = []
+  const exact = pkgs.filter(p => p.verdict.comparability === "EXACT_MATCH")
+  const close = pkgs.filter(p => p.verdict.comparability === "CLOSE_MATCH")
+  const rest = pkgs.filter(p => !["EXACT_MATCH", "CLOSE_MATCH"].includes(p.verdict.comparability))
+  const pkgTitle = p => `${sellerName(p.locator.provider)}${p.locator.operator ? " / " + p.locator.operator : ""}`
+  const pkgExtra = p => `<span>${p.locator.checkIn} · ${p.locator.nights}n · ${(p.locator.board || "").replace(/_/g, " ")} · ${p.locator.cabin}</span><span>transfer ${(p.locator.transferStatus || "?").replace(/_/g, " ")}</span>`
+  if (exact.length) sections.push(`<div class="sect">BEST EXACT MATCH</div>` + exact.map(p => offerRow(p, pkgTitle(p), pkgExtra(p))).join(""))
+  if (close.length) sections.push(`<div class="sect">BEST CLOSE MATCH</div>` + close.map(p => offerRow(p, pkgTitle(p), pkgExtra(p))).join(""))
+  if (rest.length) sections.push(`<div class="sect">SEASONAL CONTEXT</div>` + rest.slice(0, 3).map(p => offerRow(p, pkgTitle(p), pkgExtra(p))).join(""))
+
+  const diy = bundle.diy || { flights: [], stays: [], unknownCosts: [] }
+  if (diy.flights.length || diy.stays.length) {
+    const parts = []
+    for (const f of diy.flights) parts.push(offerRow(f, `Flight · ${f.locator.operator ?? "?"} ${f.locator.origin}→${f.locator.destination}`,
+      `<span>${f.locator.outboundDate}${f.locator.returnDate ? " / " + f.locator.returnDate : ""} · ${f.locator.cabin}</span>`))
+    for (const st of diy.stays) parts.push(offerRow(st, `Hotel · via ${sellerName(st.locator.provider)}${st.locator.seller && st.locator.seller !== st.locator.provider ? " (" + st.locator.seller + ")" : ""}`,
+      `<span>${st.locator.checkIn} · ${st.locator.nights}n · ${(st.locator.board || "").replace(/_/g, " ")}</span>`))
+    for (const u of diy.unknownCosts || []) parts.push(`<div class="offer"><div class="row1"><span class="pkg-seller">${/transfer/i.test(u) ? "Transfer" : /tax/i.test(u) ? "Hotel taxes" : "Other"}</span><span class="unknown">UNKNOWN — ${u}</span></div></div>`)
+    sections.push(`<div class="sect">DIY COMPONENTS (book each part yourself)</div>` + parts.join(""))
+  }
+  return sections.join("")
+}
+
+// BUILD-vs-BUY panel: one line per package quote, then the stored verdict —
+// quantified only at strong comparability; blockers named, currencies never
+// converted client-side either.
+function packagePanel(tripId, packagesByTripId) {
+  const entry = packagesByTripId[tripId]
+  if (!entry || !entry.comparisons.length) return ""
+  const rows = ""   // per-offer rows render in the sectioned offers panel below
+  // The decisive (or most decisive-refusing) comparison leads the verdict box:
+  // prefer a winner, else the strongest stated blocker.
+  const order = { BUY_PACKAGE: 0, BUILD_YOURSELF: 1, TOO_CLOSE_TO_CALL: 2, UNKNOWN_COSTS_PREVENT_VERDICT: 3, INSUFFICIENT_COMPARABILITY: 4, ROUGH_CONTEXT_ONLY: 5 }
+  const lead = [...entry.comparisons].sort((a, b) => (order[a.verdict] ?? 9) - (order[b.verdict] ?? 9))[0]
+  const cls = lead.verdict === "BUY_PACKAGE" ? "buy" : lead.verdict === "BUILD_YOURSELF" ? "diy" : "blocked"
+  const diffVal = lead.absoluteDifference ?? lead.knownDifference
+  const pctVal = lead.percentDifference ?? lead.knownDifferencePct
+  const ccy = lead.comparisonCurrency ?? lead.packageCurrency
+  const winnerShown = lead.winner != null && diffVal != null
+  const diff = winnerShown
+    ? ` · Δ ${money(Math.abs(diffVal), ccy)} (${pctVal}%)`
+    : ""
+  const totals = entry.market && lead.diyKnownTotal != null && lead.packageTotal != null
+    ? ` · DIY ${money(lead.diyKnownTotal, ccy)} vs pkg ${money(lead.packageTotal, ccy)}`
+    : ""
+  const conf = lead.confidence ? ` · confidence ${lead.confidence}` : ""
+  const why = (lead.verdictReasons ?? lead.reasons ?? []).slice(0, 2).join(" · ")
+  return `<div class="pkg"><h3>PACKAGE ALTERNATIVE (BUILD vs BUY)</h3>${rows}
+    <div class="verdict ${cls}"><b>${lead.verdict.replace(/_/g, " ")}</b> · ${lead.comparability.replace(/_/g, " ")}${conf}${totals}${diff}
+      <div class="why">${why}</div>
+    </div></div>`
+}
+
 async function load() {
   const res = await fetch("/api/trips?limit=30&all")
   const data = await res.json()
+  let packagesByTripId = {}
+  let offersByTripId = {}
+  try {
+    // Market verdicts (8h) drive the verdict box; the offers API (8i) turns
+    // every construction into an inspectable, navigable offer.
+    const [mkRes, offRes] = await Promise.all([fetch("/api/market"), fetch("/api/offers")])
+    const mkData = await mkRes.json()
+    for (const t of mkData.trips || []) packagesByTripId[t.tripId] = { comparisons: t.verdicts, market: true }
+    const offData = await offRes.json()
+    for (const t of offData.trips || []) offersByTripId[t.tripId] = t
+  } catch (_) { /* offer layer optional — trips render without it */ }
   const t = data.totals
   document.getElementById("totals").textContent =
     `${t.trips} composed trips · ${t.interesting} interesting · ${t.rejected} rejected · top score ${t.topScore ?? "n/a"}`
@@ -85,6 +246,8 @@ async function load() {
       <div class="total">TOTAL: ${cash}${miles ? ' <span class="miles">+ ' + miles + "</span>" : ""}
         ${trip.unknownCosts.length ? '<div class="unknown">unknown: ' + trip.unknownCosts.join("; ") + "</div>" : ""}
       </div>
+      ${packagePanel(trip.id, packagesByTripId)}
+      ${offersPanel(trip.id, offersByTripId)}
       <div class="badges">${(trip.reasons || []).map(r =>
         `<span class="badge ${/EXCEPTIONAL|VERIFIED|ALL_INCLUSIVE|DATES_ALIGN|ANOMALY|WTF|EXTREME/.test(r) ? "good" : /UNKNOWN|COMPLEXITY|OVERPRICED/.test(r) ? "warn" : ""}">${r}</span>`).join("")}
       </div>`

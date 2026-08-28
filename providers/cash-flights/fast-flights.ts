@@ -179,6 +179,8 @@ export class FastFlightsProvider implements CashFlightProvider {
       flightNumber: null,
       durationMinutes: s.durationMinutes,
       aircraft: s.aircraft,
+      // The free Google path never states per-segment cabins; unknown stays null.
+      cabin: null,
     }))
 
     const airlines = f.airlines.filter(Boolean)

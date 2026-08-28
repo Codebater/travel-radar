@@ -1,10 +1,9 @@
 {
   "description": "Stay Radar tuning. Config, never code: everything an operator might reasonably change lives here. Provider-specific knowledge does NOT belong here — a provider that needs a setting reads its own env.",
   "updated": "2026-08-28",
-
   "observation": {
-    "currency": "USD",
-    "currencyNote": "One pinned request currency so every baseline is single-currency from day one. USD because it is the native pricing currency of most of the target markets (Maldives, Mexico); changing it later starts new baselines, it does not convert old ones.",
+    "currency": "EUR",
+    "currencyNote": "One pinned request currency so every baseline is single-currency. Phase 8h (2026-08-28): switched USD->EUR for the trip-market comparison set - the package sellers quote EUR natively and Xotelo/Agoda/SerpAPI all accept EUR, so future comparable stay observations collect EUR directly instead of riding FX. Currency is a hard baseline dimension: EUR baselines start fresh from here, USD history remains valid (and reaches EUR comparisons through the stored-FX layer); nothing is converted in place, and old USD rows are never re-quoted just to normalize them.",
     "adults": 2,
     "children": 0,
     "defaultCheckInOffsetDays": 45,
@@ -16,17 +15,24 @@
     "maxRequestsPerRun": 12,
     "maxRequestsPerRunNote": "Hard ceiling on external requests per observe invocation, reserve-before-await style: the loop stops planning work it has no budget to perform. CLI --limit may lower but never raise it."
   },
-
   "sanity": {
     "nightly": {
-      "USD": { "min": 10, "max": 50000 },
-      "EUR": { "min": 10, "max": 50000 },
-      "default": { "min": 10, "max": 50000 }
+      "USD": {
+        "min": 10,
+        "max": 50000
+      },
+      "EUR": {
+        "min": 10,
+        "max": 50000
+      },
+      "default": {
+        "min": 10,
+        "max": 50000
+      }
     },
     "nightlyNote": "Floors catch data errors ($0, $3), NOT good deals — a genuinely absurd bargain at a real property is the entire point of this system and must survive sanity. Ceilings catch unit errors (a stay total or minor-unit amount recorded as a nightly).",
     "maxNights": 30
   },
-
   "sampling": {
     "firstCheckInOffsetDays": 21,
     "stepDays": 14,
@@ -41,20 +47,22 @@
       "cheapWindowNote": "The sparse grid is blind between its points; the provider's own calendar is not. Each run may add up to this many samples aimed at runs of >= minCheapRunNights consecutive 'cheap' days in the latest calendar — the exact windows worth watching.",
       "neighborSamplesPerRun": 3,
       "neighborTriggerPercentBelow": 15,
-      "neighborOffsetsDays": [-2, 2, 4],
+      "neighborOffsetsDays": [
+        -2,
+        2,
+        4
+      ],
       "neighborNote": "An unusually low observation (>= neighborTriggerPercentBelow under its own median) earns neighboring check-in samples: an isolated glitch and a bookable cheap window look identical until the dates around it are observed.",
       "recentSampleCooldownDays": 3,
       "recentSampleCooldownNote": "Never re-ask a (property, check-in) the radar sampled within this many days — targeted sampling must add NEW information, not burn budget re-measuring."
     }
   },
-
   "scheduler": {
     "frequencyHours": 24,
     "tickSeconds": 60,
     "leaseTtlSeconds": 90,
     "staleRunMinutes": 60
   },
-
   "budgets": {
     "maxConfirmationsPerRun": 4,
     "maxConfirmationsPerDay": 12,
@@ -67,7 +75,6 @@
     "calendarUnsupportedAfter": 3,
     "rawRetention": 400
   },
-
   "trigger": {
     "description": "Decides ONLY whether one confirmation request is worth spending. Not an alert score — Phase 8c owns scoring.",
     "calendarTrigger": true,
@@ -79,7 +86,6 @@
     "maxTriggersPerRun": 4,
     "conservativeNote": "Below minSamplesForMedian prior observations the median rule stays silent (no evidence, no spend); the calendar rule may still fire because it is the provider's own cross-date comparison, not ours."
   },
-
   "anomaly": {
     "engineVersion": "stay-anomaly-1",
     "weightsVersion": "stay-weights-1",
@@ -87,7 +93,6 @@
     "storeBelowThreshold": true,
     "noHistoryScoreCap": 80,
     "noHistoryScoreCapNote": "A decision with no baseline behind it is judged on absolute price and evidence alone; dropping the history components concentrates the surviving weights, so without a cap an unevidenced rate could outrank one backed by dozens of observations. 80, below the flight radar's 85, because stay history is younger and thinner.",
-
     "baseline": {
       "lookbackDays": 365,
       "minSamplesToEmit": 5,
@@ -95,22 +100,47 @@
       "maxBaselineAgeNote": "A baseline whose NEWEST member is older than this is an archive, not a comparison — no baseline is emitted.",
       "staleBaselineDays": 45,
       "staleBaselineNote": "Newest member older than this (but within max): baseline stands, confidence is knocked down one tier and STALE_BASELINE is recorded.",
-      "relaxationOrder": ["nightsBucket"],
+      "relaxationOrder": [
+        "nightsBucket"
+      ],
       "relaxationNote": "The ONLY safe relaxation: stay-length bucket, because the comparison unit is already per-night. Property, source_class, room_class, board, occupancy and currency are hard dimensions and are never relaxed — a meta quote is not a retail room, an AI rate is not a breakfast rate, and 2-adult pricing is not 4-adult pricing.",
       "nightsBuckets": [
-        { "label": "short", "maxNights": 4 },
-        { "label": "medium", "maxNights": 9 },
-        { "label": "long", "maxNights": 16 }
+        {
+          "label": "short",
+          "maxNights": 4
+        },
+        {
+          "label": "medium",
+          "maxNights": 9
+        },
+        {
+          "label": "long",
+          "maxNights": 16
+        }
       ]
     },
-
     "confidenceTiers": [
-      { "minSamples": 5, "label": "VERY_LOW", "value": 0.3 },
-      { "minSamples": 8, "label": "LOW", "value": 0.5 },
-      { "minSamples": 15, "label": "MEDIUM", "value": 0.75 },
-      { "minSamples": 30, "label": "HIGHER", "value": 1.0 }
+      {
+        "minSamples": 5,
+        "label": "VERY_LOW",
+        "value": 0.3
+      },
+      {
+        "minSamples": 8,
+        "label": "LOW",
+        "value": 0.5
+      },
+      {
+        "minSamples": 15,
+        "label": "MEDIUM",
+        "value": 0.75
+      },
+      {
+        "minSamples": 30,
+        "label": "HIGHER",
+        "value": 1.0
+      }
     ],
-
     "weights": {
       "relative": 0.4,
       "absoluteValue": 0.25,
@@ -126,18 +156,20 @@
     "fullCreditPercentBelowMedian": 35,
     "lowPercentileFullCreditAt": 25,
     "lowPercentileNote": "Full percentile credit at the 0th percentile, zero credit at the 25th and above — being merely below median is not remarkable.",
-
     "actionability": {
       "neighborWindowDays": 5,
       "priceTolerancePercent": 8,
       "sustainedSpanDays": 5,
-      "values": { "isolated": 0.2, "short": 0.6, "sustained": 1.0 },
+      "values": {
+        "isolated": 0.2,
+        "short": 0.6,
+        "sustained": 1.0
+      },
       "calendarSustainedValue": 0.6,
       "requiresNotablePrice": true,
       "notablePriceNote": "Persistence must never rescue an ordinary price: unless the rate is notably low (relative >= minNotableRelative, or an absolute rule fired), actionability scores a REAL ZERO — the component ran and found nothing actionable about an ordinary rate lasting a week.",
       "minNotableRelative": 0.3
     },
-
     "evidenceValues": {
       "discovered": 0.35,
       "confirmed": 0.9,
@@ -146,13 +178,11 @@
       "metaWithVerified": 0.85,
       "note": "A meta (Xotelo) observation whose property+window has a same-window retail confirmation on record is worth more than a bare meta sighting, but never as much as the retail observation itself. A metered (SerpAPI) verification on record for the window sits above the free confirmation and below being the verified observation."
     },
-
     "crossSource": {
       "retailSpreadHighPercent": 30,
       "retailSpreadNote": "When the cheapest same-window retail nightly exceeds the meta nightly by more than this percent, the candidate carries RETAIL_SPREAD_HIGH: the meta price may not be bookable at retail. Recorded as a fact and a caution badge — never used to blend the two numbers.",
       "verifiedSpreadHighPercent": 25
     },
-
     "verification": {
       "description": "The gate in front of every METERED hotel verification call. A random observation must never reach SerpAPI: only near-threshold candidates with a nameable reason spend money, and the reason is recorded BEFORE the request.",
       "nearMissBand": 20,
@@ -166,12 +196,10 @@
       "opportunityCooldownDays": 7,
       "opportunityCooldownNote": "One paid verification per opportunity (price-free key) per cooldown — re-observing the same cheap week must not re-spend."
     },
-
     "calendarSignal": {
       "flipLookbackDays": 45,
       "note": "A flip is: the LATEST per-date classification says cheap while an EARLIER snapshot within the lookback said average/high for the same date. Supporting evidence only."
     },
-
     "category": {
       "description": "The second absolute-value axis: where does this nightly sit in the CROSS-PROPERTY distribution of the same category (destination group × board × luxury tier × source class × tax status × currency)? A stay can be objectively exceptional for its category even when it is normal for its property. The judged property's own rows are EXCLUDED — a category of one is a mirror, not a market.",
       "minSamples": 20,
@@ -182,34 +210,83 @@
       "maturityNote": "Category credit is scaled by the same confidence tiers as property baselines: a 20-sample two-property category speaks softly."
     },
     "absolute": {
-      "currency": "USD",
-      "derivationNote": "Initial thresholds derived 2026-08-28 from the radar's own first observations, set CONSERVATIVELY BELOW observed normals so ordinary pricing cannot fire them: Maldives AI luxury observed $870–1,010/nt normal with a $681 cheap-season low (Lily Beach); Riviera Maya AI luxury observed $1,087–1,390 (Grand Velas); Maldives ultra any-board observed $2,400–4,300 typical (Soneva, breakfast basis). Groups without observations yet (Bali, Thailand, Los Cabos, Seychelles-Mauritius) got deliberately strict bars that only truly absurd prices can cross; they should be revisited as history accumulates. All bars assume per-night per-room 2-adult USD; taxes-unknown meta quotes cross the same bars (a tax-in price crossing is stronger — the evidence layer records which it was).",
-      "tierScale": { "ultra": 1.4, "luxury": 1.0, "upper": 0.75 },
+      "currency": "EUR",
+      "derivationNote": "Initial thresholds derived 2026-08-28 from the radar's own first observations, set CONSERVATIVELY BELOW observed normals so ordinary pricing cannot fire them: Maldives AI luxury observed $870–1,010/nt normal with a $681 cheap-season low (Lily Beach); Riviera Maya AI luxury observed $1,087–1,390 (Grand Velas); Maldives ultra any-board observed $2,400–4,300 typical (Soneva, breakfast basis). Groups without observations yet (Bali, Thailand, Los Cabos, Seychelles-Mauritius) got deliberately strict bars that only truly absurd prices can cross; they should be revisited as history accumulates. All bars assume per-night per-room 2-adult USD; taxes-unknown meta quotes cross the same bars (a tax-in price crossing is stronger — the evidence layer records which it was). RESTATED IN EUR 2026-08-28 (Phase 8h currency switch): policy thresholds re-authored from the USD bars at the stored ECB reference rate 0.85874 (fx_rate_observations #1, 2026-08-27), rounded DOWN so every bar stays at least as strict as its USD original. Policy numbers, not converted observations - USD-era decisions already stored keep their USD basis.",
+      "tierScale": {
+        "ultra": 1.4,
+        "luxury": 1.0,
+        "upper": 0.75
+      },
       "tierScaleNote": "An ultra property's 'cheap' sits far above a luxury property's — the same bar cannot serve Soneva and a 5* chain. Scales multiply the rule thresholds.",
-      "roomScale": { "villa": 1.25, "suite": 1.1, "premium": 1.0, "entry": 0.9 },
+      "roomScale": {
+        "villa": 1.25,
+        "suite": 1.1,
+        "premium": 1.0,
+        "entry": 0.9
+      },
       "roomScaleNote": "Applied only when the observation carries a room class (retail tiers do; meta property-level quotes do not): a villa crossing the bar is a stronger fact than an entry room crossing it, so the villa's bar sits higher. Unknown/absent room class uses 1.0.",
       "rules": {
         "maldives": {
-          "all_inclusive": { "interesting": 650, "extreme": 550, "wtf": 420 },
-          "any": { "interesting": 500, "extreme": 380, "wtf": 260 }
+          "all_inclusive": {
+            "interesting": 550,
+            "extreme": 470,
+            "wtf": 360
+          },
+          "any": {
+            "interesting": 420,
+            "extreme": 320,
+            "wtf": 220
+          }
         },
         "riviera-maya": {
-          "all_inclusive": { "interesting": 800, "extreme": 650, "wtf": 480 },
-          "any": { "interesting": 400, "extreme": 300, "wtf": 200 }
+          "all_inclusive": {
+            "interesting": 680,
+            "extreme": 550,
+            "wtf": 410
+          },
+          "any": {
+            "interesting": 340,
+            "extreme": 255,
+            "wtf": 170
+          }
         },
         "los-cabos": {
-          "all_inclusive": { "interesting": 700, "extreme": 560, "wtf": 420 },
-          "any": { "interesting": 450, "extreme": 340, "wtf": 230 }
+          "all_inclusive": {
+            "interesting": 600,
+            "extreme": 480,
+            "wtf": 360
+          },
+          "any": {
+            "interesting": 380,
+            "extreme": 290,
+            "wtf": 195
+          }
         },
         "bali": {
-          "any": { "interesting": 300, "extreme": 220, "wtf": 140 }
+          "any": {
+            "interesting": 255,
+            "extreme": 185,
+            "wtf": 120
+          }
         },
         "thailand-beach": {
-          "any": { "interesting": 300, "extreme": 220, "wtf": 140 }
+          "any": {
+            "interesting": 255,
+            "extreme": 185,
+            "wtf": 120
+          }
         },
         "seychelles-mauritius": {
-          "all_inclusive": { "interesting": 550, "extreme": 430, "wtf": 300 },
-          "any": { "interesting": 350, "extreme": 260, "wtf": 170 }
+          "all_inclusive": {
+            "interesting": 470,
+            "extreme": 365,
+            "wtf": 255
+          },
+          "any": {
+            "interesting": 300,
+            "extreme": 220,
+            "wtf": 145
+          }
         }
       }
     }

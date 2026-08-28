@@ -220,18 +220,18 @@ describe("four-concept scoring paths", () => {
 
   function history(amounts: number[], startAge = 60): void {
     amounts.forEach((amount, i) => {
-      obs(db, { price: { amount, currency: "USD" }, fetchedAt: daysAgo(startAge - i * 3) })
+      obs(db, { price: { amount, currency: "EUR" }, fetchedAt: daysAgo(startAge - i * 3) })
     })
   }
 
   it("cheap ABSOLUTE VALUE with no anomaly: absolute concept strong, relative near zero", () => {
-    // Lily's bars (maldives AI luxury): interesting 650 / extreme 550 / wtf 420.
-    // A property that ALWAYS costs 500: strong absolute, no anomaly at all.
-    history([500, 505, 495, 500, 510, 498, 502, 500])
-    obs(db, { price: { amount: 493, currency: "USD" }, fetchedAt: daysAgo(0) })
+    // Lily's EUR bars (maldives AI luxury): interesting 550 / extreme 470 / wtf 360.
+    // A property that ALWAYS costs ~420: strong absolute, no anomaly at all.
+    history([420, 425, 415, 420, 430, 418, 422, 420])
+    obs(db, { price: { amount: 413, currency: "EUR" }, fetchedAt: daysAgo(0) })
     evaluateStayObservations({ db, config: CONFIG })
-    const c = listStayCandidates(db, { limit: 20 }).find(x => x.nightlyAmount === 493)!
-    expect(c.absoluteValueScore).toBeGreaterThan(60)      // (650-493)/230 ≈ 68
+    const c = listStayCandidates(db, { limit: 20 }).find(x => x.nightlyAmount === 413)!
+    expect(c.absoluteValueScore).toBeGreaterThan(60)      // (550-413)/190 ≈ 72
     expect(c.relativeScore).toBeLessThan(25)              // barely-below-median + maturity-scaled 0th pct
     expect(c.reasons).toContain("ALL_INCLUSIVE_UNDER_ABSOLUTE_BAR")
     // Interesting — but a permanently-cheap property is not a mispricing.
@@ -240,7 +240,7 @@ describe("four-concept scoring paths", () => {
 
   it("huge ANOMALY that is still objectively expensive: relative strong, absolute a KEPT zero", () => {
     history([3000, 3100, 2950, 3050, 3000, 3080, 2990, 3020])
-    obs(db, { price: { amount: 1900, currency: "USD" }, fetchedAt: daysAgo(0) })   // 37% below, still >> 650
+    obs(db, { price: { amount: 1900, currency: "EUR" }, fetchedAt: daysAgo(0) })   // 37% below, still >> 550
     evaluateStayObservations({ db, config: CONFIG })
     const c = listStayCandidates(db, { limit: 1 })[0]
     expect(c.relativeScore).toBeGreaterThan(70)
@@ -253,7 +253,7 @@ describe("four-concept scoring paths", () => {
 
   it("strong anomaly AND strong absolute value compound toward extreme strength", () => {
     history([1200, 1180, 1220, 1190, 1210, 1200, 1195, 1205])
-    obs(db, { price: { amount: 430, currency: "USD" }, fetchedAt: daysAgo(0) })    // 64% below AND near-wtf
+    obs(db, { price: { amount: 370, currency: "EUR" }, fetchedAt: daysAgo(0) })    // 69% below AND near-wtf (EUR bars)
     evaluateStayObservations({ db, config: CONFIG })
     const c = listStayCandidates(db, { limit: 1 })[0]
     expect(c.relativeScore).toBeGreaterThan(80)
@@ -267,7 +267,7 @@ describe("four-concept scoring paths", () => {
   it("percentile maturity: a tiny baseline's lowest-ever earns scaled credit only", () => {
     // 5 samples → VERY_LOW (value 0.3): percentile credit must be scaled.
     history([950, 960, 970, 980, 990].slice(0, 5))
-    obs(db, { price: { amount: 940, currency: "USD" }, fetchedAt: daysAgo(0) })    // lowest ever, barely below median
+    obs(db, { price: { amount: 940, currency: "EUR" }, fetchedAt: daysAgo(0) })    // lowest ever, barely below median
     evaluateStayObservations({ db, config: CONFIG })
     const c = listStayCandidates(db, { limit: 1 })[0]
     const rel = c.scoreBreakdown.relative as { raw: number; detail: string }
@@ -283,7 +283,7 @@ describe("four-concept scoring paths", () => {
     const p = getStayProperty(db, "lily-beach-resort")!
     history([950, 960, 970, 980, 990, 955, 965, 975])
     // Isolated: one cheap check-in only.
-    obs(db, { price: { amount: 620, currency: "USD" }, fetchedAt: daysAgo(0) })
+    obs(db, { price: { amount: 620, currency: "EUR" }, fetchedAt: daysAgo(0) })
     evaluateStayObservations({ db, config: CONFIG })
     const isolated = listStayCandidates(db, { limit: 1 })[0]
     expect(isolated.actionabilityScore).toBe(20)
@@ -293,7 +293,7 @@ describe("four-concept scoring paths", () => {
     for (const [offset, amount] of [[-3, 640], [-1, 615], [2, 635], [4, 625]] as const) {
       const checkIn = new Date(Date.parse(`${STAY.checkIn}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10)
       const checkOut = new Date(Date.parse(checkIn) + 5 * 86_400_000).toISOString().slice(0, 10)
-      obs(db, { price: { amount, currency: "USD" }, checkIn, checkOut, fetchedAt: daysAgo(0) })
+      obs(db, { price: { amount, currency: "EUR" }, checkIn, checkOut, fetchedAt: daysAgo(0) })
     }
     evaluateStayObservations({ db, config: CONFIG, fromScratch: true })
     const sustained = listStayCandidates(db, { limit: 10 }).find(c => c.nightlyAmount === 620)!
@@ -319,7 +319,7 @@ describe("four-concept scoring paths", () => {
     recordCalendarObservations(db, p, "xotelo", "g1-d1", null, days)
     for (const offset of [-2, 0, 2, 4]) {
       const checkIn = new Date(Date.parse(`${STAY.checkIn}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10)
-      obs(db, { price: { amount: 965, currency: "USD" }, checkIn, fetchedAt: daysAgo(0) })
+      obs(db, { price: { amount: 965, currency: "EUR" }, checkIn, fetchedAt: daysAgo(0) })
     }
     evaluateStayObservations({ db, config: CONFIG, fromScratch: true })
     const judged = listStayCandidates(db, { limit: 10 }).filter(c => c.nightlyAmount === 965)
@@ -333,10 +333,10 @@ describe("four-concept scoring paths", () => {
 
   it("verified corroboration raises meta evidence; a verified-higher price records the spread", () => {
     history([950, 960, 970, 980, 990, 955, 965, 975])
-    obs(db, { price: { amount: 620, currency: "USD" }, fetchedAt: daysAgo(0) })
+    obs(db, { price: { amount: 620, currency: "EUR" }, fetchedAt: daysAgo(0) })
     // The paid tier answers: cheapest verified nightly 640 — corroborates 620.
     obs(db, {
-      price: { amount: 640, currency: "USD" }, fetchedAt: daysAgo(0),
+      price: { amount: 640, currency: "EUR" }, fetchedAt: daysAgo(0),
       provider: SERPAPI_HOTELS_PROVIDER, verificationLevel: "verified",
       rateSource: "Official site", sourceClass: "meta", taxesFees: "included",
     })
@@ -350,7 +350,7 @@ describe("four-concept scoring paths", () => {
     // A verified price far ABOVE the meta quote instead records the caution.
     const evidence = gatherCrossSourceEvidence(db, {
       propertyId: "lily-beach-resort", checkIn: STAY.checkIn, sourceClass: "meta",
-      nightly: 450, currency: "USD", fetchedAt: new Date().toISOString(),
+      nightly: 450, currency: "EUR", fetchedAt: new Date().toISOString(),
     }, CONFIG.anomaly)
     expect(evidence.verifiedExists).toBe(true)
     expect(evidence.verifiedSpreadHigh).toBe(true)         // 640 vs 450 = +42%
@@ -368,18 +368,18 @@ describe("the verification gate", () => {
   function strongCandidate(): void {
     const priors = [1200, 1180, 1220, 1190, 1210, 1200, 1195, 1205]
     priors.forEach((amount, i) => {
-      obs(db, { price: { amount, currency: "USD" }, fetchedAt: daysAgo(60 - i * 3) })
+      obs(db, { price: { amount, currency: "EUR" }, fetchedAt: daysAgo(60 - i * 3) })
     })
-    obs(db, { price: { amount: 430, currency: "USD" }, fetchedAt: daysAgo(0) })
+    obs(db, { price: { amount: 370, currency: "EUR" }, fetchedAt: daysAgo(0) })
     evaluateStayObservations({ db, config: CONFIG, fromScratch: true })
   }
 
   it("ordinary rates never qualify — no reason, no spend", () => {
     const priors = [950, 960, 970, 980, 990, 955, 965, 975]
     priors.forEach((amount, i) => {
-      obs(db, { price: { amount, currency: "USD" }, fetchedAt: daysAgo(60 - i * 3) })
+      obs(db, { price: { amount, currency: "EUR" }, fetchedAt: daysAgo(60 - i * 3) })
     })
-    obs(db, { price: { amount: 940, currency: "USD" }, fetchedAt: daysAgo(0) })
+    obs(db, { price: { amount: 940, currency: "EUR" }, fetchedAt: daysAgo(0) })
     evaluateStayObservations({ db, config: CONFIG })
     expect(selectVerificationTargets(db, CONFIG)).toHaveLength(0)
   })
@@ -395,7 +395,7 @@ describe("the verification gate", () => {
       rates: [makeStayRate({
         propertyId: "lily-beach-resort", provider: SERPAPI_HOTELS_PROVIDER,
         verificationLevel: "verified", sourceClass: "meta",
-        price: { amount: 455, currency: "USD" }, taxesFees: "included",
+        price: { amount: 395, currency: "EUR" }, taxesFees: "included",
       })],
     })
     const pass = await runVerificationPass({ db, config: CONFIG, provider, sleep: async () => {} })
@@ -414,12 +414,12 @@ describe("the verification gate", () => {
     strongCandidate()
     const provider = new MockStayProvider({
       name: SERPAPI_HOTELS_PROVIDER,
-      rates: [makeStayRate({ propertyId: "lily-beach-resort", provider: SERPAPI_HOTELS_PROVIDER, verificationLevel: "verified", sourceClass: "meta", price: { amount: 455, currency: "USD" } })],
+      rates: [makeStayRate({ propertyId: "lily-beach-resort", provider: SERPAPI_HOTELS_PROVIDER, verificationLevel: "verified", sourceClass: "meta", price: { amount: 455, currency: "EUR" } })],
     })
     const first = await runVerificationPass({ db, config: CONFIG, provider, sleep: async () => {} })
     expect(first.spent).toBe(1)
     // Re-observe the same cheap week; re-evaluate; the gate must not re-spend.
-    obs(db, { price: { amount: 428, currency: "USD" }, fetchedAt: daysAgo(0) })
+    obs(db, { price: { amount: 428, currency: "EUR" }, fetchedAt: daysAgo(0) })
     evaluateStayObservations({ db, config: CONFIG, fromScratch: true })
     const second = await runVerificationPass({ db, config: CONFIG, provider, sleep: async () => {} })
     expect(second.spent).toBe(0)
@@ -436,7 +436,7 @@ describe("the verification gate", () => {
     // Retail AI villa history…
     for (let i = 0; i < 5; i++) {
       obs(db, {
-        price: { amount: 1000 + i, currency: "USD" }, fetchedAt: daysAgo(30 - i * 3),
+        price: { amount: 1000 + i, currency: "EUR" }, fetchedAt: daysAgo(30 - i * 3),
         sourceClass: "retail", provider: "agoda", roomName: "Beach Villa", roomClass: "villa",
         board: "all_inclusive", boardSource: "structured", verificationLevel: "confirmed",
       })
@@ -444,7 +444,7 @@ describe("the verification gate", () => {
     // …then a verified META property-level row: different source_class, so the
     // retail baseline must remain invisible to it.
     obs(db, {
-      price: { amount: 600, currency: "USD" }, fetchedAt: daysAgo(0),
+      price: { amount: 600, currency: "EUR" }, fetchedAt: daysAgo(0),
       provider: SERPAPI_HOTELS_PROVIDER, verificationLevel: "verified", sourceClass: "meta",
     })
     evaluateStayObservations({ db, config: CONFIG, fromScratch: true })
@@ -469,9 +469,9 @@ describe("targeted sampling", () => {
     recordCalendarObservations(db, p, "xotelo", "g1-d1", null, cheapDays)
 
     for (let i = 0; i < 6; i++) {
-      obs(db, { price: { amount: 950, currency: "USD" }, fetchedAt: daysAgo(30 - i * 4) })
+      obs(db, { price: { amount: 950, currency: "EUR" }, fetchedAt: daysAgo(30 - i * 4) })
     }
-    obs(db, { price: { amount: 700, currency: "USD" }, fetchedAt: daysAgo(1) })   // 26% below
+    obs(db, { price: { amount: 700, currency: "EUR" }, fetchedAt: daysAgo(1) })   // 26% below
 
     const samples = gatherTargetedSamples(db, [p], CONFIG, new Date())
     expect(samples.some(s => s.kind === "cheap-window")).toBe(true)
@@ -490,7 +490,7 @@ describe("targeted sampling", () => {
     recordCalendarObservations(db, p, "xotelo", "g1-d1", null, [{ date: STAY.checkIn, dayClass: "cheap" }])
     const result = assessActionability(db, {
       propertyId: p.id, ...STAY, sourceClass: "meta", board: "all_inclusive",
-      currency: "USD", taxesFees: "unknown", nightly: 700, fetchedAt: new Date().toISOString(),
+      currency: "EUR", taxesFees: "unknown", nightly: 700, fetchedAt: new Date().toISOString(),
     }, true, CONFIG.anomaly)
     expect(result.calendarSustained).toBe(false)
     expect(result.persistence).toBe("isolated")

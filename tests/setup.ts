@@ -34,6 +34,17 @@ process.env.XOTELO_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
 process.env.AGODA_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
 process.env.SERPAPI_HOTELS_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
 
+// Package sellers are keyless too — same unroutable-port treatment for every
+// host the providers can reach (TUI's stable API host, both CloudFront hosts,
+// and CHECK24), so a forgotten fetch stub fails fast instead of touching a
+// live seller from CI.
+process.env.TUI_PACKAGES_OFFER_BASE = "http://127.0.0.1:9/blocked-in-tests"
+process.env.TUI_PACKAGES_CALENDAR_BASE = "http://127.0.0.1:9/blocked-in-tests"
+process.env.CHECK24_PACKAGES_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
+
+// The FX source is keyless too; same treatment.
+process.env.MARKET_FX_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
+
 // Backups go to a throwaway directory for the same reason the database does.
 // Without this, any test that runs the scheduler writes a snapshot of the test
 // database into the operator's REAL backup set — which then looks like the

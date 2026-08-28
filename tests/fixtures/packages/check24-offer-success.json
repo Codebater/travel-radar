@@ -1,0 +1,1076 @@
+{
+ "status": "Success",
+ "items": {
+  "8378752431358365324": {
+   "id": "8378752431358365324",
+   "hotelId": 3541,
+   "tourOperatorCode": "AUR",
+   "supplierCode": "au",
+   "cryptString": "0I4lhQR4RouM8D9JlqtCwncwcy2xbNkgjr8=-R09DUlkwMfqKXqdDTN/bU+0Im1HOpbW5ZUKQsMGUqqZPeuB5yfYVXWHaHhndQFnwuyRT5SvXjteALGhOhlur0TGN9wO16G22GohO/8PteZ7u5/WhBU43cGQrFHUfaFek/HXoHTX/Yj1Wf6Vls9sbKG6aerArh6gqaOTIuAAqrWuUmQMkZhHmCpoUiC2Ya9pIbfJB1s3ixQkVb4XFORy9m5Mf0HzLI12fqyos2fvSSgiIVchAK/0tA7TElOYxjA3YAqH9j+HbboR3MObAtBfzcBkJVXpIP2HEGLeMxcDvxDQQtJXFcoCGsNjEriLT+LO2mLgBXIbag4IcWstYy/q2ueWNUQm5VpaDsMsdmSXWhXPGQekYtb/BS0Gx1DzmtRoAfKp9FwACzccg8/Ic5w4L0M25BosOWY8O6ag8gtA4SrnVI3wbiqV+y2xSkAtxIlkq/NCal7pR4VNdyZ7PFOf33570iIRigDRhxY9BAF3tiLNxBA1fGx3Z6zPCUaVHnLAdaxgSLdG+kDgKOSWvDz8HdbXwkT8edMjSNO8GPJ/IO0Uq/Cid0hvbBpArTdDI5cdNhn4Biit6GOMC/YQ7K+sxwiK+vYjEwwMJrYd0vBlHQZ1DmZ9F0vvmN3yjSZHygRDwz4SPF5fPl8gffeQUWQ/vsD+wayz+0nYVlweBn6LO90tfmIXxLoAIl0XbKuzwV5iLCM+9eWfY3WK0pJQer63WUSYt0f4TOnKsixAkwSBcDaPRzfIkMpAUpzzPEtlO3qfc8zVkQRF47OBEw/RlYRBBl1S1PRAYgzt3I/JkdpYD/wcNt0JF5JOxbGmyyutZ0kpge/eMeH5uqSFjSgaa+5IaAPg12chmjconVK+RxkA7LrrCcDRsqFBN/I2J+N1nHq2KD9EuxE2Jhdaasw6o9xkM4HxWpDRZy3KJXXqm23BNc6/GRlX6fdrPA7cWdLgI0RzpRXGxrH5mztphPeGLiznKzzZhY7sb+SNepg==",
+   "travelAttributes": {
+    "overnightStays": 4,
+    "departureDate": "2026-11-19T00:00:00",
+    "returnDate": "2026-11-24T00:00:00",
+    "roomCount": 1,
+    "days": 6
+   },
+   "accommodationData": {
+    "mealType": "AllInclusive",
+    "roomDescription": {
+     "name": "Villa",
+     "description": "Villa",
+     "showRoomClass": true,
+     "type": "Villa",
+     "tooltipData": "{\"roomType\":\"villa\",\"roomClass\":\"Standard\",\"accommodationName\":\"Villa\",\"headline\":\"roomtype\\/tooltip\\/villa\\/headline\",\"annexBuilding\":\"\",\"hasRoomContent\":true,\"accommodationOriginName\":\"Villa\",\"description\":\"roomtype\\/tooltip\\/villa\\/description\",\"offerId\":\"8378752431358365324\",\"offerDescription\":[\"roomtype\\/tooltip\\/advice\\/info\"]}"
+    },
+    "roomList": [
+     {
+      "roomDescription": {
+       "name": "Villa",
+       "description": "Villa",
+       "showRoomClass": true,
+       "type": "Villa",
+       "tooltipData": "{\"roomType\":\"villa\",\"roomClass\":\"Standard\",\"accommodationName\":\"Villa\",\"headline\":\"roomtype\\/tooltip\\/villa\\/headline\",\"annexBuilding\":\"\",\"hasRoomContent\":true,\"accommodationOriginName\":\"Villa\",\"description\":\"roomtype\\/tooltip\\/villa\\/description\",\"offerId\":\"8378752431358365324\",\"offerDescription\":[\"roomtype\\/tooltip\\/advice\\/info\"]}"
+      },
+      "priceSummary": {},
+      "roomContentId": "CIaN7BEQ1fztCBjVGygBOBRaIAgUEAEZ%2BYOB597D7z8hAAAAAAAA8D8wCUoCIAFSAigB",
+      "roomPreview": "https://cdn1.urlaub.check24.de/size=60c60/di=3/nfc=200/source=aHR0cHM6Ly9xLXh4LmJzdGF0aWMuY29tL3hkYXRhL2ltYWdlcy9ob3RlbC9tYXgyMDAwLzQzNDM0ODAzNS5qcGc-az1jYWNiOTk3NzQ5MGFlMmNhNzc2MDgwMWNlZjE1ZjNhNDI2MThmZjFjZWEwOGRjNjEwNDA1ODZkMTcyYjkyNzczJm89!231c06/picture.jpg?cts_do=desktop&cts_p=PR&cts_s=s3"
+     }
+    ],
+    "mealCategory": "AllInclusive"
+   },
+   "price": {
+    "total": 6270,
+    "person": 3135,
+    "totalPrice": {
+     "amount": 6270,
+     "travelPrice": {
+      "amount": 6270,
+      "packagePrice": {
+       "amount": 6270,
+       "roomPriceList": [
+        {
+         "label": "Villa Standard",
+         "travellerPriceList": [
+          {
+           "amount": 3135,
+           "type": "Adult"
+          },
+          {
+           "amount": 3135,
+           "type": "Adult"
+          }
+         ],
+         "summary": {
+          "adults": {
+           "amount": 2,
+           "price": 6270
+          },
+          "roomPrice": 6270
+         }
+        }
+       ],
+       "adultCount": 2
+      }
+     },
+     "perPerson": 3135
+    },
+    "effective": 6270,
+    "effectivePrice": {
+     "amount": 6270,
+     "paidPrice": {
+      "amount": 6270,
+      "totalPrice": {
+       "amount": 6270,
+       "travelPrice": {
+        "amount": 6270,
+        "packagePrice": {
+         "amount": 6270,
+         "roomPriceList": [
+          {
+           "label": "Villa Standard",
+           "travellerPriceList": [
+            {
+             "amount": 3135,
+             "type": "Adult"
+            },
+            {
+             "amount": 3135,
+             "type": "Adult"
+            }
+           ],
+           "summary": {
+            "adults": {
+             "amount": 2,
+             "price": 6270
+            },
+            "roomPrice": 6270
+           }
+          }
+         ],
+         "adultCount": 2
+        }
+       },
+       "perPerson": 3135
+      }
+     }
+    },
+    "possiblePromotionalVoucherDiscount": 300
+   },
+   "flight": {
+    "outbound": {
+     "departure": {
+      "dateTime": "2026-11-19T15:15:00"
+     },
+     "arrival": {
+      "timezoneOffset": 240,
+      "dateTime": "2026-11-20T07:50:00"
+     },
+     "airline": {
+      "code": "QR",
+      "name": "Qatar Airways"
+     },
+     "airport": {
+      "code": "VIE",
+      "name": "Wien",
+      "cityName": "Wien",
+      "countryName": "Österreich",
+      "countryCode": "AT"
+     },
+     "stops": 1,
+     "duration": 755,
+     "segments": [
+      {
+       "departure": {
+        "localDateTime": "2026-11-19T15:15:00",
+        "airport": {
+         "code": "VIE",
+         "name": "Wien",
+         "cityName": "Wien",
+         "countryName": "Österreich",
+         "countryCode": "AT"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-19T22:30:00",
+        "germanTime": "20:30",
+        "airport": {
+         "code": "DOH",
+         "name": "Doha",
+         "cityName": "Doha",
+         "countryName": "Katar",
+         "countryCode": "QA"
+        }
+       },
+       "airline": {
+        "code": "QR",
+        "name": "Qatar Airways"
+       },
+       "duration": 315,
+       "flightNumber": "QR184",
+       "cabinClass": "EconomyClass"
+      },
+      {
+       "departure": {
+        "localDateTime": "2026-11-20T01:10:00",
+        "germanTime": "23:10",
+        "airport": {
+         "code": "DOH",
+         "name": "Doha",
+         "cityName": "Doha",
+         "countryName": "Katar",
+         "countryCode": "QA"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-20T07:50:00",
+        "germanTime": "03:50",
+        "airport": {
+         "code": "MLE",
+         "name": "Male",
+         "cityName": "Male",
+         "countryName": "Malediven",
+         "countryCode": "MV"
+        }
+       },
+       "airline": {
+        "code": "QR",
+        "name": "Qatar Airways"
+       },
+       "duration": 280,
+       "flightNumber": "QR676",
+       "cabinClass": "EconomyClass"
+      }
+     ],
+     "hasValidFlightTimes": true,
+     "luggageInfo": {
+      "adultHoldItem": {
+       "weight": 20,
+       "dimension": {
+        "total": 300
+       }
+      },
+      "cabinItem": {
+       "weight": 7,
+       "dimension": {
+        "width": 50,
+        "height": 37,
+        "depth": 25
+       }
+      }
+     }
+    },
+    "inbound": {
+     "departure": {
+      "timezoneOffset": 240,
+      "dateTime": "2026-11-24T20:45:00"
+     },
+     "arrival": {
+      "dateTime": "2026-11-25T06:45:00"
+     },
+     "airline": {
+      "code": "QR",
+      "name": "Qatar Airways"
+     },
+     "airport": {
+      "code": "MLE",
+      "name": "Male",
+      "cityName": "Male",
+      "countryName": "Malediven",
+      "countryCode": "MV"
+     },
+     "stops": 1,
+     "duration": 840,
+     "segments": [
+      {
+       "departure": {
+        "localDateTime": "2026-11-24T20:45:00",
+        "germanTime": "16:45",
+        "airport": {
+         "code": "MLE",
+         "name": "Male",
+         "cityName": "Male",
+         "countryName": "Malediven",
+         "countryCode": "MV"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-24T23:30:00",
+        "germanTime": "21:30",
+        "airport": {
+         "code": "DOH",
+         "name": "Doha",
+         "cityName": "Doha",
+         "countryName": "Katar",
+         "countryCode": "QA"
+        }
+       },
+       "airline": {
+        "code": "QR",
+        "name": "Qatar Airways"
+       },
+       "duration": 285,
+       "flightNumber": "QR671",
+       "cabinClass": "EconomyClass"
+      },
+      {
+       "departure": {
+        "localDateTime": "2026-11-25T02:55:00",
+        "germanTime": "00:55",
+        "airport": {
+         "code": "DOH",
+         "name": "Doha",
+         "cityName": "Doha",
+         "countryName": "Katar",
+         "countryCode": "QA"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-25T06:45:00",
+        "airport": {
+         "code": "VIE",
+         "name": "Wien",
+         "cityName": "Wien",
+         "countryName": "Österreich",
+         "countryCode": "AT"
+        }
+       },
+       "airline": {
+        "code": "QR",
+        "name": "Qatar Airways"
+       },
+       "duration": 350,
+       "flightNumber": "QR189",
+       "cabinClass": "EconomyClass"
+      }
+     ],
+     "hasValidFlightTimes": true,
+     "luggageInfo": {
+      "adultHoldItem": {
+       "weight": 20,
+       "dimension": {
+        "total": 300
+       }
+      },
+      "cabinItem": {
+       "weight": 7,
+       "dimension": {
+        "width": 50,
+        "height": 37,
+        "depth": 25
+       }
+      }
+     }
+    },
+    "hasLuggage": "Included",
+    "luggageInfo": {
+     "adultHoldItem": {
+      "weight": 20,
+      "dimension": {
+       "total": 300
+      }
+     },
+     "cabinItem": {
+      "weight": 7,
+      "dimension": {
+       "width": 50,
+       "height": 37,
+       "depth": 25
+      }
+     }
+    },
+    "hasOvernightInfo": true,
+    "overNightHint": "FirstNight",
+    "flightHint": "HintWithCheckinTime",
+    "flightHash": "40d0fae7bd3fd75cdbed5805982b551c",
+    "visa": {
+     "urlString": "MV|MLE|Malediven,QA|DOH|Katar",
+     "stopsHint": " mit Zwischenlandung in Katar (Hin-/ Rückflug)."
+    }
+   },
+   "flags": {
+    "isExclusive": true,
+    "exclusiveBannerDescription": "CHECK24 ist <b>exklusiver Online-Vertriebspartner</b> von AurumTours. Dieses Angebot ist bei keinem anderen Vergleichsportal buchbar."
+   },
+   "points": {
+    "count": 1045,
+    "value": 10.45
+   },
+   "cancellation": {
+    "hasNoRemark": true
+   },
+   "detailsUrl": "/hib/3541/hotel?date=2026-11-19&touroperator=AUR&preferredTouroperator=AUR&traveltype=package&offerListParams%5Bairport%5D=VIE&offerListParams%5BareaId%5D=1079&offerListParams%5BareaSort%5D=topregion&offerListParams%5BcateringList%5D=allinclusive%2CallinclusivePlus&offerListParams%5Bdays%5D=exact&offerListParams%5BdepartureDate%5D=2026-11-19&offerListParams%5Bds%5D=h&offerListParams%5BextendedSearch%5D=1&offerListParams%5BhotelId%5D=3541&offerListParams%5BofferSort%5D=offerRanking&offerListParams%5Bpage%5D=1&offerListParams%5BpageArea%5D=package&offerListParams%5BreturnDate%5D=2026-11-24&offerListParams%5BroomAllocation%5D=A-A&offerListParams%5BtransportType%5D=flight&forceOperatorInfo=1&ds=h&rcids=CIaN7BEQ1fztCBjVGygBOBRaIAgUEAEZ%2BYOB597D7z8hAAAAAAAA8D8wCUoCIAFSAigB",
+   "leafletData": {
+    "leafletData": "{}",
+    "type": "main"
+   },
+   "upsellPrediction": {
+    "hasAltFlights": true,
+    "hasUpselling": true,
+    "hasTransferUpsell": true
+   },
+   "position": "16",
+   "tracking": {
+    "bookEventLabelData": "{\"offer_id\":\"8378752431358365324\",\"supplier\":\"AU\",\"touroperator\":\"AUR\",\"hotel_name\":\"Lily Beach Resort and Spa All Inclusive\",\"page\":\"(not set)\",\"position\":\"(not set)\",\"beo_impression\":\"none\",\"price_total\":\"6270,00 \\u20ac\",\"price_strike\":\"(not set)\",\"duration\":6,\"mealtype\":\"allinclusive\",\"roomtype\":\"villa\",\"view\":\"noview\",\"cancellation\":\"none\",\"transfer\":\"none\",\"luggage\":\"luggageAll\",\"upsell\":\"predicted\",\"alternative_flight\":\"predicted\"}"
+   },
+   "tourOperatorAlias": "AurumTours"
+  },
+  "9119607716239415113": {
+   "id": "9119607716239415113",
+   "hotelId": 3541,
+   "tourOperatorCode": "AUR",
+   "supplierCode": "au",
+   "cryptString": "0I4lhQR4RouM8D9JlqtCwncwcy2xbNkgjr8=-R09DUlkwMVthnM+MWS1oavYnnEjUqkzhxpltE96YJ46Uhua4fmbn59HI07ykOge9ehi15h8AHdwS4tVebhTBfzCHAsSeW1FjJ7T9oqfa81zx6xbuj7hVyKETL72YM4kRzzZwhlzAAmv+h+GcUSpcDCLC9OgTh94+3sgQIUJKUAuWkLt1qMIL9HqKuYrJyOMfGD1ifkwJjS6qVxvLl5kmrSns23/Yk8d5nRzjR0X0i3muXlaJK1jEJask0LkQ86eB+gAsWEZfv02jnv3gUdWqHt6Hz8Ls+RSxLQ8KhD9hquGPjM/bGcY0006HcAzbh2Ux6avpaDwYX7EVRhbxgmDkRduWi0hx2flgUPRkTqry3QPETtOHI8oHEmyTJAjmIL74PNbYj0K55SWs99Ik6XIrAhbsxvRDw6JerJ/mmKTS0iX+ergy3GgXxQzDZQssCT+szQ7aekqGmnWXcd1i1iuAshHvDqiQRLNpSjstnT/MoDB7cPiZszJZR4jh+SllM6JCKD6Dc0dtw+R3Szj+Orrfhh2w/ls5z+E3xUu+9TpiACa1TN4nBquq1K+PWsO5aGNOS8tTQefTbdkWlzdm50WKqnxBePhgmtqLm/MKp1KYNK4gUHFj9FLaTvswIeyIBuih4vggr2wIUtNsAHRFrCNs12ExRvXRttztEl0nFlM1xHk9GwpZSh3fat7VfeoHldw3Ac/w4uskmkf5vkJj0EBP88xyTC+Xc1PMXG11Xyd5khGJNrZ8KYO3K/hlMQ/Y8eSco2iU4U6cs00zTPDjoUAZj1+0r9CUW4cJV+jeIMCtKwpiXeoffzNg4s4c4MMfNvsJmMIFgAXEEnbqPKSusDZkI7B8CKrRIQJM3RD+12vfdz0ADmhGcEGeKLSf41MnXQcUKJ5+YM61dI2XYCxgRfEsGWDeJtXyANEN3JFwUWtZIiuAaJwHd6XKWfU2QOW/K/rgzNkn6UC7FLwIpgYdNvfFAdY5jtJGT8IvxaM=",
+   "travelAttributes": {
+    "overnightStays": 4,
+    "departureDate": "2026-11-19T00:00:00",
+    "returnDate": "2026-11-24T00:00:00",
+    "roomCount": 1,
+    "days": 6
+   },
+   "accommodationData": {
+    "mealType": "AllInclusive",
+    "roomDescription": {
+     "name": "Villa",
+     "description": "Villa",
+     "showRoomClass": true,
+     "type": "Villa",
+     "tooltipData": "{\"roomType\":\"villa\",\"roomClass\":\"Standard\",\"accommodationName\":\"Villa\",\"headline\":\"roomtype\\/tooltip\\/villa\\/headline\",\"annexBuilding\":\"\",\"hasRoomContent\":true,\"accommodationOriginName\":\"Villa\",\"description\":\"roomtype\\/tooltip\\/villa\\/description\",\"offerId\":\"9119607716239415113\",\"offerDescription\":[\"roomtype\\/tooltip\\/advice\\/info\"]}"
+    },
+    "roomList": [
+     {
+      "roomDescription": {
+       "name": "Villa",
+       "description": "Villa",
+       "showRoomClass": true,
+       "type": "Villa",
+       "tooltipData": "{\"roomType\":\"villa\",\"roomClass\":\"Standard\",\"accommodationName\":\"Villa\",\"headline\":\"roomtype\\/tooltip\\/villa\\/headline\",\"annexBuilding\":\"\",\"hasRoomContent\":true,\"accommodationOriginName\":\"Villa\",\"description\":\"roomtype\\/tooltip\\/villa\\/description\",\"offerId\":\"9119607716239415113\",\"offerDescription\":[\"roomtype\\/tooltip\\/advice\\/info\"]}"
+      },
+      "priceSummary": {},
+      "roomContentId": "CIaN7BEQ1fztCBjVGygBOBRaIAgUEAEZ%2BYOB597D7z8hAAAAAAAA8D8wCUoCIAFSAigB",
+      "roomPreview": "https://cdn1.urlaub.check24.de/size=60c60/di=3/nfc=200/source=aHR0cHM6Ly9xLXh4LmJzdGF0aWMuY29tL3hkYXRhL2ltYWdlcy9ob3RlbC9tYXgyMDAwLzQzNDM0ODAzNS5qcGc-az1jYWNiOTk3NzQ5MGFlMmNhNzc2MDgwMWNlZjE1ZjNhNDI2MThmZjFjZWEwOGRjNjEwNDA1ODZkMTcyYjkyNzczJm89!231c06/picture.jpg?cts_do=desktop&cts_p=PR&cts_s=s3"
+     }
+    ],
+    "mealCategory": "AllInclusive"
+   },
+   "price": {
+    "total": 6193,
+    "person": 3096.5,
+    "totalPrice": {
+     "amount": 6193,
+     "travelPrice": {
+      "amount": 6193,
+      "packagePrice": {
+       "amount": 6193,
+       "roomPriceList": [
+        {
+         "label": "Villa Standard",
+         "travellerPriceList": [
+          {
+           "amount": 3096.5,
+           "type": "Adult"
+          },
+          {
+           "amount": 3096.5,
+           "type": "Adult"
+          }
+         ],
+         "summary": {
+          "adults": {
+           "amount": 2,
+           "price": 6193
+          },
+          "roomPrice": 6193
+         }
+        }
+       ],
+       "adultCount": 2
+      }
+     },
+     "perPerson": 3096.5
+    },
+    "effective": 6193,
+    "effectivePrice": {
+     "amount": 6193,
+     "paidPrice": {
+      "amount": 6193,
+      "totalPrice": {
+       "amount": 6193,
+       "travelPrice": {
+        "amount": 6193,
+        "packagePrice": {
+         "amount": 6193,
+         "roomPriceList": [
+          {
+           "label": "Villa Standard",
+           "travellerPriceList": [
+            {
+             "amount": 3096.5,
+             "type": "Adult"
+            },
+            {
+             "amount": 3096.5,
+             "type": "Adult"
+            }
+           ],
+           "summary": {
+            "adults": {
+             "amount": 2,
+             "price": 6193
+            },
+            "roomPrice": 6193
+           }
+          }
+         ],
+         "adultCount": 2
+        }
+       },
+       "perPerson": 3096.5
+      }
+     }
+    },
+    "possiblePromotionalVoucherDiscount": 300
+   },
+   "flight": {
+    "outbound": {
+     "departure": {
+      "dateTime": "2026-11-19T19:10:00"
+     },
+     "arrival": {
+      "timezoneOffset": 240,
+      "dateTime": "2026-11-20T12:35:00"
+     },
+     "airline": {
+      "code": "TK",
+      "name": "Turkish Airlines"
+     },
+     "airport": {
+      "code": "VIE",
+      "name": "Wien",
+      "cityName": "Wien",
+      "countryName": "Österreich",
+      "countryCode": "AT"
+     },
+     "stops": 1,
+     "duration": 805,
+     "segments": [
+      {
+       "departure": {
+        "localDateTime": "2026-11-19T19:10:00",
+        "airport": {
+         "code": "VIE",
+         "name": "Wien",
+         "cityName": "Wien",
+         "countryName": "Österreich",
+         "countryCode": "AT"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-19T23:30:00",
+        "germanTime": "21:30",
+        "airport": {
+         "code": "IST",
+         "name": "Istanbul",
+         "cityName": "Istanbul",
+         "countryName": "Türkei",
+         "countryCode": "TR"
+        }
+       },
+       "airline": {
+        "code": "TK",
+        "name": "Turkish Airlines"
+       },
+       "duration": 140,
+       "flightNumber": "TK1888",
+       "cabinClass": "EconomyClass"
+      },
+      {
+       "departure": {
+        "localDateTime": "2026-11-20T02:35:00",
+        "germanTime": "00:35",
+        "airport": {
+         "code": "IST",
+         "name": "Istanbul",
+         "cityName": "Istanbul",
+         "countryName": "Türkei",
+         "countryCode": "TR"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-20T12:35:00",
+        "germanTime": "08:35",
+        "airport": {
+         "code": "MLE",
+         "name": "Male",
+         "cityName": "Male",
+         "countryName": "Malediven",
+         "countryCode": "MV"
+        }
+       },
+       "airline": {
+        "code": "TK",
+        "name": "Turkish Airlines"
+       },
+       "duration": 480,
+       "flightNumber": "TK734",
+       "cabinClass": "EconomyClass"
+      }
+     ],
+     "hasValidFlightTimes": true,
+     "luggageInfo": {
+      "adultHoldItem": {
+       "weight": 20,
+       "dimension": {
+        "total": 158
+       }
+      },
+      "cabinItem": {
+       "weight": 8,
+       "dimension": {
+        "width": 23,
+        "height": 40,
+        "depth": 50
+       }
+      }
+     }
+    },
+    "inbound": {
+     "departure": {
+      "timezoneOffset": 240,
+      "dateTime": "2026-11-24T09:00:00"
+     },
+     "arrival": {
+      "dateTime": "2026-11-24T17:35:00"
+     },
+     "airline": {
+      "code": "TK",
+      "name": "Turkish Airlines"
+     },
+     "airport": {
+      "code": "MLE",
+      "name": "Male",
+      "cityName": "Male",
+      "countryName": "Malediven",
+      "countryCode": "MV"
+     },
+     "stops": 1,
+     "duration": 755,
+     "segments": [
+      {
+       "departure": {
+        "localDateTime": "2026-11-24T09:00:00",
+        "germanTime": "05:00",
+        "airport": {
+         "code": "MLE",
+         "name": "Male",
+         "cityName": "Male",
+         "countryName": "Malediven",
+         "countryCode": "MV"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-24T15:30:00",
+        "germanTime": "13:30",
+        "airport": {
+         "code": "IST",
+         "name": "Istanbul",
+         "cityName": "Istanbul",
+         "countryName": "Türkei",
+         "countryCode": "TR"
+        }
+       },
+       "airline": {
+        "code": "TK",
+        "name": "Turkish Airlines"
+       },
+       "duration": 510,
+       "flightNumber": "TK741",
+       "cabinClass": "EconomyClass"
+      },
+      {
+       "departure": {
+        "localDateTime": "2026-11-24T17:15:00",
+        "germanTime": "15:15",
+        "airport": {
+         "code": "IST",
+         "name": "Istanbul",
+         "cityName": "Istanbul",
+         "countryName": "Türkei",
+         "countryCode": "TR"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-24T17:35:00",
+        "airport": {
+         "code": "VIE",
+         "name": "Wien",
+         "cityName": "Wien",
+         "countryName": "Österreich",
+         "countryCode": "AT"
+        }
+       },
+       "airline": {
+        "code": "TK",
+        "name": "Turkish Airlines"
+       },
+       "duration": 140,
+       "flightNumber": "TK1887",
+       "cabinClass": "EconomyClass"
+      }
+     ],
+     "hasValidFlightTimes": true,
+     "luggageInfo": {
+      "adultHoldItem": {
+       "weight": 20,
+       "dimension": {
+        "total": 158
+       }
+      },
+      "cabinItem": {
+       "weight": 8,
+       "dimension": {
+        "width": 23,
+        "height": 40,
+        "depth": 50
+       }
+      }
+     }
+    },
+    "hasLuggage": "Included",
+    "luggageInfo": {
+     "adultHoldItem": {
+      "weight": 20,
+      "dimension": {
+       "total": 158
+      }
+     },
+     "cabinItem": {
+      "weight": 8,
+      "dimension": {
+       "width": 23,
+       "height": 40,
+       "depth": 50
+      }
+     }
+    },
+    "hasOvernightInfo": true,
+    "overNightHint": "FirstNight",
+    "flightHint": "HintWithoutCheckinTime",
+    "flightHash": "a6e5faa02c6da2e258a773e9bdce293a",
+    "visa": {
+     "urlString": "MV|MLE|Malediven,TR|IST|T%C3%BCrkei",
+     "stopsHint": " mit Zwischenlandung in Türkei (Hin-/ Rückflug)."
+    }
+   },
+   "flags": {
+    "isExclusive": true,
+    "exclusiveBannerDescription": "CHECK24 ist <b>exklusiver Online-Vertriebspartner</b> von AurumTours. Dieses Angebot ist bei keinem anderen Vergleichsportal buchbar."
+   },
+   "points": {
+    "count": 1032,
+    "value": 10.32
+   },
+   "cancellation": {
+    "hasNoRemark": true
+   },
+   "detailsUrl": "/hib/3541/hotel?date=2026-11-19&touroperator=AUR&preferredTouroperator=AUR&traveltype=package&offerListParams%5Bairport%5D=VIE&offerListParams%5BareaId%5D=1079&offerListParams%5BareaSort%5D=topregion&offerListParams%5BcateringList%5D=allinclusive%2CallinclusivePlus&offerListParams%5Bdays%5D=exact&offerListParams%5BdepartureDate%5D=2026-11-19&offerListParams%5Bds%5D=h&offerListParams%5BextendedSearch%5D=1&offerListParams%5BhotelId%5D=3541&offerListParams%5BofferSort%5D=offerRanking&offerListParams%5Bpage%5D=1&offerListParams%5BpageArea%5D=package&offerListParams%5BreturnDate%5D=2026-11-24&offerListParams%5BroomAllocation%5D=A-A&offerListParams%5BtransportType%5D=flight&forceOperatorInfo=1&ds=h&rcids=CIaN7BEQ1fztCBjVGygBOBRaIAgUEAEZ%2BYOB597D7z8hAAAAAAAA8D8wCUoCIAFSAigB",
+   "leafletData": {
+    "leafletData": "{}",
+    "type": "main"
+   },
+   "upsellPrediction": {
+    "hasAltFlights": true
+   },
+   "position": "21",
+   "tracking": {
+    "bookEventLabelData": "{\"offer_id\":\"9119607716239415113\",\"supplier\":\"AU\",\"touroperator\":\"AUR\",\"hotel_name\":\"Lily Beach Resort and Spa All Inclusive\",\"page\":\"(not set)\",\"position\":\"(not set)\",\"beo_impression\":\"none\",\"price_total\":\"6193,00 \\u20ac\",\"price_strike\":\"(not set)\",\"duration\":6,\"mealtype\":\"allinclusive\",\"roomtype\":\"villa\",\"view\":\"noview\",\"cancellation\":\"none\",\"transfer\":\"none\",\"luggage\":\"luggageAll\",\"upsell\":\"none\",\"alternative_flight\":\"predicted\"}"
+   },
+   "tourOperatorAlias": "AurumTours"
+  },
+  "14539357494633643277": {
+   "id": "14539357494633643277",
+   "hotelId": 3541,
+   "tourOperatorCode": "FER",
+   "supplierCode": "tt",
+   "cryptString": "0I4lhQR4RouM8D9JlqtCwncwcy2xbNkgjr8=-R09DUlkwMcivIgdpczU03urhL9TrUdC34XqfBhHkRtYu6O/NUIjshh8oeTFcPnxEBGSbltknZZkHh7BrcNAeGvE8J0zY1GHhYAS6nbZZgGofwtVWLod1vnI1EctQ8Z78qZa5oqhrjube/2TSBJ85UGyw6IxQjcJOZjWo3fhkt9dlT+tbeCS/p2FFLI9bC11zzYCphzRuHTY5VM/y1wbElrp87bRscnvXEVlzgjMJyRZrTcuCwdFlm5UP9Zi/Ke2KCWDhGpwFtDnl7FsA1s3485ZujNBRXSGDrgUJWH7Ar1NqG8RZxtJhcef+ZuG1nxRZr4Wh716tPPD9MGYAwX7UpLNhK727Ysc6WGOmBcg+vfnD94vN3Zbjh+VO4bwEyeeQ34EVKriWltMCo+lF5ypB3Cx1qnNBXOnGqJbQqJcffS0Lsz+tHfMbcb1Qie8vgd+O5FpycJQ4Hbdrx/FgOqfxBFN/kG7pCyEf8ULDSl+0jA9DiDHn5jneGHZ0PC0wFTTxHGs8u09A1RI4R6ZnjpiHfOM3F3xE3KtN97rdAOIL2nLCmZX6YQ2PjIhKGxgh5fB+Z7SYft8aPM+eHY7k22q/9pmyLhdmr0rH6Lh6VhXqYFj8DrIOyaqmheTxGXs4kqj16oNiKJ43/TJfIEmC7jv9aS8j1T4g8dAjH65ZG7HlCGl4666HQWfx7mqn5+UtBx60NgiJC1IAk2k1tlPLpzogzOUW0eNxqP7cy2ixe7k6bHUagqY5FO+PKClKTAnxpAL/pa2tLDEiOQIKRhWsw22E7JZFenZEpreIlV99+Yij/EW0E+KJUCuT7LyhG9R2w02IwlM+XTz6JyUgG6q06/EC0kqfVTaIOLWuh5bcruainfXu7CW1lG1WyB7gGsJ/mGrBGxl9GT47bgBRlj66ikJpEXVtlmNhLS5dwFR2+ef0e8Y862v4cDEu9OLDXJ1nfUiYSrCT23rvbLQVAyTNAxKogOi793zRQ5XxcB05CTahvcaIR8J4HHwYCaLJp+7hE2E8ouODWOK+NTvtPNhW/p9S/4CzgCD8kmpfSF1e+AMPL3L+CqRfBW4TyCvRvgUZ6aeGBrBW5skN48hDeoXjCafdt6hcdCnq0UZnk8eBcsb3N+AYWXADYaBrJDfprjQSLPEiBNAihbbx3ljfW1qCQ5Se6OqbDYDrOBbMUJFjVSrhV7Gsr+u9jF7aU+QSA1j+CDvB12iWvtKuUaCTWV5aN7uM5icBmslslJW4hYrJZ15d5mEuKeQcqFQ9kFm040du8jPuEsgm2FlH55hhcGQssBE1RYb2J7V4MV4m85E0+/X+lTfE2zbSFnhCmYbLapn2E6F90d7Dz1vDiXx46gM4D9Dt1Fqzd9S8HOLUjTVD7xdmAmQfq2KHIw/I2ht7SNYktFIyXFyB0pbq9TTDNrNEWzDg9Bum+8W0S+Ory7f/Ix/PcW7FMq6VyjVjFGXjelswABR3b9XdDKBTd800GlaQTEr4hx0kBXVrMhlGZThbanDsyu8BP7pjMXBOQ2wDwcVdHsx4rcFGtT1WEKm4kMHljAL/MZElijV53nYbaAXxToo=",
+   "travelAttributes": {
+    "overnightStays": 4,
+    "departureDate": "2026-11-19T00:00:00",
+    "returnDate": "2026-11-24T00:00:00",
+    "roomCount": 1,
+    "days": 6
+   },
+   "accommodationData": {
+    "mealType": "AllInclusivePlus",
+    "roomDescription": {
+     "name": "Villa",
+     "description": "Lagune Villa",
+     "showRoomClass": true,
+     "type": "Villa",
+     "tooltipData": "{\"roomType\":\"villa\",\"roomClass\":\"Standard\",\"accommodationName\":\"Lagune Villa\",\"headline\":\"roomtype\\/tooltip\\/villa\\/headline\",\"annexBuilding\":\"\",\"hasRoomContent\":true,\"accommodationOriginName\":\"Lagune Villa\",\"description\":\"roomtype\\/tooltip\\/villa\\/description\",\"offerId\":\"14539357494633643277\",\"offerDescription\":[\"roomtype\\/tooltip\\/advice\\/info\"]}"
+    },
+    "transfer": "Transfer",
+    "roomList": [
+     {
+      "roomDescription": {
+       "name": "Villa",
+       "description": "Lagune Villa",
+       "showRoomClass": true,
+       "type": "Villa",
+       "tooltipData": "{\"roomType\":\"villa\",\"roomClass\":\"Standard\",\"accommodationName\":\"Lagune Villa\",\"headline\":\"roomtype\\/tooltip\\/villa\\/headline\",\"annexBuilding\":\"\",\"hasRoomContent\":true,\"accommodationOriginName\":\"Lagune Villa\",\"description\":\"roomtype\\/tooltip\\/villa\\/description\",\"offerId\":\"14539357494633643277\",\"offerDescription\":[\"roomtype\\/tooltip\\/advice\\/info\"]}"
+      },
+      "priceSummary": {},
+      "roomContentId": "CIaN7BEQ1fztCBjVGygBOBRaHAgUEAEZ9dkB1xWz7z8hZTVdT3Td7z9KAFICKAE%3D",
+      "roomPreview": "https://cdn1.urlaub.check24.de/size=60c60/di=3/nfc=200/source=aHR0cHM6Ly9xLXh4LmJzdGF0aWMuY29tL3hkYXRhL2ltYWdlcy9ob3RlbC9tYXgyMDAwLzQzNDM0ODAzNS5qcGc-az1jYWNiOTk3NzQ5MGFlMmNhNzc2MDgwMWNlZjE1ZjNhNDI2MThmZjFjZWEwOGRjNjEwNDA1ODZkMTcyYjkyNzczJm89!231c06/picture.jpg?cts_do=desktop&cts_p=PR&cts_s=s3"
+     }
+    ],
+    "mealCategory": "AllInclusive"
+   },
+   "price": {
+    "total": 6315,
+    "person": 3157.5,
+    "totalPrice": {
+     "amount": 6315,
+     "travelPrice": {
+      "amount": 6315,
+      "packagePrice": {
+       "amount": 6315,
+       "roomPriceList": [
+        {
+         "label": "Villa Standard",
+         "travellerPriceList": [
+          {
+           "amount": 3157.5,
+           "type": "Adult"
+          },
+          {
+           "amount": 3157.5,
+           "type": "Adult"
+          }
+         ],
+         "summary": {
+          "adults": {
+           "amount": 2,
+           "price": 6315
+          },
+          "roomPrice": 6315
+         }
+        }
+       ],
+       "adultCount": 2
+      }
+     },
+     "perPerson": 3157.5
+    },
+    "effective": 6315,
+    "effectivePrice": {
+     "amount": 6315,
+     "paidPrice": {
+      "amount": 6315,
+      "totalPrice": {
+       "amount": 6315,
+       "travelPrice": {
+        "amount": 6315,
+        "packagePrice": {
+         "amount": 6315,
+         "roomPriceList": [
+          {
+           "label": "Villa Standard",
+           "travellerPriceList": [
+            {
+             "amount": 3157.5,
+             "type": "Adult"
+            },
+            {
+             "amount": 3157.5,
+             "type": "Adult"
+            }
+           ],
+           "summary": {
+            "adults": {
+             "amount": 2,
+             "price": 6315
+            },
+            "roomPrice": 6315
+           }
+          }
+         ],
+         "adultCount": 2
+        }
+       },
+       "perPerson": 3157.5
+      }
+     }
+    },
+    "possiblePromotionalVoucherDiscount": 300
+   },
+   "flight": {
+    "outbound": {
+     "departure": {
+      "dateTime": "2026-11-19T16:30:00"
+     },
+     "arrival": {
+      "dateTime": "2026-11-20T07:25:00"
+     },
+     "airline": {
+      "code": "TK",
+      "name": "Turkish Airlines"
+     },
+     "airport": {
+      "code": "VIE",
+      "name": "Wien",
+      "cityName": "Wien",
+      "countryName": "Österreich",
+      "countryCode": "AT"
+     },
+     "stops": -1,
+     "duration": 655,
+     "segments": [
+      {
+       "departure": {
+        "localDateTime": "2026-11-19T16:30:00",
+        "airport": {
+         "code": "VIE",
+         "name": "Wien",
+         "cityName": "Wien",
+         "countryName": "Österreich",
+         "countryCode": "AT"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-20T07:25:00",
+        "airport": {
+         "code": "MLE",
+         "name": "Male",
+         "cityName": "Male",
+         "countryName": "Malediven",
+         "countryCode": "MV"
+        }
+       },
+       "airline": {
+        "code": "TK",
+        "name": "Turkish Airlines"
+       },
+       "duration": 655,
+       "cabinClass": "EconomyClass"
+      }
+     ],
+     "hasValidFlightTimes": true,
+     "luggageInfo": {
+      "adultHoldItem": {
+       "weight": 20,
+       "dimension": {
+        "total": 158
+       }
+      },
+      "cabinItem": {
+       "weight": 8,
+       "dimension": {
+        "width": 55,
+        "height": 40,
+        "depth": 23
+       }
+      },
+      "infantHoldItem": {
+       "weight": 10,
+       "dimension": {
+        "total": 158
+       }
+      }
+     }
+    },
+    "inbound": {
+     "departure": {
+      "dateTime": "2026-11-24T09:00:00"
+     },
+     "arrival": {
+      "dateTime": "2026-11-24T17:35:00"
+     },
+     "airline": {
+      "code": "TK",
+      "name": "Turkish Airlines"
+     },
+     "airport": {
+      "code": "MLE",
+      "name": "Male",
+      "cityName": "Male",
+      "countryName": "Malediven",
+      "countryCode": "MV"
+     },
+     "stops": -1,
+     "duration": 755,
+     "segments": [
+      {
+       "departure": {
+        "localDateTime": "2026-11-24T09:00:00",
+        "airport": {
+         "code": "MLE",
+         "name": "Male",
+         "cityName": "Male",
+         "countryName": "Malediven",
+         "countryCode": "MV"
+        }
+       },
+       "arrival": {
+        "localDateTime": "2026-11-24T17:35:00",
+        "airport": {
+         "code": "VIE",
+         "name": "Wien",
+         "cityName": "Wien",
+         "countryName": "Österreich",
+         "countryCode": "AT"
+        }
+       },
+       "airline": {
+        "code": "TK",
+        "name": "Turkish Airlines"
+       },
+       "duration": 755,
+       "cabinClass": "EconomyClass"
+      }
+     ],
+     "hasValidFlightTimes": true,
+     "luggageInfo": {
+      "adultHoldItem": {
+       "weight": 20,
+       "dimension": {
+        "total": 158
+       }
+      },
+      "cabinItem": {
+       "weight": 8,
+       "dimension": {
+        "width": 55,
+        "height": 40,
+        "depth": 23
+       }
+      },
+      "infantHoldItem": {
+       "weight": 10,
+       "dimension": {
+        "total": 158
+       }
+      }
+     }
+    },
+    "hasLuggage": "Included",
+    "luggageInfo": {
+     "adultHoldItem": {
+      "weight": 20,
+      "dimension": {
+       "total": 158
+      }
+     },
+     "cabinItem": {
+      "weight": 8,
+      "dimension": {
+       "width": 55,
+       "height": 40,
+       "depth": 23
+      }
+     },
+     "infantHoldItem": {
+      "weight": 10,
+      "dimension": {
+       "total": 158
+      }
+     }
+    },
+    "hasOvernightInfo": true,
+    "overNightHint": "FirstNight",
+    "flightHint": "HintWithCheckinTime",
+    "flightHash": "2cc84db06f8ff8b16f4d0bacf89d474a",
+    "visa": {
+     "urlString": "MV|MLE|Malediven"
+    }
+   },
+   "flags": {},
+   "points": {
+    "count": 1052,
+    "value": 10.52
+   },
+   "cancellation": {
+    "hasNoRemark": true
+   },
+   "detailsUrl": "/hib/3541/hotel?date=2026-11-19&touroperator=FER&preferredTouroperator=AUR&accommodationCode=MLE062&traveltype=package&offerListParams%5Bairport%5D=VIE&offerListParams%5BareaId%5D=1079&offerListParams%5BareaSort%5D=topregion&offerListParams%5BcateringList%5D=allinclusive%2CallinclusivePlus&offerListParams%5Bdays%5D=exact&offerListParams%5BdepartureDate%5D=2026-11-19&offerListParams%5Bds%5D=h&offerListParams%5BextendedSearch%5D=1&offerListParams%5BhotelId%5D=3541&offerListParams%5BofferSort%5D=offerRanking&offerListParams%5Bpage%5D=1&offerListParams%5BpageArea%5D=package&offerListParams%5BreturnDate%5D=2026-11-24&offerListParams%5BroomAllocation%5D=A-A&offerListParams%5BtransportType%5D=flight&forceOperatorInfo=1&ds=h&rcids=CIaN7BEQ1fztCBjVGygBOBRaHAgUEAEZ9dkB1xWz7z8hZTVdT3Td7z9KAFICKAE%3D",
+   "leafletData": {
+    "leafletData": "{}",
+    "type": "main"
+   },
+   "upsellPrediction": {
+    "hasAltFlights": true
+   },
+   "position": "7",
+   "tracking": {
+    "bookEventLabelData": "{\"offer_id\":\"14539357494633643277\",\"supplier\":\"TT\",\"touroperator\":\"FER\",\"hotel_name\":\"Lily Beach Resort and Spa All Inclusive\",\"page\":\"(not set)\",\"position\":\"(not set)\",\"beo_impression\":\"none\",\"price_total\":\"6315,00 \\u20ac\",\"price_strike\":\"(not set)\",\"duration\":6,\"mealtype\":\"allinclusiveplus\",\"roomtype\":\"villa\",\"view\":\"noview\",\"cancellation\":\"none\",\"transfer\":\"transfer\",\"luggage\":\"luggageAll\",\"upsell\":\"none\",\"alternative_flight\":\"predicted\"}"
+   },
+   "accommodationCode": "MLE062",
+   "tourOperatorAlias": "FERIEN Touristik"
+  }
+ },
+ "meta": {
+  "travellerCount": 2,
+  "hotelName": "Lily Beach Resort and Spa All Inclusive",
+  "hotelCategory": 5
+ }
+}

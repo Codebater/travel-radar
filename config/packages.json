@@ -1,0 +1,60 @@
+{
+  "description": "Package tier policy. Config, never code. Sellers are unofficial first-party APIs (research 2026-08-28, docs/PHASE8G_HANDOFF context): endpoints may rotate or start challenging at any time — hosts live HERE so a rotation is a config change plus a health event, never a code hunt, and NEVER a silent fallback to scraping something else.",
+  "updated": "2026-08-28",
+
+  "travellers": {
+    "adults": 2,
+    "adultsNote": "Matches the stay radar's 2-adult observation posture; occupancy is a hard comparability dimension."
+  },
+
+  "tui": {
+    "searchApiBase": "https://api.cloud.tui.com",
+    "offerApiBase": "https://d2z3tkv1undzra.cloudfront.net",
+    "calendarApiBase": "https://d18axsujemfwj.cloudfront.net",
+    "hostsNote": "The two CloudFront hosts are opaque and MAY ROTATE. Symptom: DNS failure, 403, or non-JSON. Response: the provider fails with a health event; re-discover the hosts by watching tui.com's own offer page network traffic and update this file. searchApiBase is the stable first-party host.",
+    "tenant": "TUICOM",
+    "calendarTenant": "tui.com",
+    "tenantNote": "The offer endpoint wants tenant=TUICOM, the calendar endpoint tenant=tui.com — measured live 2026-08-28; a wrong tenant is a 500 or empty set, not an error message.",
+    "locale": "de_DE",
+    "currency": "EUR",
+    "currencyNote": "TUICOM quotes EUR only; the response's own currency field is still echo-checked.",
+    "maxCallsPerRun": 6,
+    "maxCallsPerDay": 24,
+    "capsNote": "Politeness ceilings for a free unofficial API, enforced via package_search_requests counts (reserve-before-await). A refused call is recorded as a skipped event — ceilings reduce scope and say so."
+  },
+
+  "check24": {
+    "apiBase": "https://urlaub.check24.de",
+    "currency": "EUR",
+    "currencyNote": "urlaub.check24.de is a German-market portal quoting EUR exclusively; responses carry no currency field (measured 2026-08-28), so this constant is a structural fact about the seller, not an inference about an offer.",
+    "maxSearchesPerRun": 4,
+    "maxSearchesPerDay": 12,
+    "capsNote": "Agoda-style confirmation caps: one logical search = one poll loop (many HTTP POSTs, ONE spend). Targeted use only — this seller exists to answer 'does another operator beat TUI here', never to sweep.",
+    "pollIntervalMs": 1500,
+    "maxPolls": 20,
+    "pollNote": "The offer endpoint is job/poll: the same POST creates then reports the job until Success/Empty/Error (~8-15s live). Empty is a valid 0-offer answer and terminates immediately.",
+    "blockNote": "HTTP 403/429/503, a challenge header, or HTML instead of JSON = the bot wall answered. The provider returns reason 'blocked', records an event, and the caller STOPS — no retries, no workarounds, ever."
+  },
+
+  "comparability": {
+    "nightsToleranceCloseMatch": 1,
+    "nightsToleranceNote": "A ±1-night package can still be a CLOSE_MATCH for context, but a monetary verdict is never issued across differing nights — a 4-night product undercutting a 5-night trip is a different product, not a saving.",
+    "dateFamilyWindowDays": 3,
+    "dateFamilyNote": "Same fixed 3-day grid as stays/notifications identity. Same check-in = EXACT eligible; same family = CLOSE; outside = seasonal context only."
+  },
+
+  "competition": {
+    "minDecisiveDifferencePct": 5,
+    "minDecisiveDifferenceNote": "Below this percentage gap the verdict is ROUGH_CONTEXT_ONLY — a 1% 'win' inside two moving quote streams is noise, not a decision.",
+    "maxPackageAgeDays": 7,
+    "maxPackageAgeNote": "A package observation older than this is a memory, not an offer — excluded from BUILD-vs-BUY verdicts (mirrors trips maxFlightAgeDays).",
+    "maxCheckInDistanceDays": 7,
+    "maxCheckInDistanceNote": "Pairing scope, not comparability: packages checking in further than this from the trip's check-in are seasonal curve, not candidate alternatives — they stay in history and baselines but no comparison row is minted. Within the scope, the comparability engine still records every demotion."
+  },
+
+  "baselines": {
+    "minDistinctFetchDays": 3,
+    "minObservations": 5,
+    "maturityNote": "A baseline for a package product needs observations from at least this many DISTINCT fetch days. One calendar response contains many dates but is ONE observation of the seasonal curve — it may never masquerade as history for any single travel date."
+  }
+}

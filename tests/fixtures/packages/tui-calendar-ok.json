@@ -1,0 +1,835 @@
+{
+ "offers": [
+  {
+   "arrivalDate": "2026-11-08",
+   "checkInDate": "2026-11-08",
+   "checkOutDate": "2026-11-13",
+   "lengthOfStay": 5,
+   "tourOperator": "LTUR",
+   "bookingTourOperator": "TUR1",
+   "brand": "TUR1L",
+   "travelType": "LTU5",
+   "cancellationType": "REFUNDABLE",
+   "totalPrice": 6392,
+   "discount": 1210.59,
+   "calculatedPricePerPerson": 3196,
+   "calculatedOriginalPricePerPerson": 3801.295,
+   "personPrices": [
+    {
+     "id": 1,
+     "price": 3196
+    },
+    {
+     "id": 2,
+     "price": 3196
+    }
+   ],
+   "rooms": [
+    {
+     "code": "BUX1",
+     "roomCodes": [
+      "ST04-BU"
+     ],
+     "viewCodes": [
+      "GT13-SESI",
+      "GT13-SEVI#AT13-DIRE"
+     ],
+     "bookingCode": "BUX1A",
+     "board": "A",
+     "boardCode": "GT06-AI",
+     "boardDescription": "Alles Inklusive",
+     "description": "Beach Villa",
+     "travellers": [
+      {
+       "id": 1
+      },
+      {
+       "id": 2
+      }
+     ],
+     "priceByUnit": false,
+     "transferIncluded": true,
+     "extras": [
+      {
+       "type": "GT07-TUI3",
+       "included": true
+      },
+      {
+       "type": "TR",
+       "included": true
+      }
+     ]
+    }
+   ],
+   "departure": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "departureDateTime": "2026-11-07T15:15:00.000+01:00",
+    "arrivalAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "arrivalDateTime": "2026-11-08T07:50:00.000+05:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0676",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR0184OM-QR0676OM",
+    "totalPrice": 1578,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 789
+     },
+     {
+      "id": 2,
+      "price": 789
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "departureDateTime": "2026-11-07T15:15:00.000+01:00",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-07T22:30:00.000+03:00",
+      "flightDuration": 315,
+      "bookingClass": "O",
+      "number": "0184"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-08T01:10:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "arrivalDateTime": "2026-11-08T07:50:00.000+05:00",
+      "flightDuration": 280,
+      "bookingClass": "O",
+      "number": "0676"
+     }
+    ]
+   },
+   "return": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "departureDateTime": "2026-11-13T20:45:00.000+05:00",
+    "arrivalAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "arrivalDateTime": "2026-11-14T06:45:00.000+01:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0671",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR0671OM-QR0189OM",
+    "totalPrice": 0,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 0
+     },
+     {
+      "id": 2,
+      "price": 0
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "departureDateTime": "2026-11-13T20:45:00.000+05:00",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-13T23:30:00.000+03:00",
+      "flightDuration": 285,
+      "bookingClass": "O",
+      "number": "0671"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-14T02:55:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "arrivalDateTime": "2026-11-14T06:45:00.000+01:00",
+      "flightDuration": 350,
+      "bookingClass": "O",
+      "number": "0189"
+     }
+    ]
+   },
+   "cheapest": true
+  },
+  {
+   "arrivalDate": "2026-12-15",
+   "checkInDate": "2026-12-15",
+   "checkOutDate": "2026-12-20",
+   "lengthOfStay": 5,
+   "tourOperator": "LTUR",
+   "bookingTourOperator": "TUR1",
+   "brand": "TUR1L",
+   "travelType": "LTU5",
+   "cancellationType": "REFUNDABLE",
+   "totalPrice": 6412,
+   "discount": 1214.59,
+   "calculatedPricePerPerson": 3206,
+   "calculatedOriginalPricePerPerson": 3813.295,
+   "personPrices": [
+    {
+     "id": 1,
+     "price": 3206
+    },
+    {
+     "id": 2,
+     "price": 3206
+    }
+   ],
+   "rooms": [
+    {
+     "code": "BUX1",
+     "roomCodes": [
+      "ST04-BU"
+     ],
+     "viewCodes": [
+      "GT13-SESI",
+      "GT13-SEVI#AT13-DIRE"
+     ],
+     "bookingCode": "BUX1A",
+     "board": "A",
+     "boardCode": "GT06-AI",
+     "boardDescription": "Alles Inklusive",
+     "description": "Beach Villa",
+     "travellers": [
+      {
+       "id": 1
+      },
+      {
+       "id": 2
+      }
+     ],
+     "priceByUnit": false,
+     "transferIncluded": true,
+     "extras": [
+      {
+       "type": "GT07-TUI3",
+       "included": true
+      },
+      {
+       "type": "TR",
+       "included": true
+      }
+     ]
+    }
+   ],
+   "departure": {
+    "airline": {
+     "value": "Etihad Airways",
+     "code": "EY"
+    },
+    "departureAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "departureDateTime": "2026-12-14T10:50:00.000+01:00",
+    "arrivalAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "arrivalDateTime": "2026-12-15T07:25:00.000+05:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0372",
+    "flightKey": "HAJLT215L-TO-2ADT1CNN1INF-EY0154EM-EY0372EM",
+    "totalPrice": 1602,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 801
+     },
+     {
+      "id": 2,
+      "price": 801
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "departureDateTime": "2026-12-14T10:50:00.000+01:00",
+      "arrivalAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "arrivalDateTime": "2026-12-14T19:20:00.000+04:00",
+      "flightDuration": 330,
+      "bookingClass": "E",
+      "number": "0154"
+     },
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "departureDateTime": "2026-12-15T02:05:00.000+04:00",
+      "arrivalAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "arrivalDateTime": "2026-12-15T07:25:00.000+05:00",
+      "flightDuration": 260,
+      "bookingClass": "E",
+      "number": "0372"
+     }
+    ]
+   },
+   "return": {
+    "airline": {
+     "value": "Etihad Airways",
+     "code": "EY"
+    },
+    "departureAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "departureDateTime": "2026-12-20T09:10:00.000+05:00",
+    "arrivalAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "arrivalDateTime": "2026-12-20T17:45:00.000+01:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0373",
+    "flightKey": "HAJLT215L-TO-2ADT1CNN1INF-EY0373EM-EY0151EM",
+    "totalPrice": 0,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 0
+     },
+     {
+      "id": 2,
+      "price": 0
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "departureDateTime": "2026-12-20T09:10:00.000+05:00",
+      "arrivalAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "arrivalDateTime": "2026-12-20T12:35:00.000+04:00",
+      "flightDuration": 265,
+      "bookingClass": "E",
+      "number": "0373"
+     },
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "departureDateTime": "2026-12-20T14:30:00.000+04:00",
+      "arrivalAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "arrivalDateTime": "2026-12-20T17:45:00.000+01:00",
+      "flightDuration": 375,
+      "bookingClass": "E",
+      "number": "0151"
+     }
+    ]
+   },
+   "cheapest": false
+  },
+  {
+   "arrivalDate": "2026-10-15",
+   "checkInDate": "2026-10-15",
+   "checkOutDate": "2026-10-20",
+   "lengthOfStay": 5,
+   "tourOperator": "LTUR",
+   "bookingTourOperator": "TUR1",
+   "brand": "TUR1L",
+   "travelType": "LTU5",
+   "cancellationType": "REFUNDABLE",
+   "totalPrice": 6432,
+   "discount": 1327.8,
+   "calculatedPricePerPerson": 3216,
+   "calculatedOriginalPricePerPerson": 3879.9,
+   "personPrices": [
+    {
+     "id": 1,
+     "price": 3216
+    },
+    {
+     "id": 2,
+     "price": 3216
+    }
+   ],
+   "rooms": [
+    {
+     "code": "BUX1",
+     "roomCodes": [
+      "ST04-BU"
+     ],
+     "viewCodes": [
+      "GT13-SESI",
+      "GT13-SEVI#AT13-DIRE"
+     ],
+     "bookingCode": "BUX1A",
+     "board": "A",
+     "boardCode": "GT06-AI",
+     "boardDescription": "Alles Inklusive",
+     "description": "Beach Villa",
+     "travellers": [
+      {
+       "id": 1
+      },
+      {
+       "id": 2
+      }
+     ],
+     "priceByUnit": false,
+     "transferIncluded": true,
+     "extras": [
+      {
+       "type": "GT07-TUI3",
+       "included": true
+      },
+      {
+       "type": "TR",
+       "included": true
+      }
+     ]
+    }
+   ],
+   "departure": {
+    "airline": {
+     "value": "Etihad Airways",
+     "code": "EY"
+    },
+    "departureAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "departureDateTime": "2026-10-14T11:55:00.000+02:00",
+    "arrivalAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "arrivalDateTime": "2026-10-15T05:15:00.000+05:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0378",
+    "flightKey": "HAJLT215L-TO-2ADT1CNN1INF-EY0154EM-EY0378EM",
+    "totalPrice": 1408,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 704
+     },
+     {
+      "id": 2,
+      "price": 704
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "departureDateTime": "2026-10-14T11:55:00.000+02:00",
+      "arrivalAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "arrivalDateTime": "2026-10-14T19:25:00.000+04:00",
+      "flightDuration": 330,
+      "bookingClass": "E",
+      "number": "0154"
+     },
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "departureDateTime": "2026-10-14T23:55:00.000+04:00",
+      "arrivalAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "arrivalDateTime": "2026-10-15T05:15:00.000+05:00",
+      "flightDuration": 260,
+      "bookingClass": "E",
+      "number": "0378"
+     }
+    ]
+   },
+   "return": {
+    "airline": {
+     "value": "Etihad Airways",
+     "code": "EY"
+    },
+    "departureAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "departureDateTime": "2026-10-20T21:25:00.000+05:00",
+    "arrivalAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "arrivalDateTime": "2026-10-21T06:40:00.000+02:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0377",
+    "flightKey": "HAJLT215L-TO-2ADT1CNN1INF-EY0377EM-EY0153EM",
+    "totalPrice": 0,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 0
+     },
+     {
+      "id": 2,
+      "price": 0
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "departureDateTime": "2026-10-20T21:25:00.000+05:00",
+      "arrivalAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "arrivalDateTime": "2026-10-21T00:25:00.000+04:00",
+      "flightDuration": 240,
+      "bookingClass": "E",
+      "number": "0377"
+     },
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "departureDateTime": "2026-10-21T02:40:00.000+04:00",
+      "arrivalAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "arrivalDateTime": "2026-10-21T06:40:00.000+02:00",
+      "flightDuration": 360,
+      "bookingClass": "E",
+      "number": "0153"
+     }
+    ]
+   },
+   "cheapest": false
+  },
+  {
+   "arrivalDate": "2026-10-14",
+   "checkInDate": "2026-10-14",
+   "checkOutDate": "2026-10-19",
+   "lengthOfStay": 5,
+   "tourOperator": "LTUR",
+   "bookingTourOperator": "TUR1",
+   "brand": "TUR1L",
+   "travelType": "LTU5",
+   "cancellationType": "REFUNDABLE",
+   "totalPrice": 6432,
+   "discount": 1327.8,
+   "calculatedPricePerPerson": 3216,
+   "calculatedOriginalPricePerPerson": 3879.9,
+   "personPrices": [
+    {
+     "id": 1,
+     "price": 3216
+    },
+    {
+     "id": 2,
+     "price": 3216
+    }
+   ],
+   "rooms": [
+    {
+     "code": "BUX1",
+     "roomCodes": [
+      "ST04-BU"
+     ],
+     "viewCodes": [
+      "GT13-SESI",
+      "GT13-SEVI#AT13-DIRE"
+     ],
+     "bookingCode": "BUX1A",
+     "board": "A",
+     "boardCode": "GT06-AI",
+     "boardDescription": "Alles Inklusive",
+     "description": "Beach Villa",
+     "travellers": [
+      {
+       "id": 1
+      },
+      {
+       "id": 2
+      }
+     ],
+     "priceByUnit": false,
+     "transferIncluded": true,
+     "extras": [
+      {
+       "type": "GT07-TUI3",
+       "included": true
+      },
+      {
+       "type": "TR",
+       "included": true
+      }
+     ]
+    }
+   ],
+   "departure": {
+    "airline": {
+     "value": "Etihad Airways",
+     "code": "EY"
+    },
+    "departureAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "departureDateTime": "2026-10-13T11:55:00.000+02:00",
+    "arrivalAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "arrivalDateTime": "2026-10-14T05:15:00.000+05:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0378",
+    "flightKey": "HAJLT215L-TO-2ADT1CNN1INF-EY0154EM-EY0378EM",
+    "totalPrice": 1408,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 704
+     },
+     {
+      "id": 2,
+      "price": 704
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "departureDateTime": "2026-10-13T11:55:00.000+02:00",
+      "arrivalAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "arrivalDateTime": "2026-10-13T19:25:00.000+04:00",
+      "flightDuration": 330,
+      "bookingClass": "E",
+      "number": "0154"
+     },
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "departureDateTime": "2026-10-13T23:55:00.000+04:00",
+      "arrivalAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "arrivalDateTime": "2026-10-14T05:15:00.000+05:00",
+      "flightDuration": 260,
+      "bookingClass": "E",
+      "number": "0378"
+     }
+    ]
+   },
+   "return": {
+    "airline": {
+     "value": "Etihad Airways",
+     "code": "EY"
+    },
+    "departureAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "departureDateTime": "2026-10-19T21:25:00.000+05:00",
+    "arrivalAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "arrivalDateTime": "2026-10-20T06:40:00.000+02:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0377",
+    "flightKey": "HAJLT215L-TO-2ADT1CNN1INF-EY0377EM-EY0153EM",
+    "totalPrice": 0,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 0
+     },
+     {
+      "id": 2,
+      "price": 0
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "departureDateTime": "2026-10-19T21:25:00.000+05:00",
+      "arrivalAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "arrivalDateTime": "2026-10-20T00:25:00.000+04:00",
+      "flightDuration": 240,
+      "bookingClass": "E",
+      "number": "0377"
+     },
+     {
+      "airline": {
+       "value": "Etihad Airways",
+       "code": "EY"
+      },
+      "departureAirport": {
+       "value": "Abu Dhabi",
+       "code": "AUH"
+      },
+      "departureDateTime": "2026-10-20T02:40:00.000+04:00",
+      "arrivalAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "arrivalDateTime": "2026-10-20T06:40:00.000+02:00",
+      "flightDuration": 360,
+      "bookingClass": "E",
+      "number": "0153"
+     }
+    ]
+   },
+   "cheapest": false
+  }
+ ],
+ "currency": "EUR",
+ "travellers": [
+  {
+   "id": 1,
+   "age": 28
+  },
+  {
+   "id": 2,
+   "age": 28
+  }
+ ]
+}

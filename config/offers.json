@@ -1,0 +1,28 @@
+{
+  "description": "Bookable-offer policy. Config, never code. Navigation is honest by construction: a provider-returned URL is preserved verbatim but only rendered if it passes the scheme+domain allowlist below; a reconstructed search is labelled SEARCH_REPLAY_LINK; a bare hotel/provider page is labelled PROVIDER_LANDING_LINK; anything else is UNAVAILABLE. URLs are never invented and EXACT is never faked.",
+  "updated": "2026-08-28",
+
+  "allowedDomains": {
+    "tui_packages": ["www.tui.com"],
+    "check24_packages": ["urlaub.check24.de"],
+    "fast_flights": ["www.google.com"],
+    "serpapi": ["www.google.com"],
+    "xotelo": ["www.tripadvisor.com"],
+    "agoda": ["www.agoda.com"],
+    "serpapi_hotels": ["www.google.com"],
+    "domainsNote": "Exact host match, https only, no credentials in the URL. A URL that fails the check is DROPPED (the locator degrades to the next honest quality), never 'fixed'. These are the only domains offer navigation may ever point at — a provider-returned URL to anywhere else is treated as data corruption, not as a destination."
+  },
+
+  "freshness": {
+    "verifiedRecentMinutes": 30,
+    "verifiedRecentNote": "A verification younger than this renders as 'Verified N min ago'; older verifications and bare observations render their actual age and the UI encourages RECHECK PRICE before booking. No 'still available' language is ever invented.",
+    "observedFreshHours": 24,
+    "observedFreshNote": "Observations older than this are flagged as stale evidence in the offer panel."
+  },
+
+  "recheck": {
+    "staysPerDay": 12,
+    "staysPerDayNote": "Ceiling on xotelo-backed hotel-quote rechecks per day (keyless free API — politeness cap, counted from offer_verifications). Package rechecks spend through the existing package budgets (packages.json caps) — a recheck IS a package search.",
+    "note": "A blocked provider ends the recheck immediately with status 'blocked' — no retries, ever. Providers without a resolver return 'unsupported' as a named result, never a guess."
+  }
+}

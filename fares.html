@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Business Fare Radar</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0f14; color: #d7dde5; font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  header { padding: 18px 22px 10px; border-bottom: 1px solid #1d2733; }
+  h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: 2px; color: #7fd1b9; }
+  .sub { color: #6b7a8c; font-size: 12px; }
+  main { padding: 14px 22px 40px; max-width: 1020px; }
+  .form { border: 1px solid #1d2733; border-radius: 8px; padding: 14px 16px; background: #0f1520;
+          display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+  .form label { color: #6b7a8c; font-size: 12px; margin-right: 4px; }
+  .form input, .form select { background: #131b27; border: 1px solid #314052; color: #d7dde5;
+          border-radius: 6px; padding: 4px 8px; font: inherit; width: 90px; }
+  .form input[type=checkbox] { width: auto; }
+  .btn { font-size: 12px; padding: 5px 14px; border-radius: 6px; border: 1px solid #2c5d4b;
+         color: #7fd1b9; background: #131b27; cursor: pointer; text-decoration: none; }
+  .btn:hover { background: #1a2534; }
+  .btn.secondary { border-color: #314052; color: #d7dde5; }
+  .plan { color: #8fa1b5; font-size: 12px; white-space: pre-wrap; margin: 10px 0; }
+  .sect { margin: 16px 0 6px; font-size: 11px; letter-spacing: 1px; color: #6b7a8c; }
+  .card { border: 1px solid #1d2733; border-radius: 8px; padding: 10px 14px; margin: 0 0 10px; background: #0f1520; }
+  .row1 { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; }
+  .price { font-size: 18px; color: #ffd479; min-width: 110px; }
+  .route { color: #eef3f8; }
+  .mix { font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid #314052; color: #8fa1b5; }
+  .mix.full { border-color: #2c5d4b; color: #7fd1b9; }
+  .mix.mixed { border-color: #6b5327; color: #ffd479; }
+  .meta { color: #6b7a8c; font-size: 12px; margin-top: 2px; }
+  .dest { display: flex; gap: 14px; flex-wrap: wrap; }
+  .dest .card { min-width: 160px; cursor: pointer; }
+  .changed { color: #ffd479; font-size: 12px; margin-top: 4px; }
+  .empty { color: #6b7a8c; padding: 30px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>BUSINESS FARE RADAR</h1>
+  <div class="sub">Flexible-window sweeps over the FREE provider only — every run is a visible, capped plan.
+  Cabin labels are evidence: BUSINESS UNVERIFIED means the provider states no per-segment cabin. Recheck before booking.</div>
+</header>
+<main>
+  <div class="form" id="form">loading config…</div>
+  <div class="plan" id="plan"></div>
+  <div id="results"><div class="empty">No finished run yet — configure and hit SEARCH, or run npm run flights:radar.</div></div>
+</main>
+<script>
+const fmt = new Intl.NumberFormat("en-US")
+let CONFIG = null
+
+function mixClass(m) { return m === "BUSINESS_FULL" ? "mix full" : m === "BUSINESS_MIXED" ? "mix mixed" : "mix" }
+function hours(min) { return min == null ? "?" : Math.floor(min / 60) + "h " + (min % 60) + "m" }
+
+async function loadConfig() {
+  const res = await fetch("/api/fares/config")
+  CONFIG = await res.json()
+  const f = document.getElementById("form")
+  const airports = [...CONFIG.homeAirports.primary.map(a => [a, true]),
+                    ...CONFIG.homeAirports.extended.map(a => [a, false])]
+  f.innerHTML = `
+    <span><label>Home airports</label>${airports.map(([a, primary]) =>
+      `<label style="color:#d7dde5"><input type="checkbox" name="origin" value="${a}" ${primary ? "checked" : ""}> ${a}</label>`).join(" ")}</span>
+    <span><label>Destination</label><input id="dest" placeholder="BKK" value="BKK">
+      <select id="watchlist"><option value="">— or watchlist —</option>
+        ${Object.keys(CONFIG.watchlists).map(w => `<option value="${w}">${w}</option>`).join("")}
+        <option value="__anywhere__">anywhere (all watchlists)</option></select></span>
+    <span><label>Departure</label>next <input id="nextDays" value="${CONFIG.window.defaultNextDays}" size="3"> days</span>
+    <span><label>Nights</label><input id="minNights" value="${CONFIG.window.minNights}" size="2">–<input id="maxNights" value="${CONFIG.window.maxNights}" size="2"></span>
+    <span><label>Cabin</label>Business</span>
+    <button class="btn" onclick="runSearch(this)">SEARCH</button>`
+}
+
+async function runSearch(btn) {
+  btn.disabled = true; btn.textContent = "Searching… (this issues real provider requests)"
+  const origins = [...document.querySelectorAll('input[name=origin]:checked')].map(i => i.value).join(",")
+  const wl = document.getElementById("watchlist").value
+  const params = new URLSearchParams({
+    origins,
+    nextDays: document.getElementById("nextDays").value,
+    minNights: document.getElementById("minNights").value,
+    maxNights: document.getElementById("maxNights").value,
+  })
+  if (wl === "__anywhere__") params.set("anywhere", "1")
+  else if (wl) params.set("watchlist", wl)
+  else params.set("destination", document.getElementById("dest").value)
+  try {
+    const res = await fetch("/api/fares/run?" + params, { method: "POST" })
+    const data = await res.json()
+    if (data.error) throw new Error(data.error)
+    document.getElementById("plan").textContent = (data.planLines || []).join("\n")
+  } catch (e) {
+    document.getElementById("plan").textContent = "run failed: " + e.message
+  }
+  btn.disabled = false; btn.textContent = "SEARCH"
+  loadResults()
+}
+
+async function recheckTop(btn) {
+  btn.disabled = true; btn.textContent = "Rechecking top 5…"
+  try {
+    const res = await fetch("/api/fares/recheck-top?top=5", { method: "POST" })
+    const data = await res.json()
+    window.__rechecks = Object.fromEntries((data.results || []).map(r => [r.candidateId, r]))
+  } catch (e) { /* surfaced per-card below */ }
+  btn.disabled = false; btn.textContent = "RECHECK TOP 5"
+  loadResults()
+}
+
+async function loadResults(filterDest) {
+  const res = await fetch("/api/fares/radar")
+  const data = await res.json()
+  const el = document.getElementById("results")
+  if (!data.run) { el.innerHTML = '<div class="empty">No finished run yet.</div>'; return }
+  const run = data.run
+  let candidates = data.candidates
+  if (filterDest) candidates = candidates.filter(c => c.destination === filterDest)
+
+  const rechecks = window.__rechecks || {}
+  const card = (c, rank) => {
+    const r = rechecks[c.id]
+    const changed = r && r.status === "changed"
+      ? `<div class="changed">PRICE CHANGED · Observed: ${c.priceCurrency} ${fmt.format(r.observedPrice)} · Current: ${c.priceCurrency} ${fmt.format(r.currentPrice)} · Difference: ${r.currentPrice - r.observedPrice >= 0 ? "+" : "−"}${c.priceCurrency} ${fmt.format(Math.abs(r.currentPrice - r.observedPrice))}</div>`
+      : r && r.status === "verified" ? `<div class="meta" style="color:#7fd1b9">Fare re-verified just now at the observed price.</div>`
+      : r && r.status === "unavailable" ? `<div class="changed">NOT FOUND at recheck — historical observation kept.</div>` : ""
+    return `<div class="card">
+      <div class="row1">
+        <span class="price">#${rank} — ${c.priceCurrency === "EUR" ? "€" : c.priceCurrency + " "}${fmt.format(c.priceAmount)}</span>
+        <span class="route">${c.origin} → ${c.destination}</span>
+        <span>${c.airline ?? ((c.airlines || []).join("+") || "?")}</span>
+        <span>${c.departureDate} → ${c.returnDate} · ${c.nights} nights</span>
+        <span class="${mixClass(c.cabinMix)}">${c.cabinMix.replace(/_/g, " ")}</span>
+        <span>${c.stops ?? "?"} stop(s) · ${hours(c.durationMinutes)}</span>
+        ${c.url ? `<a class="btn secondary" href="${c.url}" target="_blank" rel="noopener noreferrer">${c.navigationQuality === "EXACT_DEEP_LINK" ? "Check fare" : "Open provider search"}</a>` : `<span class="meta">no trustworthy link</span>`}
+      </div>
+      <div class="meta">score ${c.dealScore}${(c.qualityFlags || []).length ? " · " + c.qualityFlags.join(", ") : ""} · ${c.provider} · observed ${c.observedAt.slice(0, 16)}${c.cabinMix !== "BUSINESS_FULL" ? " · " + c.cabinMixDetail : ""}</div>
+      ${changed}
+    </div>`
+  }
+
+  const byDest = new Map()
+  for (const c of data.candidates) if (!byDest.has(c.destination)) byDest.set(c.destination, c)
+  const destDash = byDest.size > 1 && !filterDest ? `
+    <div class="sect">CHEAPEST BUSINESS-CLASS DESTINATIONS (observed fares — click to filter)</div>
+    <div class="dest">${[...byDest.entries()].sort((a, b) => a[1].priceAmount - b[1].priceAmount).map(([d, c]) =>
+      `<div class="card" onclick="loadResults('${d}')"><b>${d}</b> €${fmt.format(c.priceAmount)}<div class="meta">${c.origin} · ${c.departureDate} · ${c.nights}n · ${c.cabinMix.replace(/_/g, " ")}</div></div>`).join("")}</div>` : ""
+
+  const bestValue = [...candidates].sort((a, b) => b.dealScore - a.dealScore || a.priceAmount - b.priceAmount)
+  el.innerHTML = `
+    <div class="meta">Run #${run.id} · ${run.origins.join(", ")} → ${run.destinationMode} · window ${run.windowStart}..${run.windowEnd}
+      · ${run.searchesIssued} searches (planned ${run.callsPlanned}, billable ${run.callsSpent})
+      <button class="btn secondary" onclick="recheckTop(this)">RECHECK TOP 5</button>
+      ${filterDest ? `<button class="btn secondary" onclick="loadResults()">show all destinations</button>` : ""}</div>
+    ${destDash}
+    <div class="sect">CHEAPEST${filterDest ? " — " + filterDest : ""}</div>
+    ${candidates.slice(0, 10).map((c, i) => card(c, i + 1)).join("")}
+    <div class="sect">BEST VALUE</div>
+    ${bestValue.slice(0, 5).map((c, i) => card(c, i + 1)).join("")}`
+}
+
+loadConfig().then(loadResults).catch(err => {
+  document.getElementById("results").innerHTML = '<div class="empty">failed to load: ' + err.message + "</div>"
+})
+</script>
+</body>
+</html>

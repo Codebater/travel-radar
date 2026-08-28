@@ -43,6 +43,14 @@ import { loadStaysConfig } from "./stays/config.js"
 import { listStayWindows } from "./stays/windows.js"
 import { buildStayOpportunities } from "./stays/opportunities.js"
 import { listTrips, tripTotals } from "./trips/store.js"
+import { getPackageObservation, latestComparisonsForTrip, packageTotals } from "./packages/store.js"
+import { currentMarketVerdictsForTrip, marketVerdictTotals } from "./market/verdict.js"
+import { assembleAllTripOffers } from "./offers/assemble.js"
+import { loadFareRadarConfig } from "./fareradar/config.js"
+import { recheckTopFares, runFareRadar } from "./fareradar/engine.js"
+import { candidatesForRun, latestFareRadarRun } from "./fareradar/store.js"
+import { getLocator as getOfferLocator } from "./offers/locators.js"
+import { recheckOffer } from "./offers/recheck.js"
 import fsSync from "fs"
 
 const PORT = parseInt(process.argv.find((_, i, a) => a[i-1] === "--port") || "8888")
@@ -305,6 +313,240 @@ const server = http.createServer(async (req, res) => {
           limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 20,
           status: url.searchParams.get("all") !== null ? undefined : "interesting",
         }),
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/fares/config — the radar's configuration surface for the UI.
+  if (url.pathname === "/api/fares/config") {
+    const cfg = loadFareRadarConfig()
+    res.writeHead(200, { "Content-Type": "application/json" })
+    res.end(JSON.stringify({
+      homeAirports: cfg.homeAirports,
+      watchlists: Object.fromEntries(Object.entries(cfg.watchlists).filter(([, v]) => Array.isArray(v))),
+      window: cfg.window,
+      budget: { maxSearchesPerRun: cfg.budget.maxSearchesPerRun, currency: cfg.budget.currency },
+    }, null, 2))
+    return
+  }
+
+  // Route: /api/fares/radar — the latest finished run, candidates + locators.
+  // Read-only; runs nothing, spends nothing.
+  if (url.pathname === "/api/fares/radar") {
+    try {
+      const db = getDb()
+      const run = latestFareRadarRun(db)
+      if (!run) {
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ run: null, candidates: [] }))
+        return
+      }
+      const candidates = candidatesForRun(db, run.id).slice(0, 60).map(c => {
+        const locator = c.locatorId !== null ? getOfferLocator(db, c.locatorId) : null
+        return {
+          ...c,
+          navigationQuality: locator?.navigationQuality ?? "UNAVAILABLE",
+          url: locator ? (locator.deepLinkUrl ?? locator.searchReplayUrl ?? locator.landingUrl) : null,
+        }
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        disclaimer: "Observed fares from planned free-provider sweeps. Cabin labels are evidence-based: BUSINESS_UNVERIFIED means the provider states no per-segment cabin. RECHECK finalists before booking.",
+        run, candidates,
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: POST /api/fares/run — plan + execute a sweep (FREE provider only,
+  // hard-capped by the stored plan; the metered tier is unreachable).
+  if (url.pathname === "/api/fares/run") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" })
+      res.end(JSON.stringify({ error: "POST only" }))
+      return
+    }
+    try {
+      const origins = (url.searchParams.get("origins") ?? "").split(",").map(o => o.trim()).filter(Boolean)
+      const destination = url.searchParams.get("destination") ?? undefined
+      const watchlistName = url.searchParams.get("watchlist") ?? undefined
+      const anywhere = boolParam(url.searchParams.get("anywhere"))
+      const summary = await runFareRadar(getDb(), {
+        origins: origins.length ? origins.map(o => iata(o, "origins")) : undefined,
+        destination: destination ? iata(destination, "destination") : undefined,
+        watchlistName,
+        anywhere,
+        nextDays: url.searchParams.get("nextDays") ? Number(url.searchParams.get("nextDays")) : undefined,
+        minNights: url.searchParams.get("minNights") ? Number(url.searchParams.get("minNights")) : undefined,
+        maxNights: url.searchParams.get("maxNights") ? Number(url.searchParams.get("maxNights")) : undefined,
+        maxSearches: url.searchParams.get("maxCalls") ? Number(url.searchParams.get("maxCalls")) : undefined,
+        source: "api",
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ runId: summary.runId, planLines: summary.plan.lines, searchesIssued: summary.searchesIssued, candidates: summary.candidatesStored }, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: POST /api/fares/recheck-top — re-confirm the finalists (free tier).
+  if (url.pathname === "/api/fares/recheck-top") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" })
+      res.end(JSON.stringify({ error: "POST only" }))
+      return
+    }
+    try {
+      const db = getDb()
+      const run = latestFareRadarRun(db)
+      if (!run) throw new BadRequest("no finished fare-radar run")
+      const results = await recheckTopFares(db, run.id, Number(url.searchParams.get("top") ?? 5))
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ results }, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/offers — Phase 8i inspectable offers per trip. Building
+  // locators is deterministic local work; no provider is contacted here.
+  if (url.pathname === "/api/offers") {
+    try {
+      const db = getDb()
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        disclaimer: "Navigation quality is honest: EXACT_DEEP_LINK only ever means the provider returned that URL for that offer. Prices are observations; RECHECK before booking.",
+        trips: assembleAllTripOffers(db, { limit: 30 }),
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: POST /api/offers/recheck?id=N — re-resolve one stored offer at its
+  // provider (budget/politeness-capped; blocked ends immediately, no retries).
+  // Same POST discipline as the feedback endpoint: POST-only, same-origin.
+  if (url.pathname === "/api/offers/recheck") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" })
+      res.end(JSON.stringify({ error: "POST only" }))
+      return
+    }
+    try {
+      const id = Number(url.searchParams.get("id"))
+      if (!Number.isFinite(id) || id <= 0) throw new BadRequest("id must be a positive locator id")
+      const result = await recheckOffer(getDb(), id)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(result, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/market — Phase 8h BUILD-vs-BUY market verdicts. Read-only
+  // over the newest compute batch: superseded rows never surface here.
+  // Currencies converted only through stored FX observations; a verdict
+  // without sufficient confidence carries no winner and no savings number.
+  if (url.pathname === "/api/market") {
+    try {
+      const db = getDb()
+      const trips = listTrips(db, { minScore: 0, limit: 100, status: "interesting" })
+      const LEVEL_ORDER: Record<string, number> = { EXACT_MATCH: 0, CLOSE_MATCH: 1, DESTINATION_LEVEL_ONLY: 2 }
+      const byTrip = trips.map(trip => {
+        const verdicts = currentMarketVerdictsForTrip(db, trip.id)
+          .filter(v => v.comparability !== "NOT_COMPARABLE")
+          .sort((a, b) =>
+            (LEVEL_ORDER[a.comparability] ?? 9) - (LEVEL_ORDER[b.comparability] ?? 9)
+            || (a.packageTotal ?? Infinity) - (b.packageTotal ?? Infinity))
+          .slice(0, 5)
+          .map(v => {
+            const obs = getPackageObservation(db, v.packageObservationId)
+            return {
+              ...v,
+              package: obs && {
+                provider: obs.provider, tourOperator: obs.tourOperator,
+                hotelName: obs.hotelName, checkIn: obs.checkIn, nights: obs.nights,
+                board: obs.board, cabin: obs.cabin, roomName: obs.roomName,
+                transfer: obs.transfer, baggage: obs.baggage,
+                totalPrice: obs.totalPrice, currency: obs.currency,
+                verificationLevel: obs.verificationLevel,
+              },
+            }
+          })
+        return { tripId: trip.id, tripKey: trip.tripKey, verdicts }
+      }).filter(t => t.verdicts.length > 0)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        disclaimer: "EXPERIMENTAL — verdicts only at sufficient confidence; UNKNOWN costs are named, never zeroed; conversions reference stored FX observations; native prices preserved.",
+        totals: marketVerdictTotals(db),
+        trips: byTrip,
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/packages — Phase 8g BUILD-vs-BUY. Read-only over stored
+  // comparisons: runs no search, spends no budget. Currencies are NEVER
+  // converted — a cross-currency pair is reported as such, side by side.
+  if (url.pathname === "/api/packages") {
+    try {
+      const db = getDb()
+      const trips = listTrips(db, { minScore: 0, limit: 100, status: "interesting" })
+      const LEVEL_ORDER: Record<string, number> = { EXACT_MATCH: 0, CLOSE_MATCH: 1, DESTINATION_LEVEL_ONLY: 2 }
+      const byTrip = trips.map(trip => {
+        // The panel shows judgements, not the audit trail: NOT_COMPARABLE
+        // rows stay queryable via the CLI but are noise here, and per trip
+        // only the strongest few package alternatives are rendered.
+        const comparisons = latestComparisonsForTrip(db, trip.id)
+          .filter(c => c.comparability !== "NOT_COMPARABLE")
+          .sort((a, b) =>
+            (LEVEL_ORDER[a.comparability] ?? 9) - (LEVEL_ORDER[b.comparability] ?? 9)
+            || a.packageTotal - b.packageTotal)
+          .slice(0, 5)
+          .map(c => {
+          const obs = getPackageObservation(db, c.packageObservationId)
+          return {
+            ...c,
+            package: obs && {
+              provider: obs.provider, tourOperator: obs.tourOperator,
+              hotelName: obs.hotelName, propertyId: obs.propertyId,
+              origin: obs.origin, checkIn: obs.checkIn, nights: obs.nights,
+              tripDays: obs.tripDays, board: obs.board, cabin: obs.cabin,
+              roomName: obs.roomName, transfer: obs.transfer, baggage: obs.baggage,
+              cancellation: obs.cancellation, totalPrice: obs.totalPrice,
+              pricePerPerson: obs.pricePerPerson, currency: obs.currency,
+              verificationLevel: obs.verificationLevel, fetchedAt: obs.fetchedAt,
+            },
+          }
+        })
+        return { tripId: trip.id, tripKey: trip.tripKey, comparisons }
+      }).filter(t => t.comparisons.length > 0)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        disclaimer: "EXPERIMENTAL — package quotes are observations from unofficial seller APIs, not confirmed bookable rates. Verdicts are quantified only at strong comparability; unknown costs are named, never zeroed; currencies are never converted.",
+        totals: packageTotals(db),
+        trips: byTrip,
       }, null, 2))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })

@@ -233,6 +233,7 @@ export class SerpApiProvider implements CashFlightProvider {
           flightNumber: l.flight_number || null,
           durationMinutes: typeof l.duration === "number" ? l.duration : null,
           aircraft: l.airplane || null,
+          cabin: typeof l.travel_class === "string" && l.travel_class ? l.travel_class : null,
         }))
 
         const departureTime = normaliseTime(first.departure_airport?.time)

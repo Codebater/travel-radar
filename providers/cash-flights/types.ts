@@ -47,6 +47,9 @@ export interface NormalizedSegment {
   flightNumber: string | null
   durationMinutes: number | null
   aircraft: string | null
+  /** Per-segment cabin where the provider states one (SerpAPI does; the
+   *  free Google path does not) — null means UNKNOWN, never assumed. */
+  cabin: string | null
 }
 
 /**

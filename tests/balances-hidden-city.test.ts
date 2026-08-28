@@ -258,8 +258,8 @@ describe("hidden-city engine (§no invisible SerpAPI spend)", () => {
       destination: "SIN", returnDate: null, cabin: "economy",
       price: { amount: price, currency: "USD" },
       segments: [
-        { origin: "PRG", destination: "BKK", departureTime: "2026-11-10T10:00", arrivalTime: "2026-11-10T22:00", airline: null, flightNumber: null, durationMinutes: 660, aircraft: null },
-        { origin: "BKK", destination: "SIN", departureTime: "2026-11-11T01:00", arrivalTime: "2026-11-11T03:30", airline: null, flightNumber: null, durationMinutes: 150, aircraft: null },
+        { origin: "PRG", destination: "BKK", departureTime: "2026-11-10T10:00", arrivalTime: "2026-11-10T22:00", airline: null, flightNumber: null, durationMinutes: 660, aircraft: null, cabin: null },
+        { origin: "BKK", destination: "SIN", departureTime: "2026-11-11T01:00", arrivalTime: "2026-11-11T03:30", airline: null, flightNumber: null, durationMinutes: 150, aircraft: null, cabin: null },
       ],
     })
   }

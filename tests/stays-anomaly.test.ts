@@ -187,27 +187,28 @@ describe("stay baselines — the hard dimensions", () => {
 describe("absolute rules — rulePath discipline", () => {
   it("distinguishes 'rule ran and said ordinary' from 'no rule applies'", () => {
     const ordinary = assessStayAbsolute(
-      { nightly: 900, currency: "USD", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "luxury" },
+      { nightly: 900, currency: "EUR", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "luxury" },
       CONFIG.anomaly)
     expect(ordinary.rulePath).toBe("maldives.all_inclusive.luxury")
     expect(ordinary.tier).toBeNull()
     expect(ordinary.score).toBe(0)               // a REAL zero
 
+    // Bars are EUR since the 8h currency switch; a USD rate has NO rule now.
     const noRule = assessStayAbsolute(
-      { nightly: 900, currency: "EUR", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "luxury" },
+      { nightly: 900, currency: "USD", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "luxury" },
       CONFIG.anomaly)
     expect(noRule.rulePath).toBe("none")          // uncomputable, not zero
   })
 
   it("fires tiers with the luxury-tier scale applied", () => {
     const hit = assessStayAbsolute(
-      { nightly: 500, currency: "USD", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "luxury" },
+      { nightly: 430, currency: "EUR", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "luxury" },
       CONFIG.anomaly)
-    expect(hit.tier).toBe("extreme")              // bars 650/550/420 at ×1.0
+    expect(hit.tier).toBe("extreme")              // EUR bars 550/470/360 at ×1.0
     const ultraSame = assessStayAbsolute(
-      { nightly: 700, currency: "USD", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "ultra" },
+      { nightly: 600, currency: "EUR", destinationGroup: "maldives", board: "all_inclusive", luxuryTier: "ultra" },
       CONFIG.anomaly)
-    expect(ultraSame.tier).toBe("extreme")        // ×1.4 → 910/770/588
+    expect(ultraSame.tier).toBe("extreme")        // ×1.4 → 770/658/504
   })
 })
 

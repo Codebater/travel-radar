@@ -1,0 +1,68 @@
+{
+  "description": "Flexible business-class fare radar policy. Config, never code: home airports, destination watchlists, date-window generation, quality filters, the deterministic deal score and the hard request budget all live here. No airport, destination or exchange of money is ever hard-coded into search logic.",
+  "updated": "2026-08-28",
+
+  "homeAirports": {
+    "primary": ["VIE", "PRG"],
+    "extended": ["BUD", "BTS", "MUC"],
+    "extendedEnabled": false,
+    "note": "PRIMARY airports always compete in every run; EXTENDED join only when extendedEnabled (or --extended). The engine treats the list as data — adding BER/WAW later is a config edit, not a redesign. Fare differences between home airports are EXPOSED, never converted into a positioning cost (no factual ground-transport data exists yet)."
+  },
+
+  "watchlists": {
+    "asia": ["BKK", "HKT", "SIN", "KUL", "HKG", "NRT", "HND", "ICN", "TPE", "DPS", "SGN", "HAN", "MNL"],
+    "americas": ["JFK", "MIA", "LAX", "CUN", "SJU", "GRU", "EZE", "BOG", "MEX", "YYZ"],
+    "middle-east-africa": ["DXB", "AUH", "DOH", "MLE", "MRU", "SEZ", "CPT", "JNB", "ZNZ"],
+    "note": "ANYWHERE mode = the union of every watchlist, honestly labelled: no cash provider we use supports true destination-less discovery, so 'anywhere' means 'everywhere we have chosen to look'. Lists are config; a new region is a new key."
+  },
+
+  "window": {
+    "defaultNextDays": 30,
+    "minNights": 4,
+    "maxNights": 14,
+    "preferredNights": [4, 5, 6, 7, 8, 10, 12, 14],
+    "note": "preferredNights are the trip lengths the refinement tier actually tests — never a blind cartesian product, and never an assumed fixed 7."
+  },
+
+  "quality": {
+    "maxStops": 2,
+    "maxDurationHours": 30,
+    "longLayoverHours": 6,
+    "overnightConnectionStartHour": 22,
+    "overnightConnectionEndHour": 5,
+    "note": "Itineraries over maxStops/maxDuration are dropped with the drop counted in the run plan. LONG_LAYOVER and OVERNIGHT_CONNECTION are recorded flags that feed the value score and the UI — a cheap nightmare must say WHY it is cheaper. Self-transfer/separate-ticket flags are carried in the schema but our current providers only quote single-ticket itineraries, so they never fire today (data, not guesswork)."
+  },
+
+  "scoring": {
+    "description": "Deterministic and price-dominant; no model, no opacity. dealScore = 100 × (cheapest qualifying fare in the result set ÷ this fare) minus fixed penalties. The raw CHEAPEST ordering is always available untouched beside BEST VALUE.",
+    "penalties": {
+      "businessUnverified": 4,
+      "businessMixed": 10,
+      "premiumEconomyAsResult": 100,
+      "perStop": 3,
+      "longLayover": 4,
+      "overnightConnection": 3,
+      "durationPerHourOverThreshold": 0.8,
+      "durationThresholdHours": 16,
+      "selfTransfer": 15,
+      "separateTicket": 15
+    },
+    "note": "businessMixed at 10 means a mixed-cabin fare must be ~10% cheaper before it outranks full business on value; premiumEconomyAsResult at 100 removes any non-business echo from value ranking entirely (it stays visible, labelled, in the raw list)."
+  },
+
+  "budget": {
+    "maxSearchesPerRun": 60,
+    "sparseProbesPerRoute": 5,
+    "refineTopCells": 6,
+    "refineNightsVariants": 3,
+    "confirmFinalists": 5,
+    "currency": "EUR",
+    "note": "Hard ceiling per run, planned BEFORE any request and printed as a visible plan. All tiers use the FREE provider (fast_flights) — politeness-capped, zero billing; the metered SerpAPI provider is NEVER touched by the radar (allowMeteredFallback:false everywhere), so the production flight budget cannot be dented. When the plan exceeds the cap, breadth reduces in order: fewer probes per route → fewer refinement cells → fewer destinations, and every reduction is named in the plan. Currency EUR to match the market layer's comparison currency; flight_prices rows record it per-row (currency is a hard baseline dimension)."
+  },
+
+  "baselines": {
+    "minDistinctFetchDays": 3,
+    "minObservations": 5,
+    "note": "A 'typical fare' for (origin|destination|nights bucket|cabin|currency) is only quoted once this many observations across this many distinct days exist — until then the UI shows no deal-percentage, matching the stays/packages maturity doctrine."
+  }
+}

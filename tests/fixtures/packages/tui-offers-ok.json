@@ -1,0 +1,761 @@
+{
+ "currency": "EUR",
+ "hotel": {
+  "giata": 16356,
+  "regionGiata": 1148,
+  "product": "MLE60070",
+  "name": "Lily Beach Resort & Spa"
+ },
+ "offers": [
+  {
+   "arrivalDate": "2026-11-16",
+   "checkInDate": "2026-11-16",
+   "checkOutDate": "2026-11-21",
+   "lengthOfStay": 5,
+   "tourOperator": "LTUR",
+   "bookingTourOperator": "TUR1",
+   "brand": "TUR1L",
+   "travelType": "LTU5",
+   "programType": "0756",
+   "supplier": {
+    "provider": "comres",
+    "supplier": "",
+    "subSupplier": ""
+   },
+   "cancellationType": "REFUNDABLE",
+   "totalPrice": 6628,
+   "discount": 1214.59,
+   "calculatedPricePerPerson": 3314,
+   "calculatedOriginalPricePerPerson": 3921.295,
+   "personPrices": [
+    {
+     "id": 1,
+     "price": 3314
+    },
+    {
+     "id": 2,
+     "price": 3314
+    }
+   ],
+   "rooms": [
+    {
+     "code": "BUX1",
+     "roomCodes": [
+      "ST04-BU"
+     ],
+     "viewCodes": [
+      "GT13-SESI",
+      "GT13-SEVI#AT13-DIRE"
+     ],
+     "bookingCode": "BUX1A",
+     "board": "A",
+     "boardCode": "GT06-AI",
+     "boardDescription": "Alles Inklusive",
+     "description": "Beach Villa",
+     "travellers": [
+      {
+       "id": 1
+      },
+      {
+       "id": 2
+      }
+     ],
+     "priceByUnit": false,
+     "transferIncluded": true,
+     "extras": [
+      {
+       "type": "GT07-TUI3",
+       "included": true
+      },
+      {
+       "type": "TR",
+       "included": true
+      }
+     ]
+    }
+   ],
+   "departure": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "departureDateTime": "2026-11-15T15:15:00.000+01:00",
+    "arrivalAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "arrivalDateTime": "2026-11-16T07:50:00.000+05:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0676",
+    "provider": "AMADMMP",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR0184OM-QR0676OM",
+    "totalPrice": 1818,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 909
+     },
+     {
+      "id": 2,
+      "price": 909
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "departureDateTime": "2026-11-15T15:15:00.000+01:00",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-15T22:30:00.000+03:00",
+      "flightDuration": 315,
+      "bookingClass": "O",
+      "number": "0184"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-16T01:10:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "arrivalDateTime": "2026-11-16T07:50:00.000+05:00",
+      "flightDuration": 280,
+      "bookingClass": "O",
+      "number": "0676"
+     }
+    ]
+   },
+   "return": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "departureDateTime": "2026-11-21T20:55:00.000+05:00",
+    "arrivalAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "arrivalDateTime": "2026-11-22T13:10:00.000+01:00",
+    "stopOver": 2,
+    "class": "economy",
+    "number": "4923",
+    "provider": "AMADMMP",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR4923OM-QR0659OM-QR0183OM",
+    "totalPrice": 0,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 0
+     },
+     {
+      "id": 2,
+      "price": 0
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "departureDateTime": "2026-11-21T20:55:00.000+05:00",
+      "arrivalAirport": {
+       "value": "Sri Lanka",
+       "code": "CMB"
+      },
+      "arrivalDateTime": "2026-11-21T22:50:00.000+05:30",
+      "flightDuration": 85,
+      "bookingClass": "O",
+      "number": "4923"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Sri Lanka",
+       "code": "CMB"
+      },
+      "departureDateTime": "2026-11-22T03:25:00.000+05:30",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-22T05:45:00.000+03:00",
+      "flightDuration": 290,
+      "bookingClass": "O",
+      "number": "0659"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-22T09:20:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "arrivalDateTime": "2026-11-22T13:10:00.000+01:00",
+      "flightDuration": 350,
+      "bookingClass": "O",
+      "number": "0183"
+     }
+    ]
+   },
+   "tempId": "2f3aa317-056f-4fa5-b005-791e4ed98f05",
+   "cheapest": true,
+   "travellers": [
+    {
+     "id": 1,
+     "age": 28
+    },
+    {
+     "id": 2,
+     "age": 28
+    }
+   ],
+   "currency": "EUR",
+   "hotel": {
+    "giata": 16356,
+    "regionGiata": 1148,
+    "product": "MLE60070",
+    "name": "Lily Beach Resort & Spa"
+   }
+  },
+  {
+   "arrivalDate": "2026-11-16",
+   "checkInDate": "2026-11-16",
+   "checkOutDate": "2026-11-21",
+   "lengthOfStay": 5,
+   "tourOperator": "LTUR",
+   "bookingTourOperator": "TUR1",
+   "brand": "TUR1L",
+   "travelType": "LTU5",
+   "programType": "0756",
+   "supplier": {
+    "provider": "comres",
+    "supplier": "",
+    "subSupplier": ""
+   },
+   "cancellationType": "REFUNDABLE",
+   "totalPrice": 6628,
+   "discount": 1214.59,
+   "calculatedPricePerPerson": 3314,
+   "calculatedOriginalPricePerPerson": 3921.295,
+   "personPrices": [
+    {
+     "id": 1,
+     "price": 3314
+    },
+    {
+     "id": 2,
+     "price": 3314
+    }
+   ],
+   "rooms": [
+    {
+     "code": "BUX1",
+     "roomCodes": [
+      "ST04-BU"
+     ],
+     "viewCodes": [
+      "GT13-SESI",
+      "GT13-SEVI#AT13-DIRE"
+     ],
+     "bookingCode": "BUX1A",
+     "board": "A",
+     "boardCode": "GT06-AI",
+     "boardDescription": "Alles Inklusive",
+     "description": "Beach Villa",
+     "travellers": [
+      {
+       "id": 1
+      },
+      {
+       "id": 2
+      }
+     ],
+     "priceByUnit": false,
+     "transferIncluded": true,
+     "extras": [
+      {
+       "type": "GT07-TUI3",
+       "included": true
+      },
+      {
+       "type": "TR",
+       "included": true
+      }
+     ]
+    }
+   ],
+   "departure": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "departureDateTime": "2026-11-15T15:15:00.000+01:00",
+    "arrivalAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "arrivalDateTime": "2026-11-16T07:50:00.000+05:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0676",
+    "provider": "AMADMMP",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR0184OM-QR0676OM",
+    "totalPrice": 1818,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 909
+     },
+     {
+      "id": 2,
+      "price": 909
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "departureDateTime": "2026-11-15T15:15:00.000+01:00",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-15T22:30:00.000+03:00",
+      "flightDuration": 315,
+      "bookingClass": "O",
+      "number": "0184"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-16T01:10:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "arrivalDateTime": "2026-11-16T07:50:00.000+05:00",
+      "flightDuration": 280,
+      "bookingClass": "O",
+      "number": "0676"
+     }
+    ]
+   },
+   "return": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "departureDateTime": "2026-11-21T20:55:00.000+05:00",
+    "arrivalAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "arrivalDateTime": "2026-11-22T13:10:00.000+01:00",
+    "stopOver": 2,
+    "class": "economy",
+    "number": "4923",
+    "provider": "AMADMMP",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR4923OM-QR0659OM-QR0183OM",
+    "totalPrice": 0,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 0
+     },
+     {
+      "id": 2,
+      "price": 0
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "departureDateTime": "2026-11-21T20:55:00.000+05:00",
+      "arrivalAirport": {
+       "value": "Sri Lanka",
+       "code": "CMB"
+      },
+      "arrivalDateTime": "2026-11-21T22:50:00.000+05:30",
+      "flightDuration": 85,
+      "bookingClass": "O",
+      "number": "4923"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Sri Lanka",
+       "code": "CMB"
+      },
+      "departureDateTime": "2026-11-22T03:25:00.000+05:30",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-22T05:45:00.000+03:00",
+      "flightDuration": 290,
+      "bookingClass": "O",
+      "number": "0659"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-22T09:20:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "arrivalDateTime": "2026-11-22T13:10:00.000+01:00",
+      "flightDuration": 350,
+      "bookingClass": "O",
+      "number": "0183"
+     }
+    ]
+   },
+   "tempId": "5ba1cfff-c2fa-40cd-bc4b-55a7aa1e3ac9",
+   "cheapest": true,
+   "travellers": [
+    {
+     "id": 1,
+     "age": 28
+    },
+    {
+     "id": 2,
+     "age": 28
+    }
+   ],
+   "currency": "EUR",
+   "hotel": {
+    "giata": 16356,
+    "regionGiata": 1148,
+    "product": "MLE60070",
+    "name": "Lily Beach Resort & Spa"
+   }
+  },
+  {
+   "arrivalDate": "2026-11-19",
+   "checkInDate": "2026-11-19",
+   "checkOutDate": "2026-11-24",
+   "lengthOfStay": 5,
+   "tourOperator": "LTUR",
+   "bookingTourOperator": "TUR1",
+   "brand": "TUR1L",
+   "travelType": "LTU5",
+   "programType": "0756",
+   "supplier": {
+    "provider": "comres",
+    "supplier": "",
+    "subSupplier": ""
+   },
+   "cancellationType": "REFUNDABLE",
+   "totalPrice": 9498,
+   "discount": 2192.29,
+   "calculatedPricePerPerson": 4749,
+   "calculatedOriginalPricePerPerson": 5845.145,
+   "personPrices": [
+    {
+     "id": 1,
+     "price": 4749
+    },
+    {
+     "id": 2,
+     "price": 4749
+    }
+   ],
+   "rooms": [
+    {
+     "code": "JSM1",
+     "roomCodes": [
+      "ST04-JS",
+      "ST04-VI"
+     ],
+     "viewCodes": [
+      "GT13-SEVI#AT13-DIRE"
+     ],
+     "bookingCode": "JSM1A",
+     "board": "A",
+     "boardCode": "GT06-AI",
+     "boardDescription": "Alles Inklusive",
+     "description": "Beach Suite with Jaccuzi",
+     "travellers": [
+      {
+       "id": 1
+      },
+      {
+       "id": 2
+      }
+     ],
+     "priceByUnit": false,
+     "transferIncluded": true,
+     "extras": [
+      {
+       "type": "GT07-TUI3",
+       "included": true
+      },
+      {
+       "type": "TR",
+       "included": true
+      }
+     ]
+    }
+   ],
+   "departure": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "departureDateTime": "2026-11-18T15:15:00.000+01:00",
+    "arrivalAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "arrivalDateTime": "2026-11-19T08:25:00.000+05:00",
+    "stopOver": 1,
+    "class": "economy",
+    "number": "0670",
+    "provider": "AMADMMP",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR0184OM-QR0670OM",
+    "totalPrice": 1756,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 878
+     },
+     {
+      "id": 2,
+      "price": 878
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "departureDateTime": "2026-11-18T15:15:00.000+01:00",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-18T22:30:00.000+03:00",
+      "flightDuration": 315,
+      "bookingClass": "O",
+      "number": "0184"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-19T01:45:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "arrivalDateTime": "2026-11-19T08:25:00.000+05:00",
+      "flightDuration": 280,
+      "bookingClass": "O",
+      "number": "0670"
+     }
+    ]
+   },
+   "return": {
+    "airline": {
+     "value": "Qatar Airways",
+     "code": "QR"
+    },
+    "departureAirport": {
+     "value": "Male",
+     "code": "MLE"
+    },
+    "departureDateTime": "2026-11-24T20:55:00.000+05:00",
+    "arrivalAirport": {
+     "value": "Wien",
+     "code": "VIE"
+    },
+    "arrivalDateTime": "2026-11-25T13:10:00.000+01:00",
+    "stopOver": 2,
+    "class": "economy",
+    "number": "4923",
+    "provider": "AMADMMP",
+    "flightKey": "HAJLT215L-PU-2ADT1CNN1INF-QR4923OM-QR0659OM-QR0183OM",
+    "totalPrice": 0,
+    "personPrices": [
+     {
+      "id": 1,
+      "price": 0
+     },
+     {
+      "id": 2,
+      "price": 0
+     }
+    ],
+    "segments": [
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Male",
+       "code": "MLE"
+      },
+      "departureDateTime": "2026-11-24T20:55:00.000+05:00",
+      "arrivalAirport": {
+       "value": "Sri Lanka",
+       "code": "CMB"
+      },
+      "arrivalDateTime": "2026-11-24T22:50:00.000+05:30",
+      "flightDuration": 85,
+      "bookingClass": "O",
+      "number": "4923"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Sri Lanka",
+       "code": "CMB"
+      },
+      "departureDateTime": "2026-11-25T03:25:00.000+05:30",
+      "arrivalAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "arrivalDateTime": "2026-11-25T05:45:00.000+03:00",
+      "flightDuration": 290,
+      "bookingClass": "O",
+      "number": "0659"
+     },
+     {
+      "airline": {
+       "value": "Qatar Airways",
+       "code": "QR"
+      },
+      "departureAirport": {
+       "value": "Doha",
+       "code": "DOH"
+      },
+      "departureDateTime": "2026-11-25T09:20:00.000+03:00",
+      "arrivalAirport": {
+       "value": "Wien",
+       "code": "VIE"
+      },
+      "arrivalDateTime": "2026-11-25T13:10:00.000+01:00",
+      "flightDuration": 350,
+      "bookingClass": "O",
+      "number": "0183"
+     }
+    ]
+   },
+   "tempId": "737ab40f-ed76-44b5-957e-fc170d7e0ffe",
+   "cheapest": false,
+   "travellers": [
+    {
+     "id": 1,
+     "age": 28
+    },
+    {
+     "id": 2,
+     "age": 28
+    }
+   ],
+   "currency": "EUR",
+   "hotel": {
+    "giata": 16356,
+    "regionGiata": 1148,
+    "product": "MLE60070",
+    "name": "Lily Beach Resort & Spa"
+   }
+  }
+ ]
+}
