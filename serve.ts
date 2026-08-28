@@ -39,6 +39,7 @@ import { immediatesToday, listEvents, listNotifications, listQueue } from "./not
 import { isQuiet, localDay } from "./notifications/quiet-hours.js"
 import { credentialWarnings } from "./notifications/credentials.js"
 import { listStayCandidates, stayCandidateTotals } from "./stays/candidates.js"
+import { loadStayUniverse } from "./stays/registry.js"
 import { loadStaysConfig } from "./stays/config.js"
 import { listStayWindows } from "./stays/windows.js"
 import { buildStayOpportunities } from "./stays/opportunities.js"
@@ -279,6 +280,12 @@ const server = http.createServer(async (req, res) => {
         minScore: minRaw !== null && Number.isFinite(Number(minRaw)) ? Number(minRaw) : 0,
         limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 100) : 25,
       }).filter(c => c.status !== "suspicious")
+      // Explicit hotel-loyalty affiliations from config — DATA the page joins
+      // hotel buy-points promos on; never inferred from property names.
+      const propertyLoyalty: Record<string, string> = {}
+      for (const p of loadStayUniverse().properties) {
+        if (p.loyaltyProgram) propertyLoyalty[p.id] = p.loyaltyProgram
+      }
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify({
         mode: "shadow",
@@ -288,6 +295,7 @@ const server = http.createServer(async (req, res) => {
         totals: stayCandidateTotals(db),
         windows: listStayWindows(db, { limit: 15 }),
         opportunities: buildStayOpportunities(db, { limit: 15 }),
+        propertyLoyalty,
         candidates,
       }, null, 2))
     } catch (err) {

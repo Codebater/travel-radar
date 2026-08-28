@@ -17,14 +17,18 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
 
   /**
-   * Index of ACTIVE, MAPPED promos by loyaltyProgram. Unmapped rows and
-   * expired rows never enter it; a failed/absent feed yields an empty index,
-   * which disables enrichment without touching the results themselves.
+   * Index of ACTIVE, MAPPED promos by loyaltyProgram for ONE category
+   * (default "airline" — the original contract, so existing callers see
+   * exactly the rows they always did). Unmapped rows and expired rows never
+   * enter it; a failed/absent feed yields an empty index, which disables
+   * enrichment without touching the results themselves.
    */
-  function activePromoIndex(feed) {
+  function activePromoIndex(feed, category) {
+    const wanted = category || "airline"
     const index = {}
     if (!feed || feed.ok !== true || !Array.isArray(feed.promos)) return index
     for (const p of feed.promos) {
+      if ((p.category || "airline") !== wanted) continue
       if (!p.loyaltyProgram) continue     // unmapped source program — enriches nothing
       if (p.active !== true) continue     // expired dated promos never qualify
       if (!index[p.loyaltyProgram]) index[p.loyaltyProgram] = p
@@ -48,6 +52,23 @@
     return "BUY MILES " + (p.upTo ? "UP TO " : "") + pct
   }
 
+  /**
+   * "BUY POINTS +50%" for hotel programs — a promo on buying the hotel
+   * currency, never a discount on any cash rate.
+   */
+  function hotelPromoBadgeText(p) {
+    const pct = p.bonusPercent !== null && p.bonusPercent !== undefined
+      ? "+" + p.bonusPercent + "%"
+      : "-" + p.discountPercent + "%"
+    return "BUY POINTS " + (p.upTo ? "UP TO " : "") + pct
+  }
+
+  /** "Promo purchase rate: 0.83¢/point" only when the source stated it — never invented. */
+  function promoRateText(p) {
+    if (p.effectiveCostPerMile === null || p.effectiveCostPerMile === undefined) return null
+    return "Promo purchase rate: " + p.effectiveCostPerMile + "¢/point"
+  }
+
   /** "Ends Sep 16" when the source stated an end date; null otherwise — never invented. */
   function promoEndsText(p) {
     if (!p.validUntil) return null
@@ -57,5 +78,5 @@
     return "Ends " + months[Number(m[2]) - 1] + " " + Number(m[3])
   }
 
-  return { activePromoIndex, qualifies, promoBadgeText, promoEndsText }
+  return { activePromoIndex, qualifies, promoBadgeText, promoEndsText, hotelPromoBadgeText, promoRateText }
 })

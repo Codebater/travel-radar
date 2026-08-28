@@ -84,14 +84,14 @@ describe("parsing the captured airline table", () => {
     expect(copa.discountPercent).toBe(45)
   })
 
-  it("hotel rows never leak into the airline feed", () => {
-    for (const p of promos) {
-      expect(p.sourceProgramName).not.toMatch(/Bonvoy|Honors|IHG|One Rewards/)
+  it("hotel rows never leak into the AIRLINE category", () => {
+    for (const p of promos.filter(p => p.category === "airline")) {
+      expect(p.sourceProgramName).not.toMatch(/Bonvoy|Honors|IHG|One Rewards|Leaders Club/)
     }
   })
 
-  it("effective cost is never invented — the current page states no airline rate, so every row is null", () => {
-    for (const p of promos) {
+  it("effective cost is never invented — the current page states no AIRLINE rate, so every airline row is null", () => {
+    for (const p of promos.filter(p => p.category === "airline")) {
       expect(p.effectiveCostPerMile).toBeNull()
       expect(p.currency).toBeNull()
     }
@@ -116,6 +116,62 @@ describe("parsing the captured airline table", () => {
     expect(byName(later.promos, "Flying Blue").active).toBe(false)     // ended 9/16
     expect(byName(later.promos, "TrueBlue").active).toBe(true)         // ends 10/1
     expect(byName(later.promos, "Flying Club").active).toBe(true)      // no end date stated
+  })
+})
+
+describe("parsing the captured hotel table", () => {
+  const { promos, anomaly } = parsePromoPage(FIXTURE, CFG, OPTS)
+  const hotels = promos.filter(p => p.category === "hotel")
+
+  it("parses the hotel rows as their own category without disturbing the airline rows", () => {
+    expect(anomaly).toBeNull()
+    expect(hotels.length).toBeGreaterThanOrEqual(4)
+    // Airline behavior unchanged: same rows as before the hotel extension.
+    const airline = promos.filter(p => p.category === "airline")
+    expect(airline.length).toBeGreaterThanOrEqual(8)
+    expect(airline.every(p => p.effectiveCostPerMile === null)).toBe(true)
+  })
+
+  it("maps hotel programs ONLY through the explicit hotel map", () => {
+    expect(byName(hotels, "One Rewards").loyaltyProgram).toBe("IHG_ONE_REWARDS")
+    expect(byName(hotels, "Bonvoy").loyaltyProgram).toBe("MARRIOTT_BONVOY")
+    expect(byName(hotels, "Honors").loyaltyProgram).toBe("HILTON_HONORS")
+    expect(byName(hotels, "Leaders Club").loyaltyProgram).toBe("LEADERS_CLUB")
+  })
+
+  it("preserves the source's explicit cents-per-point — and only where stated", () => {
+    expect(byName(hotels, "Bonvoy").effectiveCostPerMile).toBe(0.83)
+    expect(byName(hotels, "One Rewards").effectiveCostPerMile).toBe(0.5)
+    expect(byName(hotels, "Honors").effectiveCostPerMile).toBe(0.5)
+    expect(byName(hotels, "Bonvoy").currency).toBe("USD")
+    // LHW is not in the highlight-rate table — no rate is ever invented.
+    expect(byName(hotels, "Leaders Club").effectiveCostPerMile).toBeNull()
+  })
+
+  it("hotel bonuses, up-to and expiry parse with the same rules", () => {
+    const bonvoy = byName(hotels, "Bonvoy")
+    expect(bonvoy.bonusPercent).toBe(50)
+    expect(bonvoy.upTo).toBe(false)
+    expect(bonvoy.validUntil).toBe("2026-09-09")
+    const lhw = byName(hotels, "Leaders Club")
+    expect(lhw.bonusPercent).toBe(100)
+    expect(lhw.upTo).toBe(true)
+  })
+
+  it("an expired hotel promo is inactive on a later clock", () => {
+    const later = parsePromoPage(FIXTURE, CFG, { now: new Date("2026-09-20T09:00:00Z"), fetchedAt: "2026-09-20T09:00:00Z" })
+    const hotelsLater = later.promos.filter(p => p.category === "hotel")
+    expect(byName(hotelsLater, "One Rewards").active).toBe(false)   // ended 9/1
+    expect(byName(hotelsLater, "Bonvoy").active).toBe(false)        // ended 9/9
+    expect(byName(hotelsLater, "Honors").active).toBe(true)         // ends 9/25
+  })
+
+  it("a page whose hotel section is missing still serves airline promos — hotel is additive, never a hostage", () => {
+    const airlineOnly = FIXTURE.slice(0, FIXTURE.indexOf("Buy Points Promotions From Hotels"))
+    const parsed = parsePromoPage(airlineOnly, CFG, OPTS)
+    expect(parsed.anomaly).toBeNull()
+    expect(parsed.promos.filter(p => p.category === "airline").length).toBeGreaterThanOrEqual(8)
+    expect(parsed.promos.filter(p => p.category === "hotel")).toHaveLength(0)
   })
 })
 

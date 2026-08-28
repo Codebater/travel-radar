@@ -46,6 +46,10 @@ export interface StayPropertyConfig {
   active: boolean
   /** Provider-native identities, keyed by provider name. Missing = no coverage. */
   refs: Record<string, string>
+  /** Explicit hotel loyalty affiliation (MARRIOTT_BONVOY, HILTON_HONORS, …) —
+   *  DATA, never inferred from the property name. Unset = independent or
+   *  unknown, and nothing downstream may guess. */
+  loyaltyProgram?: string
   notes?: string
 }
 

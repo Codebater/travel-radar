@@ -47,6 +47,7 @@
   <div class="sub" id="disclaimer">loading…</div>
 </header>
 <main id="main"><div class="empty">loading deals from stored observations…</div></main>
+<script src="./promo-enrich.js"></script>
 <script>
 const fmt = new Intl.NumberFormat("en-US")
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))
@@ -205,6 +206,15 @@ function stayCard(s) {
     ? { cls: "good", text: `${Math.round(c.percentBelowMedian * 10) / 10}% below its usual rate (${c.sampleSize} observations)` }
     : { cls: "", text: "Cheapest rate we have observed" }
   const sighting = c.sourceClass === "meta" ? " · price sighting, not yet confirmed bookable" : ""
+  // Hotel buy-points promo: a promotion on BUYING the property's loyalty
+  // currency — never a discount on the cash rate on this card.
+  const hotelPromo = s.loyaltyProgram ? hotelPromoIndex[s.loyaltyProgram] : null
+  const promoBadge = hotelPromo ? (() => {
+    const ends = PromoEnrich.promoEndsText(hotelPromo)
+    const rate = PromoEnrich.promoRateText(hotelPromo)
+    const tip = "Points purchase promo — not a discount on this cash hotel rate." + (rate ? " " + rate : "")
+    return `<span class="tag deal" title="${esc(tip)}">💳 ${esc(PromoEnrich.hotelPromoBadgeText(hotelPromo))}${ends ? " · " + esc(ends) : ""}</span>`
+  })() : ""
   const detailInner =
     `<div>Source class ${esc(c.sourceClass)} via ${esc(c.provider)} · taxes ${esc(c.taxesFees)} · verification ${esc(c.verificationStatus)}</div>` +
     ((c.reasons || []).length ? `<div>${c.reasons.map(esc).join(" · ")}</div>` : "") +
@@ -224,7 +234,7 @@ function stayCard(s) {
       <div><div class="price">${money(c.nightlyAmount, c.priceCurrency)}<span class="per">/night</span></div></div>
     </div>
     <div class="status ${status.cls}">${esc(status.text)}</div>
-    <div class="actions">${actionHtml(s.locator)}
+    <div class="actions">${promoBadge}${actionHtml(s.locator)}
       ${s.variants.length ? `<span class="meta">+${s.variants.length} more date option${s.variants.length > 1 ? "s" : ""} in details</span>` : ""}</div>
     ${details(detailInner)}
   </div>`
@@ -267,10 +277,17 @@ function diyCard(t) {
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 
+// Active mapped HOTEL buy-points promos by program — empty when the promo
+// feed is unavailable, which only removes badges, never cards.
+let hotelPromoIndex = {}
+
 async function load() {
   const res = await fetch("/api/dealradar")
   const feed = await res.json()
   if (feed.error) throw new Error(feed.error)
+  try {
+    hotelPromoIndex = PromoEnrich.activePromoIndex(await (await fetch("/api/promos/miles")).json(), "hotel")
+  } catch (e) { hotelPromoIndex = {} }
   document.getElementById("disclaimer").textContent =
     "Deals found in this radar's own price observations — evidence-based, no seller claims. Recheck before booking."
   const section = (title, note, inner) =>

@@ -25,5 +25,15 @@
     "executive club": "BRITISH_AIRWAYS",
     "frequent flyer": "QANTAS",
     "krisflyer": "SINGAPORE"
-  }
+  },
+
+  "hotelProgramMap": {
+    "one rewards": "IHG_ONE_REWARDS",
+    "bonvoy": "MARRIOTT_BONVOY",
+    "honors": "HILTON_HONORS",
+    "leaders club": "LEADERS_CLUB",
+    "world of hyatt": "WORLD_OF_HYATT",
+    "all": "ACCOR_ALL"
+  },
+  "hotelNote": "Hotel section of the same page, same rules: explicit parenthesized-name map, unmapped rows kept but enriching nothing. Hotel promo keys join stay cards ONLY via a property's explicit loyaltyProgram in config/stay-properties.json — chain affiliation is data, never inferred from names."
 }

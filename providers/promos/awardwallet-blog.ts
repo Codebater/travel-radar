@@ -23,6 +23,9 @@ export interface MilesPromosConfig {
   source: { url: string; ttlHours: number; timeoutMs: number }
   /** Source's parenthesized program name (lowercased) → our loyaltyProgram enum. */
   programMap: Record<string, string>
+  /** Same, for the hotel section → hotel program keys (MARRIOTT_BONVOY, …).
+   *  Optional so an older config degrades to airline-only, never a throw. */
+  hotelProgramMap?: Record<string, string>
 }
 
 let cachedConfig: MilesPromosConfig | null = null
@@ -36,6 +39,10 @@ export function loadMilesPromosConfig(force = false): MilesPromosConfig {
 }
 
 export interface MilesPromo {
+  /** Which promotions table the row came from. Hotel promos join stay cards
+   *  via a property's explicit loyaltyProgram; airline promos join award
+   *  results — the two never mix. */
+  category: "airline" | "hotel"
   /** Exactly as the source names it, e.g. "KLM (Flying Blue)". */
   sourceProgramName: string
   /** Our award loyaltyProgram enum via the explicit config map — null when the
@@ -81,6 +88,7 @@ export interface MilesPromoFeed {
 // ── Parsing (pure — tests feed it the captured fixture) ──────────────────────
 
 const AIRLINE_HEADING = "Buy Miles Promotions From Airlines"
+const HOTEL_HEADING = "Buy Points Promotions From Hotels"
 
 function stripTags(html: string): string {
   return html.replace(/<[^>]+>/g, " ").replace(/&nbsp;|\u00a0/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim()
@@ -125,22 +133,22 @@ export interface ParseOutcome {
   anomaly: string | null
 }
 
-export function parsePromoPage(
+/** One promotions section (airline or hotel): heading → next h2, pt-row table. */
+function parseSection(
   html: string,
+  heading: string,
+  category: "airline" | "hotel",
+  map: Record<string, string>,
+  rates: Map<string, number>,
   cfg: MilesPromosConfig,
   opts: { now: Date; fetchedAt: string },
-): ParseOutcome {
-  const headingAt = html.indexOf(AIRLINE_HEADING)
-  if (headingAt < 0) {
-    return { promos: [], anomaly: `airline promotions heading not found — page format changed (expected "${AIRLINE_HEADING}")` }
-  }
-  // Only the airline section: from its heading to the next h2 (the hotel
-  // section) — hotel and other-transport rows can never leak in.
-  const nextH2 = html.indexOf("<h2", headingAt + AIRLINE_HEADING.length)
+): MilesPromo[] | null {
+  const headingAt = html.indexOf(heading)
+  if (headingAt < 0) return null
+  const nextH2 = html.indexOf("<h2", headingAt + heading.length)
   const section = html.slice(headingAt, nextH2 > 0 ? nextH2 : undefined)
 
   const rows = section.match(/<div class="pt-row">[\s\S]*?(?=<div class="pt-row">|$)/g) ?? []
-  const rates = statedRates(html)
   const today = opts.now.toISOString().slice(0, 10)
   const promos: MilesPromo[] = []
 
@@ -162,8 +170,9 @@ export function parsePromoPage(
     const rate = paren !== null ? rates.get(paren) ?? null : null
 
     promos.push({
+      category,
       sourceProgramName: program,
-      loyaltyProgram: paren !== null ? cfg.programMap[paren] ?? null : null,
+      loyaltyProgram: paren !== null ? map[paren] ?? null : null,
       // Expired DATED promos never qualify; an undated row is listed as
       // current by the source, so it stays active with endDateKnown false.
       active: validUntil === null || validUntil >= today,
@@ -178,11 +187,31 @@ export function parsePromoPage(
       fetchedAt: opts.fetchedAt,
     })
   }
+  return promos
+}
 
-  if (promos.length === 0) {
+export function parsePromoPage(
+  html: string,
+  cfg: MilesPromosConfig,
+  opts: { now: Date; fetchedAt: string },
+): ParseOutcome {
+  const rates = statedRates(html)
+
+  // Airline section: its absence or emptiness is a format anomaly — the
+  // original contract, unchanged.
+  const airline = parseSection(html, AIRLINE_HEADING, "airline", cfg.programMap, rates, cfg, opts)
+  if (airline === null) {
+    return { promos: [], anomaly: `airline promotions heading not found — page format changed (expected "${AIRLINE_HEADING}")` }
+  }
+  if (airline.length === 0) {
     return { promos: [], anomaly: "airline section present but zero promo rows parsed — page format changed" }
   }
-  return { promos, anomaly: null }
+
+  // Hotel section: additive, best-effort. Its absence only means no hotel
+  // enrichment — airline behavior is never held hostage to it.
+  const hotel = parseSection(html, HOTEL_HEADING, "hotel", cfg.hotelProgramMap ?? {}, rates, cfg, opts) ?? []
+
+  return { promos: [...airline, ...hotel], anomaly: null }
 }
 
 // ── Fetch + cache ────────────────────────────────────────────────────────────

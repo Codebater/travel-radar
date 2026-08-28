@@ -23,6 +23,7 @@ import { type TripType } from "../fareradar/config.js"
 import { leadVerdict, type StoredMarketVerdict } from "../market/verdict.js"
 import { listTrips, type StoredTrip } from "../trips/store.js"
 import { listStayCandidates, type StayCandidateRow } from "../stays/candidates.js"
+import { loadStayUniverse } from "../stays/registry.js"
 import { assembleTripOffers, type InspectableOffer, type PackageAlternative } from "../offers/assemble.js"
 import {
   buildStayLocator,
@@ -129,6 +130,9 @@ export interface PackageDealCard {
 
 export interface StayDealCard {
   candidate: StayCandidateRow
+  /** The property's EXPLICIT hotel-loyalty affiliation from config — data for
+   *  the page's buy-points promo join, never inferred from names. */
+  loyaltyProgram: string | null
   locator: StoredLocator | null
   state: OfferState | null
   freshness: Freshness | null
@@ -334,10 +338,21 @@ function stayCard(db: DB, candidate: StayCandidateRow, now: Date): StayDealCard 
   const verification = locator ? latestVerification(db, locator.id) : null
   return {
     candidate,
+    loyaltyProgram: propertyLoyaltyProgram(candidate.propertyId),
     locator,
     state: locator ? offerStateFor(verification) : null,
     freshness: locator ? freshnessFor(locator, verification, now) : null,
     variants: [],
+  }
+}
+
+/** Explicit affiliation from config/stay-properties.json — null unless stated. */
+function propertyLoyaltyProgram(propertyId: string): string | null {
+  try {
+    const p = loadStayUniverse().properties.find(p => p.id === propertyId)
+    return p?.loyaltyProgram ?? null
+  } catch {
+    return null
   }
 }
 

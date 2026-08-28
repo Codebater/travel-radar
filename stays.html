@@ -43,6 +43,7 @@
 </header>
 <div class="totals" id="totals">loading…</div>
 <main id="main"><div class="empty">loading…</div></main>
+<script src="./promo-enrich.js"></script>
 <script>
 const fmt = new Intl.NumberFormat("en-US")
 const money = (n, c) => n == null ? "—" : `${fmt.format(Math.round(n))} ${c}`
@@ -50,6 +51,15 @@ const money = (n, c) => n == null ? "—" : `${fmt.format(Math.round(n))} ${c}`
 async function load() {
   const res = await fetch("/api/stays/deals?limit=40")
   const data = await res.json()
+
+  // Hotel buy-points promos: a promotion on BUYING the property's loyalty
+  // currency, never a discount on the cash rate shown. Joined only via the
+  // property's explicit affiliation; a failed feed just means no badges.
+  let hotelPromos = {}
+  try {
+    hotelPromos = PromoEnrich.activePromoIndex(await (await fetch("/api/promos/miles")).json(), "hotel")
+  } catch (e) { hotelPromos = {} }
+  const propertyLoyalty = data.propertyLoyalty || {}
   const t = data.totals
   document.getElementById("totals").textContent =
     `${t.decisions} decisions · ${t.candidates} candidates ≥ ${data.threshold} · ` +
@@ -102,7 +112,14 @@ async function load() {
         <div><b>evidence</b> ${c.verificationLevel} · ${c.confirmationState.replace(/_/g, " ")}${c.verificationStatus === "verified" ? " · GOOGLE-VERIFIED" : ""}</div>
         <div><b>concepts</b> rel ${c.relativeScore ?? "—"} · abs ${c.absoluteValueScore ?? "—"} · evid ${c.evidenceScore ?? "—"} · act ${c.actionabilityScore ?? "—"}</div>
       </div>
-      <div class="badges">${c.reasons.map(r =>
+      <div class="badges">${(() => {
+        const promo = propertyLoyalty[c.propertyId] ? hotelPromos[propertyLoyalty[c.propertyId]] : null
+        if (!promo) return ""
+        const ends = PromoEnrich.promoEndsText(promo)
+        const rate = PromoEnrich.promoRateText(promo)
+        const tip = "Points purchase promo — not a discount on this cash hotel rate." + (rate ? " " + rate : "")
+        return `<span class="badge good" title="${tip}">💳 ${PromoEnrich.hotelPromoBadgeText(promo)}${ends ? " · " + ends : ""}</span>`
+      })()}${c.reasons.map(r =>
         `<span class="badge ${/CONFIRMED|TAX_INCLUDED|ALL_INCLUSIVE_UNDER|NEW_OBSERVED/.test(r) ? "good" : /THIN|META_ONLY|SPREAD_HIGH|STALE|NO_BASELINE|PROPERTY_DEFAULT/.test(r) ? "warn" : ""}">${r}</span>`).join("")}
       </div>
       <div class="srcline">${sourceLabel}${crossLine}</div>`
