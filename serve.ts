@@ -40,6 +40,7 @@ import { immediatesToday, listEvents, listNotifications, listQueue } from "./not
 import { isQuiet, localDay } from "./notifications/quiet-hours.js"
 import { credentialWarnings } from "./notifications/credentials.js"
 import { listStayCandidates, stayCandidateTotals } from "./stays/candidates.js"
+import { listHotelAwards } from "./providers/hotel-awards/store.js"
 import { loadStayUniverse } from "./stays/registry.js"
 import { loadStaysConfig } from "./stays/config.js"
 import { listStayWindows } from "./stays/windows.js"
@@ -467,6 +468,45 @@ const server = http.createServer(async (req, res) => {
       const feed = await getMilesPromoFeed({ forceRefresh: boolParam(url.searchParams.get("refresh")) })
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify(feed, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/hotel-awards — Phase HA-1 read-out. READ-ONLY over the
+  // append-only hotel_award_observations; no valuation, no ranking, no merge
+  // with cash stays. Points are per-night as stored (never a synthesized
+  // total); cash is context, never a comparison. limit + program only.
+  if (url.pathname === "/api/hotel-awards") {
+    try {
+      const db = getDb()
+      const limitRaw = Number(url.searchParams.get("limit") ?? 100)
+      const program = url.searchParams.get("program") ?? undefined
+      const observations = listHotelAwards(db, {
+        limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100,
+        program,
+      }).map(o => {
+        const locator = o.locatorId !== null ? getOfferLocator(db, o.locatorId) : null
+        return {
+          ...o,
+          navigation: locator
+            ? {
+                quality: locator.navigationQuality,
+                url: locator.deepLinkUrl ?? locator.searchReplayUrl ?? locator.landingUrl,
+              }
+            : { quality: "UNAVAILABLE", url: null },
+        }
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        disclaimer: "Points STAYS observed by this radar, append-only and SEPARATE from cash stays. Points are per-night as the source stated them — never a synthesized stay total. Cash figures are context only, never a comparison. Availability 'unknown' means a historical/period observation, not a live hold.",
+        programs: [...new Set(listHotelAwards(db, { limit: 500 }).map(o => o.program))].sort(),
+        providers: [...new Set(listHotelAwards(db, { limit: 500 }).map(o => o.provider))].sort(),
+        count: observations.length,
+        observations,
+      }, null, 2))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))

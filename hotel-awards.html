@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hotel Award Radar</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0b0f14; color: #d7dde5; font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
+  header { padding: 18px 22px 10px; border-bottom: 1px solid #1d2733; }
+  h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: 2px; color: #7fd1b9; }
+  .sub { color: #6b7a8c; font-size: 12px; max-width: 900px; }
+  a.back { color: #7fd1b9; font-size: 12px; text-decoration: none; }
+  main { padding: 14px 22px 40px; max-width: 1040px; }
+  .form { border: 1px solid #1d2733; border-radius: 8px; padding: 12px 14px; background: #0f1520;
+          display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 14px; }
+  .form label { color: #6b7a8c; font-size: 12px; margin-right: 4px; }
+  .form select, .form input { background: #131b27; border: 1px solid #314052; color: #d7dde5;
+          border-radius: 6px; padding: 4px 8px; font: inherit; }
+  .form input { width: 200px; }
+  .count { color: #8fa1b5; font-size: 12px; margin: 4px 0 10px; }
+  .card { border: 1px solid #1d2733; border-radius: 10px; padding: 12px 15px 10px; margin: 0 0 11px; background: #0f1520; }
+  .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
+  .title { font-size: 15px; color: #eef3f8; font-weight: 700; }
+  .kind { font-size: 10px; letter-spacing: 1px; padding: 2px 8px; border-radius: 9px; border: 1px solid #314052; color: #8fa1b5; }
+  .kind.roame { border-color: #6b5327; color: #ffd479; }
+  .kind.gondola { border-color: #2c5d4b; color: #7fd1b9; }
+  .points { font-size: 19px; color: #ffd479; white-space: nowrap; text-align: right; }
+  .per { font-size: 11px; color: #6b7a8c; }
+  .line { color: #9fb0c0; font-size: 13px; margin-top: 2px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
+  .tag { font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid #314052; color: #8fa1b5; }
+  .tag.warn { border-color: #6b5327; color: #ffd479; }
+  .bounded { color: #8fa1b5; font-size: 11.5px; margin-top: 6px; font-style: italic; }
+  .meta { color: #55636f; font-size: 11.5px; margin-top: 5px; }
+  .btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid #314052;
+         color: #d7dde5; background: #131b27; text-decoration: none; }
+  .empty { color: #6b7a8c; padding: 24px 0; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>HOTEL AWARD RADAR</h1>
+  <div class="sub" id="disclaimer">loading…</div>
+  <div style="margin-top:6px"><a class="back" href="/observer.html">← Observer</a> · <a class="back" href="/">Search dashboard</a></div>
+</header>
+<main>
+  <div class="form" id="form">
+    <span><label>Program</label><select id="program"><option value="">All programs</option></select></span>
+    <span><label>Provider</label><select id="provider"><option value="">All</option></select></span>
+    <span><label>Property</label><input id="q" placeholder="text search"></span>
+  </div>
+  <div class="count" id="count"></div>
+  <div id="results"><div class="empty">loading award-stay observations…</div></div>
+</main>
+<script>
+const fmt = new Intl.NumberFormat("en-US")
+const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))
+const money = (a, c) => (c === "USD" ? "$" : c === "EUR" ? "€" : (c ? c + " " : "")) + fmt.format(Math.round(a))
+const PROG = { WORLD_OF_HYATT: "World of Hyatt", HILTON_HONORS: "Hilton Honors", MARRIOTT_BONVOY: "Marriott Bonvoy",
+  IHG_ONE_REWARDS: "IHG One Rewards", ACCOR_ALL: "Accor ALL", WYNDHAM_REWARDS: "Wyndham Rewards",
+  CHOICE_PRIVILEGES: "Choice Privileges" }
+const prog = p => PROG[p] || p
+const provLabel = p => p === "roame_hotels" ? "Roame" : p === "gondola_hotels" ? "Gondola" : p
+
+let ALL = []
+
+function action(o) {
+  const n = o.navigation
+  if (!n || !n.url || n.quality === "UNAVAILABLE")
+    return `<span class="meta">no trustworthy link</span>`
+  const label = n.quality === "EXACT_DEEP_LINK" ? "Check & book at provider"
+    : n.quality === "SEARCH_REPLAY_LINK" ? "Open provider search" : "Open provider page"
+  return `<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+}
+
+function card(o) {
+  // Points are PER-NIGHT as stored — never a synthesized stay total.
+  const pts = o.pointsPerNight != null ? `${fmt.format(o.pointsPerNight)}<span class="per"> pts/night</span>`
+    : (o.quoteBasis === "full_stay" && o.pointsTotal != null ? `${fmt.format(o.pointsTotal)}<span class="per"> pts total (stated)</span>` : "—")
+  const room = o.roomName ? `${esc(o.roomName)}${o.roomClass ? " · " + esc(o.roomClass) : ""}`
+    : (o.roomClass ? esc(o.roomClass) : "room not stated")
+  const taxes = o.taxesFeesState === "stated" && o.taxesFeesAmount != null
+    ? `taxes/fees ${money(o.taxesFeesAmount, o.taxesFeesCurrency)}`
+    : `taxes/fees ${esc(o.taxesFeesState)}`
+  const cash = o.cashComparisonAmount != null
+    ? `<span class="tag">cash context ${money(o.cashComparisonAmount, o.cashComparisonCurrency)} — not a comparison</span>` : ""
+  const fresh = o.sourceFreshness ? `source freshness ${esc(String(o.sourceFreshness).slice(0, 16))}` : "source freshness unknown"
+  const bounded = o.availabilityState === "unknown"
+    ? `<div class="bounded">Historical/period award observation — not a live hold.</div>` : ""
+  return `<div class="card">
+    <div class="top">
+      <div>
+        <span class="kind ${o.provider === 'roame_hotels' ? 'roame' : 'gondola'}">${esc(provLabel(o.provider))}</span>
+        <div class="title">${esc(o.propertyName)}</div>
+        <div class="line">${esc(prog(o.program))} · ${esc(o.checkIn)} → ${esc(o.checkOut)} · ${o.nights} night${o.nights === 1 ? "" : "s"} · ${room}</div>
+      </div>
+      <div><div class="points">${pts}</div><div class="per">${esc(o.quoteBasis.replace("_", " "))}</div></div>
+    </div>
+    <div class="tags">
+      <span class="tag ${o.taxesFeesState === "stated" ? "" : "warn"}">${taxes}</span>
+      ${cash}
+      <span class="tag">availability ${esc(o.availabilityState)}</span>
+      <span class="tag">search ${esc(o.searchState)}</span>
+      ${action(o)}
+    </div>
+    ${bounded}
+    <div class="meta">${fresh} · observed ${esc(String(o.fetchedAt).slice(0, 16))} · ${esc(o.verificationLevel)}</div>
+  </div>`
+}
+
+function apply() {
+  const pv = document.getElementById("provider").value
+  const q = document.getElementById("q").value.trim().toLowerCase()
+  let rows = ALL
+  if (pv) rows = rows.filter(o => o.provider === pv)
+  if (q) rows = rows.filter(o => (o.propertyName || "").toLowerCase().includes(q))
+  document.getElementById("count").textContent = `${rows.length} observation${rows.length === 1 ? "" : "s"} (newest first)`
+  document.getElementById("results").innerHTML = rows.length
+    ? rows.map(card).join("")
+    : '<div class="empty">No award-stay observations match — run npm run hotel-awards:probe.</div>'
+}
+
+async function load() {
+  const program = document.getElementById("program").value
+  const res = await fetch("/api/hotel-awards?limit=300" + (program ? "&program=" + encodeURIComponent(program) : ""))
+  const data = await res.json()
+  document.getElementById("disclaimer").textContent = data.disclaimer || ""
+  // Populate program/provider filters once (from the full set).
+  const progSel = document.getElementById("program")
+  if (progSel.options.length === 1) for (const p of data.programs || []) progSel.add(new Option(prog(p), p))
+  const provSel = document.getElementById("provider")
+  if (provSel.options.length === 1) for (const p of data.providers || []) provSel.add(new Option(provLabel(p), p))
+  ALL = data.observations || []
+  apply()
+}
+
+document.getElementById("program").addEventListener("change", load)
+document.getElementById("provider").addEventListener("change", apply)
+document.getElementById("q").addEventListener("input", apply)
+load().catch(err => { document.getElementById("results").innerHTML = '<div class="empty">failed to load: ' + esc(err.message) + "</div>" })
+</script>
+</body>
+</html>
