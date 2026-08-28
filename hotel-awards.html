@@ -32,6 +32,10 @@
   .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; align-items: center; }
   .tag { font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid #314052; color: #8fa1b5; }
   .tag.warn { border-color: #6b5327; color: #ffd479; }
+  .perk { letter-spacing: 0.5px; font-weight: 700; }
+  .perk.ok { border-color: #2c5d4b; color: #7fd1b9; }
+  .perk.buy { border-color: #6b5327; color: #ffd479; }
+  .perk.req { border-color: #3a4656; color: #8fa1b5; border-style: dashed; }
   .bounded { color: #8fa1b5; font-size: 11.5px; margin-top: 6px; font-style: italic; }
   .meta { color: #55636f; font-size: 11.5px; margin-top: 5px; }
   .btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid #314052;
@@ -75,6 +79,33 @@ function action(o) {
   return `<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
 }
 
+// Verified perk badges — display only. Eligibility is DECLARED config, never
+// inferred; nothing here ranks, values or synthesizes a number.
+function perkBadges(o) {
+  return (o.perks || []).map(p => {
+    const cls = p.eligibility === "eligible" ? "ok" : p.eligibility === "purchasable" ? "buy" : "req"
+    const suffix = p.eligibility === "eligible" ? ""
+      : p.eligibility === "purchasable"
+        ? (p.acquisition && p.acquisition.cost && p.acquisition.cost.amount > 0
+            ? " · join " + money(p.acquisition.cost.amount, p.acquisition.cost.currency) + "/yr"
+            : " · join free")
+        : " · needs status/card"
+    const rateMark = p.appliesTo === "cash" ? " (cash rates only)" : ""
+    // Only a source_page rule may present itself as verified; anything else
+    // is marked unverified and can never read as an optimizer-grade perk.
+    const verified = p.verification === "source_page"
+    const trust = verified
+      ? " Source-verified " + p.verifiedAt + "."
+      : " UNVERIFIED — encoded from program knowledge, not checked against the official source; re-verify before relying on it."
+    const tip = p.displayBenefit
+      + (p.bookingChannel ? " — " + p.bookingChannel : "")
+      + " Requires: " + p.requires.join(" or ") + "."
+      + trust
+    const unvMark = verified ? "" : " · unverified"
+    return `<span class="tag perk ${verified ? cls : "req"}" title="${esc(tip)}">${esc(p.badgeLabel)}${esc(rateMark)}${esc(suffix)}${esc(unvMark)}</span>`
+  }).join("")
+}
+
 function card(o) {
   // Points are PER-NIGHT as stored — never a synthesized stay total.
   const pts = o.pointsPerNight != null ? `${fmt.format(o.pointsPerNight)}<span class="per"> pts/night</span>`
@@ -99,6 +130,7 @@ function card(o) {
       <div><div class="points">${pts}</div><div class="per">${esc(o.quoteBasis.replace("_", " "))}</div></div>
     </div>
     <div class="tags">
+      ${perkBadges(o)}
       <span class="tag ${o.taxesFeesState === "stated" ? "" : "warn"}">${taxes}</span>
       ${cash}
       <span class="tag">availability ${esc(o.availabilityState)}</span>

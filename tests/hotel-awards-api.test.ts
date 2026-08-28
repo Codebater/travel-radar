@@ -12,16 +12,23 @@ import fs from "fs"
 import { beforeEach, describe, expect, it } from "vitest"
 import { createMemoryDb, type DB } from "../db/index.js"
 import { insertHotelAwards, listHotelAwards } from "../providers/hotel-awards/store.js"
+import { applicablePerks, loadEntitlements, loadHotelPerkRules } from "../providers/hotel-awards/perks.js"
 import type { NormalizedHotelAward } from "../providers/hotel-awards/types.js"
 
 // The route body is small and lives in serve.ts (which starts a listener on
 // import); replicate its exact read+serialize here so we test the same logic
 // without booting the server. Kept in lockstep with serve.ts /api/hotel-awards.
 function hotelAwardsPayload(db: DB, opts: { limit?: number; program?: string } = {}) {
+  const perkRules = loadHotelPerkRules(true)
+  const entitlements = loadEntitlements(true)
   const observations = listHotelAwards(db, {
     limit: opts.limit ?? 100,
     program: opts.program,
-  }).map(o => ({ ...o, navigation: { quality: "UNAVAILABLE", url: null } }))
+  }).map(o => ({
+    ...o,
+    perks: applicablePerks({ program: o.program, chain: o.chain, nights: o.nights, checkIn: o.checkIn }, perkRules, entitlements),
+    navigation: { quality: "UNAVAILABLE", url: null },
+  }))
   return {
     programs: [...new Set(listHotelAwards(db, { limit: 500 }).map(o => o.program))].sort(),
     providers: [...new Set(listHotelAwards(db, { limit: 500 }).map(o => o.provider))].sort(),
@@ -99,6 +106,26 @@ describe("the /api/hotel-awards payload", () => {
     expect(hotelAwardsPayload(db).observations[0].providerPropertyRef).toBe("new")
   })
 
+  it("perk badges are pure enrichment — every stored observation field is unchanged and no number is synthesized", () => {
+    insertHotelAwards(db, [award({ program: "MARRIOTT_BONVOY", sourceProgramName: "MARRIOTT", chain: "Marriott" })])
+    const o = hotelAwardsPayload(db).observations[0]
+    // The 5-night Marriott stay picks up the verified 5th-night rule…
+    const b = o.perks.find(p => p.ruleId === "marriott-award-5th-night-free")
+    expect(b).toBeDefined()
+    expect(b!.eligibility).toBe("purchasable")             // nothing held by default — never inferred
+    // …while the observation itself is exposed exactly as stored.
+    expect(o.pointsPerNight).toBe(4500)
+    expect(o.pointsTotal).toBeNull()                       // a rule NEVER licenses avg × nights
+    expect(o.quoteBasis).toBe("per_night")
+    expect(listHotelAwards(db, { limit: 10 })[0].pointsTotal).toBeNull()
+  })
+
+  it("a stay below a rule's minimum nights gets no badge for it", () => {
+    insertHotelAwards(db, [award({ program: "MARRIOTT_BONVOY", sourceProgramName: "MARRIOTT", chain: "Marriott", checkOut: "2026-11-24", nights: 3 })])
+    const o = hotelAwardsPayload(db).observations[0]
+    expect(o.perks.find(p => p.ruleId === "marriott-award-5th-night-free")).toBeUndefined()
+  })
+
   it("an empty DB serializes cleanly", () => {
     const p = hotelAwardsPayload(db)
     expect(p.count).toBe(0)
@@ -128,6 +155,16 @@ describe("serve.ts wiring + page honesty", () => {
     expect(html).toMatch(/cash context[^<]*not a comparison/)
     // No multiplication of per-night into a total anywhere in the card code.
     expect(html).not.toMatch(/pointsPerNight\s*\*/)
+    // Perk badges render all three declared eligibility states, display-only.
+    expect(html).toContain("perkBadges(o)")
+    expect(html).toContain("needs status/card")
+    expect(html).toContain("join free")
+    expect(html).toMatch(/display only/i)
+    // Only source_page rules may present as verified; the rest are marked.
+    expect(html).toContain('p.verification === "source_page"')
+    expect(html).toContain("Source-verified")
+    expect(html).toContain("UNVERIFIED")
+    expect(html).toContain("· unverified")
     expect(html).not.toMatch(/\*\s*o?\.?nights/)
   })
 

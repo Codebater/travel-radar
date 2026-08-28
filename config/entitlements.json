@@ -1,0 +1,57 @@
+{
+  "description": "Declared hotel loyalty entitlements — memberships, statuses, cards, certificates. Config, never inference: a perk is 'eligible' ONLY when its requirement key appears in held.* below; nothing downstream may guess an entitlement from a booking history, a name, or a card product. held.* lists are EMPTY until the user declares what they actually hold. purchasable[] declares acquisition paths the radar may surface (with the acquisition cost that must be included when such a perk is ever used in arithmetic). certificates[] is declared quantity ONLY — consumption state is a later phase and does not live in config.",
+  "updated": "2026-08-28",
+  "held": {
+    "memberships": [],
+    "statuses": [],
+    "cards": []
+  },
+  "purchasable": [
+    {
+      "key": "MARRIOTT_BONVOY",
+      "kind": "membership",
+      "program": "MARRIOTT_BONVOY",
+      "acquisitionCost": { "amount": 0, "currency": "USD" },
+      "sourceUrl": "https://www.marriott.com/loyalty.mi",
+      "verifiedAt": "2026-08-28",
+      "note": "Free to join."
+    },
+    {
+      "key": "HILTON_HONORS",
+      "kind": "membership",
+      "program": "HILTON_HONORS",
+      "acquisitionCost": { "amount": 0, "currency": "USD" },
+      "sourceUrl": "https://www.hilton.com/en/hilton-honors/",
+      "verifiedAt": "2026-08-28",
+      "note": "Free to join. Joining alone grants no elite status."
+    },
+    {
+      "key": "IHG_ONE_REWARDS",
+      "kind": "membership",
+      "program": "IHG_ONE_REWARDS",
+      "acquisitionCost": { "amount": 0, "currency": "USD" },
+      "sourceUrl": "https://www.ihg.com/onerewards",
+      "verifiedAt": "2026-08-28",
+      "note": "Free to join."
+    },
+    {
+      "key": "WORLD_OF_HYATT",
+      "kind": "membership",
+      "program": "WORLD_OF_HYATT",
+      "acquisitionCost": { "amount": 0, "currency": "USD" },
+      "sourceUrl": "https://world.hyatt.com",
+      "verifiedAt": "2026-08-28",
+      "note": "Free to join."
+    },
+    {
+      "key": "IHG_AMBASSADOR",
+      "kind": "membership",
+      "program": "IHG_ONE_REWARDS",
+      "acquisitionCost": { "amount": 225, "currency": "USD" },
+      "sourceUrl": "https://www.ihg.com/intercontinental/content/us/en/ambassador/terms-conditions",
+      "verifiedAt": "2026-08-28",
+      "note": "Paid annual InterContinental Ambassador membership. VERIFIED against the official T&C on 2026-08-28: purchase and renewal are each 'USD 225 or 45,000 IHG One Rewards points'. The points alternative cannot be encoded in acquisitionCost (single amount+currency) — this note is its record. This cost MUST be included whenever an Ambassador perk enters any later arithmetic. Purchase/renewal awards the annual Complimentary Weekend Night certificate."
+    }
+  ],
+  "certificates": []
+}

@@ -41,6 +41,7 @@ import { isQuiet, localDay } from "./notifications/quiet-hours.js"
 import { credentialWarnings } from "./notifications/credentials.js"
 import { listStayCandidates, stayCandidateTotals } from "./stays/candidates.js"
 import { listHotelAwards } from "./providers/hotel-awards/store.js"
+import { applicablePerks, loadEntitlements, loadHotelPerkRules, type PerkBadge } from "./providers/hotel-awards/perks.js"
 import { loadStayUniverse } from "./stays/registry.js"
 import { loadStaysConfig } from "./stays/config.js"
 import { listStayWindows } from "./stays/windows.js"
@@ -484,13 +485,29 @@ const server = http.createServer(async (req, res) => {
       const db = getDb()
       const limitRaw = Number(url.searchParams.get("limit") ?? 100)
       const program = url.searchParams.get("program") ?? undefined
+      // Verified perk badges are DISPLAY-ONLY enrichment: a config problem
+      // degrades to no badges plus a stated error — never a broken read-out,
+      // and never any effect on the observations themselves.
+      let perkRules: ReturnType<typeof loadHotelPerkRules> | null = null
+      let entitlements: ReturnType<typeof loadEntitlements> | null = null
+      let perksError: string | null = null
+      try {
+        perkRules = loadHotelPerkRules()
+        entitlements = loadEntitlements()
+      } catch (err) {
+        perksError = (err as Error).message
+      }
       const observations = listHotelAwards(db, {
         limit: Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 100,
         program,
       }).map(o => {
         const locator = o.locatorId !== null ? getOfferLocator(db, o.locatorId) : null
+        const perks: PerkBadge[] = perkRules && entitlements
+          ? applicablePerks({ program: o.program, chain: o.chain, nights: o.nights, checkIn: o.checkIn }, perkRules, entitlements)
+          : []
         return {
           ...o,
+          perks,
           navigation: locator
             ? {
                 quality: locator.navigationQuality,
@@ -504,6 +521,7 @@ const server = http.createServer(async (req, res) => {
         disclaimer: "Points STAYS observed by this radar, append-only and SEPARATE from cash stays. Points are per-night as the source stated them — never a synthesized stay total. Cash figures are context only, never a comparison. Availability 'unknown' means a historical/period observation, not a live hold.",
         programs: [...new Set(listHotelAwards(db, { limit: 500 }).map(o => o.program))].sort(),
         providers: [...new Set(listHotelAwards(db, { limit: 500 }).map(o => o.provider))].sort(),
+        perksError,
         count: observations.length,
         observations,
       }, null, 2))
