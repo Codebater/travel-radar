@@ -48,6 +48,7 @@ import { currentMarketVerdictsForTrip, marketVerdictTotals } from "./market/verd
 import { assembleAllTripOffers } from "./offers/assemble.js"
 import { loadFareRadarConfig, parseTripType, TRIP_TYPES } from "./fareradar/config.js"
 import { buildDealRadarFeed } from "./dealradar/feed.js"
+import { getMilesPromoFeed } from "./providers/promos/awardwallet-blog.js"
 import { recheckTopFares, runFareRadar } from "./fareradar/engine.js"
 import { candidatesForRun, latestFareRadarRun } from "./fareradar/store.js"
 import { getLocator as getOfferLocator } from "./offers/locators.js"
@@ -429,6 +430,22 @@ const server = http.createServer(async (req, res) => {
     } catch (err) {
       const status = err instanceof BadRequest ? 400 : 500
       res.writeHead(status, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/promos/miles — the Miles Promo Feed: airline buy-miles
+  // promotions from AwardWallet's public promotions page. Enrichment metadata
+  // only; award results stay the source of truth. Cached for the configured
+  // TTL (a blocked answer included — no retry storms); ?refresh=1 refetches.
+  if (url.pathname === "/api/promos/miles") {
+    try {
+      const feed = await getMilesPromoFeed({ forceRefresh: boolParam(url.searchParams.get("refresh")) })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(feed, null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
     return

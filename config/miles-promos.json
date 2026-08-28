@@ -1,0 +1,29 @@
+{
+  "description": "Miles Promo Feed policy — promotion ENRICHMENT only. One keyless fetch of AwardWallet's public current buy-points/miles promotions page; only the airline table is parsed. Award results remain the source of truth for miles/taxes/availability — a promo never changes them, and an effective cost is only ever echoed when the source states one. Program identity is this explicit map (source's parenthesized program name, lowercased → our award loyaltyProgram enum) — never a fuzzy name heuristic; unmapped rows stay in the feed but enrich nothing.",
+  "updated": "2026-08-28",
+
+  "source": {
+    "url": "https://awardwallet.com/blog/current-promotions-buy-points-miles/",
+    "ttlHours": 18,
+    "timeoutMs": 25000,
+    "note": "Promos move daily at most; one polite request per TTL. A blocked answer (403/429/503/bot-wall) is cached like any other outcome so it is NEVER retried in a loop — only an explicit forced refresh asks again."
+  },
+
+  "programMap": {
+    "flying blue": "FLYING_BLUE",
+    "flying club": "VIRGIN_ATLANTIC",
+    "trueblue": "JETBLUE",
+    "aadvantage": "AMERICAN",
+    "etihad guest": "ETIHAD",
+    "privilege club": "QATAR",
+    "miles and more": "MILES_AND_MORE",
+    "lifemiles": "LIFEMILES",
+    "aeroplan": "AEROPLAN",
+    "mileage plan": "ALASKA",
+    "mileageplus": "UNITED",
+    "skymiles": "DELTA",
+    "executive club": "BRITISH_AIRWAYS",
+    "frequent flyer": "QANTAS",
+    "krisflyer": "SINGAPORE"
+  }
+}
