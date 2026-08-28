@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Flight Search Dashboard</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="./promo-enrich.js"></script>
 <script>
 tailwind.config = {
   theme: {
@@ -42,6 +43,9 @@ tailwind.config = {
   .badge-red { background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3); }
   .badge-blue { background: rgba(56,189,248,0.15); color: #38bdf8; border: 1px solid rgba(56,189,248,0.3); }
   .badge-purple { background: rgba(168,85,247,0.15); color: #a855f7; border: 1px solid rgba(168,85,247,0.3); }
+  /* Award card whose program has a miles-PURCHASE promo (never a fare discount) */
+  .promo-card { border-color: rgba(251,191,36,0.4) !important; }
+  .promo-card:hover { border-color: rgba(251,191,36,0.65) !important; }
   .rec-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); }
   .rec-1 { border-left: 4px solid #34d399; }
   .rec-2 { border-left: 4px solid #38bdf8; }
@@ -242,6 +246,8 @@ tailwind.config = {
           <button onclick="setFilter('all')" id="filter-all" class="px-3 py-1.5 rounded-md text-xs font-medium transition-all bg-gray-700 text-white">All</button>
           <button onclick="setFilter('cash')" id="filter-cash" class="px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-400 hover:text-white">Cash</button>
           <button onclick="setFilter('award')" id="filter-award" class="px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-400 hover:text-white">Award</button>
+          <button onclick="setFilter('milessale')" id="filter-milessale" title="Award results whose loyalty program currently has a miles-purchase promotion"
+            class="hidden px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-400 hover:text-white">💳 Miles sale</button>
         </div>
 
         <select onchange="setSort(this.value)" class="bg-surface border border-gray-700 text-sm rounded-lg px-3 py-1.5 text-gray-300 focus:outline-none focus:border-accent">
@@ -289,6 +295,25 @@ let currentClass = 'all';
 let currentFilter = 'all';
 let currentSort = 'value';
 let flexDays = 0;
+
+// Miles-purchase promo enrichment (presentation only): active mapped promos
+// by loyaltyProgram. Empty when the feed is unavailable — award results are
+// unaffected and the Miles sale filter hides itself.
+let promoIndex = {};
+
+async function loadMilesPromos() {
+  try {
+    const res = await fetch('./api/promos/miles');
+    promoIndex = PromoEnrich.activePromoIndex(await res.json());
+  } catch (e) {
+    promoIndex = {};
+  }
+  const btn = document.getElementById('filter-milessale');
+  const available = Object.keys(promoIndex).length > 0;
+  if (btn) btn.classList.toggle('hidden', !available);
+  if (!available && currentFilter === 'milessale') setFilter('all');
+  else if (dashboardData) render();
+}
 
 // RT pairing state
 let rtMode = false;          // true if searching round trip
@@ -576,6 +601,16 @@ function renderFlightCard(flight, idx) {
     const cppClass = flight.cppValue ? getCppClass(flight.cppValue) : 'cpp-low';
     const seats = flight.availableSeats ? `${flight.availableSeats} seat${flight.availableSeats > 1 ? 's' : ''}` : '';
 
+    // Miles-purchase promo enrichment: a promotion on BUYING this program's
+    // miles — never a discount on this fare. Metadata only; miles/taxes/
+    // ordering/recommendations are untouched.
+    const promo = flight.pointsProgram ? promoIndex[flight.pointsProgram] : null;
+    const promoBorder = promo ? ' promo-card' : '';
+    const promoEnds = promo ? PromoEnrich.promoEndsText(promo) : null;
+    const promoBadge = promo
+      ? `<span class="badge-yellow text-xs px-2 py-0.5 rounded-full" title="Miles purchase promo: a promotion on buying ${escapeHtml(programName)} miles — not a discount on this award fare">💳 ${escapeHtml(PromoEnrich.promoBadgeText(promo))}${promoEnds ? ' · ' + escapeHtml(promoEnds) : ''}</span>`
+      : '';
+
     let statusBadge = '';
     if (dashboardData?.balances && flight.pointsProgram) {
       const bal = dashboardData.balances.find(b => b.programKey === flight.pointsProgram);
@@ -590,7 +625,7 @@ function renderFlightCard(flight, idx) {
     }
     
     return `
-      <div class="bg-card rounded-xl p-5 border border-gray-700/50 card-enter hover:border-gray-600 fade-in ${selectableClass}" ${selectHandler}>
+      <div class="bg-card rounded-xl p-5 border border-gray-700/50 card-enter hover:border-gray-600 fade-in ${selectableClass}${promoBorder}" ${selectHandler}>
         <div class="flex items-start justify-between mb-3">
           <div class="flex items-center gap-3">
             ${logo ? `<img src="${logo}" class="logo-img" onerror="this.style.display='none'" alt="">` : ''}
@@ -610,6 +645,7 @@ function renderFlightCard(flight, idx) {
         <div class="flex flex-wrap items-center gap-2 mb-3">
           ${dateBadgeHtml}
           ${statusBadge}
+          ${promoBadge}
           ${flight.cppValue ? `<span class="${cppClass} text-sm font-bold">${flight.cppValue}¢/mi</span>` : ''}
           ${seats ? `<span class="text-xs text-gray-500">${seats}</span>` : ''}
           ${flight.roameScore ? `<span class="text-xs text-gray-500">Score: ${flight.roameScore}</span>` : ''}
@@ -859,6 +895,10 @@ function getFilteredFlights() {
     flights = flights.filter(f => f.type === 'cash');
   } else if (currentFilter === 'award') {
     flights = flights.filter(f => f.type === 'award');
+  } else if (currentFilter === 'milessale') {
+    // Award results whose program has an ACTIVE mapped miles-purchase promo.
+    // Pure filter — existing ordering below is untouched.
+    flights = flights.filter(f => PromoEnrich.qualifies(f, promoIndex));
   }
   
   // Sort
@@ -925,10 +965,13 @@ function setClass(cls) {
 
 function setFilter(f) {
   currentFilter = f;
-  ['all','cash','award'].forEach(v => {
-    document.getElementById('filter-'+v).className = v === f
+  ['all','cash','award','milessale'].forEach(v => {
+    const el = document.getElementById('filter-'+v);
+    if (!el) return;
+    const hidden = v === 'milessale' && Object.keys(promoIndex).length === 0;
+    el.className = (hidden ? 'hidden ' : '') + (v === f
       ? 'px-3 py-1.5 rounded-md text-xs font-medium transition-all bg-gray-700 text-white'
-      : 'px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-400 hover:text-white';
+      : 'px-3 py-1.5 rounded-md text-xs font-medium transition-all text-gray-400 hover:text-white');
   });
   render();
 }
@@ -1025,6 +1068,10 @@ async function runSearchRequest({ from, to, date, refresh = false, verify = fals
   const flexLabel = flexDays > 0 ? ` (±${flexDays} day${flexDays > 1 ? 's' : ''})` : '';
   document.getElementById('loadingText').textContent =
     `${refresh ? 'Refreshing live prices for' : 'Searching'} ${from} → ${to}${tripType === 'ONE_WAY' ? ' (one way)' : ''}${flexLabel} across all programs...`;
+
+  // Refresh promo enrichment alongside the search (server-side cached; a
+  // failure only hides the Miles sale filter, never the results).
+  loadMilesPromos();
 
   try {
     const params = new URLSearchParams({ from, to, date, return: ret, class: cls, flex: String(flexDays), tripType });
@@ -1202,6 +1249,9 @@ async function init() {
 }
 
 init();
+// Miles-purchase promos load alongside the results; a failed feed leaves the
+// dashboard fully functional with the Miles sale filter hidden.
+loadMilesPromos();
 </script>
 </body>
 </html>
