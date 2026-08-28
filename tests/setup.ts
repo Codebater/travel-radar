@@ -45,6 +45,10 @@ process.env.CHECK24_PACKAGES_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
 // The FX source is keyless too; same treatment.
 process.env.MARKET_FX_API_BASE = "http://127.0.0.1:9/blocked-in-tests"
 
+// The Gondola MCP endpoint is keyless too — a hotel-award test that forgets
+// to stub it must fail fast, never reach the real server.
+process.env.HOTEL_AWARDS_MCP_URL = "http://127.0.0.1:9/blocked-in-tests"
+
 // Backups go to a throwaway directory for the same reason the database does.
 // Without this, any test that runs the scheduler writes a snapshot of the test
 // database into the operator's REAL backup set — which then looks like the

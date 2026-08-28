@@ -90,7 +90,9 @@
     "offers:recheck": "tsx offers/cli.ts recheck",
     "flights:radar": "tsx fareradar/cli.ts radar",
     "flights:radar-report": "tsx fareradar/cli.ts report",
-    "flights:radar-recheck": "tsx fareradar/cli.ts recheck"
+    "flights:radar-recheck": "tsx fareradar/cli.ts recheck",
+    "hotel-awards:probe": "tsx providers/hotel-awards/cli.ts probe",
+    "hotel-awards:list": "tsx providers/hotel-awards/cli.ts list"
   },
   "name": "awardwiz",
   "engines": {

@@ -5,7 +5,11 @@
   "allowedDomains": {
     "tui_packages": ["www.tui.com"],
     "check24_packages": ["urlaub.check24.de"],
-    "fast_flights": ["www.google.com"],
+    "gondola_hotels": [
+   "gondola.ai",
+   "www.gondola.ai"
+  ],
+  "fast_flights": ["www.google.com"],
     "serpapi": ["www.google.com"],
     "xotelo": ["www.tripadvisor.com"],
     "agoda": ["www.agoda.com"],

@@ -30,7 +30,7 @@ export type NavigationQuality =
   | "PROVIDER_LANDING_LINK"
   | "UNAVAILABLE"
 
-export type OfferKind = "package" | "flight" | "stay"
+export type OfferKind = "package" | "flight" | "stay" | "hotel_award"
 
 export interface BuiltLocator {
   kind: OfferKind

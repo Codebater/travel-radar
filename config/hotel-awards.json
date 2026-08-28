@@ -1,0 +1,31 @@
+{
+  "description": "Hotel Award Radar policy — Phase 1, Gondola MCP only. Config, never code. Observations are append-only and completely separate from cash stays; no valuation, no buy-points math, no ranking exists yet. The request plan (1 search + 2 calls per detail-checked hotel) is printed BEFORE execution and hard-capped.",
+  "updated": "2026-08-28",
+
+  "gondola": {
+    "mcpUrl": "https://mcp.gondola.ai/mcp",
+    "timeoutMs": 30000,
+    "note": "Free anonymous MCP (no key, no account). A 403/429/503 or handshake refusal is BLOCKED: stop, record, never retry within the run."
+  },
+
+  "budget": {
+    "maxCallsPerRun": 8,
+    "detailTopN": 2,
+    "politenessMs": 800,
+    "note": "detailTopN hotels (cheapest by stated points total) additionally get get_multi_night_rates (full-stay confirmation) and get_booking_link. 1 + 2×detailTopN must fit maxCallsPerRun; the CLI refuses otherwise."
+  },
+
+  "programMap": {
+    "wyndham rewards": "WYNDHAM_REWARDS",
+    "ihg one rewards": "IHG_ONE_REWARDS",
+    "marriott bonvoy": "MARRIOTT_BONVOY",
+    "hilton honors": "HILTON_HONORS",
+    "world of hyatt": "WORLD_OF_HYATT",
+    "choice privileges": "CHOICE_PRIVILEGES",
+    "accor live limitless": "ACCOR_ALL",
+    "all - accor live limitless": "ACCOR_ALL",
+    "best western rewards": "BEST_WESTERN_REWARDS",
+    "leaders club": "LEADERS_CLUB",
+    "note": "Source program name (lowercased) → our hotel program enum — the same key space as the buy-points promo feed and stay-property affiliations. An unmapped program keeps the source's own name normalized; nothing is guessed."
+  }
+}
