@@ -8,6 +8,61 @@
     "note": "Free anonymous MCP (no key, no account). A 403/429/503 or handshake refusal is BLOCKED: stop, record, never retry within the run."
   },
 
+  "roame": {
+    "encoreUrl": "https://roame.travel/encore/graphql",
+    "timeoutMs": 30000,
+    "credentialsPath": "~/.openclaw/credentials/roame.json",
+    "note": "Real authenticated award search, from the capturedSearch reference below: query HotelAvailablePeriods(input: HotelRoomPeriodWhereInput!) on /encore/graphql (Apollo client 'encore'). The obsolete /api/graphql pingHotelResult path is GONE — the provider has no graphqlUrl/whereTemplate any more, so it cannot accidentally hit the wrong endpoint. Auth = the SAME session cookie file as the flight scraper; 401/403/429/503 → structured blocked, no retries.",
+    "search": {
+      "roomTypeEnum": "All",
+      "sortByEnum": "AwardPoints",
+      "awardPointsRange": { "start": 1000, "end": 300000 },
+      "cppMin": 0,
+      "maxPages": 2,
+      "note": "roomTypeEnum/sortByEnum are the SERVER-DICTATED casings (the server rejects 'ALL'/'AWARD_POINTS'). maxPages caps pagination for Phase 1; startCursorGT walks pages while hasMore."
+    },
+    "locations": {
+      "bangkok": { "bbox": [100.3, 13.5, 100.9, 13.95], "center": [100.5, 13.75] },
+      "note": "Phase 1 location = an EXPLICIT configured map bbox only ([west, south, east, north] + center [lng, lat]). A requested location with no configured bbox returns structured unconfigured — the provider NEVER geocodes or invents a box from a city string. Add regions here as data."
+    },
+    "capturedSearch": {
+      "capturedAt": "2026-08-28",
+      "endpoint": "https://roame.travel/encore/graphql",
+      "apolloClientName": "encore",
+      "operation": "query HotelAvailablePeriods($input: HotelRoomPeriodWhereInput!)",
+      "variable": "input (NOT where)",
+      "inputShape": {
+        "awardPointsRange": { "start": "hotelPointsRange[0]×1000", "end": "hotelPointsRange[1]≥500 ? 300000 : ×1000" },
+        "cppMin": "hotelCPPMinimum slider",
+        "mileagePrograms": "[MileageProgram] — program filter (HYATT/HILTON/MARRIOTT/ACCOR/WYNDHAM/IHG/CHOICE)",
+        "brands": "[String] — omit when empty (server rejects [] oddly)",
+        "stayDateRange": { "startDate": "yyyy-MM-dd (check-in)", "endDate": "yyyy-MM-dd (check-out)" },
+        "minNights": "nights selector",
+        "roomType": "HotelRoomType enum — value 'All' (server-dictated, NOT 'ALL')",
+        "startCursorGT": "null (pagination cursor)",
+        "sortBy": "HotelSortBy enum — 'AwardPoints' or 'CentsPerPoint' (server-dictated casing)",
+        "mapBoundInput": { "bounding": "GeoJSON {type,coordinates:[lng,lat],bbox:[W,S,E,N]} — LOCATION IS A MAP BOX, not a string", "enforce": true }
+      },
+      "responseFields": {
+        "availableHotels[].hotelDetail": "{id,name,brand,mileageProgram,city,country,url}",
+        "availableRooms[].roomDetail": "{roomCode,roomName,roomType}",
+        "offerPeriods[]": "{avgAwardPoints,avgSurchargeUsd,avgCashPriceUsd,avgCpp,nights,roomCode,roomType,startDate,mileageProgram,offerCode,createTime}",
+        "availabilityPercent": "number",
+        "lastUpdated": "ISO time"
+      },
+      "unitsAndTraps": "avgAwardPoints is a PER-NIGHT average (verified: 4500 pts vs avgCashPriceUsd 104 at avgCpp 2.31 → per-night), NOT a stay total — so mapping must record pointsPerNight and NEVER synthesize a stay total (no avg×nights). avgSurchargeUsd/avgCashPriceUsd are USD (not cents). createTime is source freshness. Programs already the same enum keys as hotelProgramMap. These differ from the provider's current award_points_hundreds×100 / surcharge_int-cents assumptions — a deliberate reason NOT to wire it in without a real logic pass."
+    },
+    "hotelProgramMap": {
+      "HYATT": "WORLD_OF_HYATT",
+      "HILTON": "HILTON_HONORS",
+      "MARRIOTT": "MARRIOTT_BONVOY",
+      "ACCOR": "ACCOR_ALL",
+      "WYNDHAM": "WYNDHAM_REWARDS",
+      "IHG": "IHG_ONE_REWARDS",
+      "CHOICE": "CHOICE_PRIVILEGES"
+    }
+  },
+
   "budget": {
     "maxCallsPerRun": 8,
     "detailTopN": 2,

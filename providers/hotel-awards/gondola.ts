@@ -39,6 +39,23 @@ const CONFIG_PATH = path.join(ROOT, "config", "hotel-awards.json")
 
 export interface HotelAwardsConfig {
   gondola: { mcpUrl: string; timeoutMs: number }
+  /** Provider #2 (Roame). Optional so an older config degrades gracefully. */
+  roame?: {
+    encoreUrl: string
+    timeoutMs: number
+    credentialsPath: string
+    search: {
+      roomTypeEnum: string
+      sortByEnum: string
+      awardPointsRange: { start: number; end: number }
+      cppMin: number
+      maxPages: number
+    }
+    /** Explicit map bboxes by location key; NO geocoding — a missing key is
+     *  a structured unconfigured, never a guessed box. */
+    locations: Record<string, { bbox: [number, number, number, number]; center: [number, number] } | string>
+    hotelProgramMap: Record<string, string>
+  }
   budget: { maxCallsPerRun: number; detailTopN: number; politenessMs: number }
   programMap: Record<string, string>
 }

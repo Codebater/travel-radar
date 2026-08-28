@@ -5,7 +5,11 @@
   "allowedDomains": {
     "tui_packages": ["www.tui.com"],
     "check24_packages": ["urlaub.check24.de"],
-    "gondola_hotels": [
+    "roame_hotels": [
+   "roame.travel",
+   "www.roame.travel"
+  ],
+  "gondola_hotels": [
    "gondola.ai",
    "www.gondola.ai"
   ],

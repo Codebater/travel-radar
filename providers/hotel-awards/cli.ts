@@ -17,6 +17,7 @@ import "../../load-env.js"
 import { getDb } from "../../db/index.js"
 import { recordCallAttempt, recordCallOutcome } from "../../db/repositories.js"
 import { GondolaHotelAwardsProvider, loadHotelAwardsConfig } from "./gondola.js"
+import { RoameHotelAwardsProvider } from "./roame.js"
 import { insertHotelAwards, listHotelAwards } from "./store.js"
 import { getLocator } from "../../offers/locators.js"
 
@@ -37,12 +38,20 @@ async function main() {
       const checkIn = flag("check-in")
       const checkOut = flag("check-out")
       if (!location || !checkIn || !checkOut) throw new Error("--location, --check-in and --check-out are required")
-      const provider = new GondolaHotelAwardsProvider(cfg)
 
-      const planned = provider.plannedCalls()
-      console.log(`Request plan: 1 search + ${cfg.budget.detailTopN} × (multi-night confirm + booking link) = ${planned} calls (cap ${cfg.budget.maxCallsPerRun})`)
-      if (planned > cfg.budget.maxCallsPerRun) {
-        throw new Error(`plan (${planned}) exceeds maxCallsPerRun (${cfg.budget.maxCallsPerRun}) — lower detailTopN`)
+      // Provider identity is data: --provider selects which one to probe;
+      // default gondola. Roame emits the SAME normalized observations.
+      const which = flag("provider") ?? "gondola"
+      const provider = which === "roame" ? new RoameHotelAwardsProvider(cfg) : new GondolaHotelAwardsProvider(cfg)
+
+      if (which === "gondola") {
+        const planned = (provider as GondolaHotelAwardsProvider).plannedCalls()
+        console.log(`Request plan: 1 search + ${cfg.budget.detailTopN} × (multi-night confirm + booking link) = ${planned} calls (cap ${cfg.budget.maxCallsPerRun})`)
+        if (planned > cfg.budget.maxCallsPerRun) {
+          throw new Error(`plan (${planned}) exceeds maxCallsPerRun (${cfg.budget.maxCallsPerRun}) — lower detailTopN`)
+        }
+      } else {
+        console.log(`Request plan: up to ${cfg.roame?.search.maxPages ?? 1} HotelAvailablePeriods page(s) on /encore/graphql; session=${provider.isConfigured()}`)
       }
       if (has("dry-run")) { console.log("DRY RUN — zero requests were issued."); break }
 
