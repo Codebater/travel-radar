@@ -266,6 +266,157 @@ describe("cross-provider dedupe keeps source identity distinct", () => {
   })
 })
 
+describe("long-window discovery — minNights decoupled from the window", () => {
+  function withCreds<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = process.env.HOTEL_AWARDS_ROAME_CREDS
+    process.env.HOTEL_AWARDS_ROAME_CREDS = writeTempCreds()
+    return fn().finally(() => {
+      if (prev === undefined) delete process.env.HOTEL_AWARDS_ROAME_CREDS
+      else process.env.HOTEL_AWARDS_ROAME_CREDS = prev
+    })
+  }
+
+  // Bangkok, Nov 1 → Dec 1: a 30-day window. LIVE-VERIFIED (2026-08-29):
+  // Roame echoes the EXACT requested window — minNights only filters. This
+  // block pins OUR side of that contract: the filter is sent verbatim, and
+  // whatever periods the source states come back exactly as stated.
+  const WINDOW30: HotelAwardQuery = { location: "Bangkok", checkIn: "2026-11-01", checkOut: "2026-12-01", adults: 2 }
+
+  // Hypothetical shorter periods: live Roame does NOT return these (it echoes
+  // the window), but IF the source ever states them, they must be preserved
+  // verbatim — own startDate + nights, never extrapolated, never totalled.
+  function segmentsPage(): RoameHotelAvailablePeriods {
+    return page({
+      availableHotels: [
+        {
+          hotelDetail: { id: "bkkzs", name: "Hyatt Place Bangkok Sukhumvit 24", brand: "PLACE", mileageProgram: "HYATT", city: "Bangkok", country: "TH", url: null },
+          availableRooms: [
+            {
+              roomDetail: { roomCode: "KNGX", roomName: "1 King Bed", roomType: "GuestRoom" },
+              offerPeriods: [
+                { avgAwardPoints: 4500, avgSurchargeUsd: 0, avgCashPriceUsd: 104, avgCpp: 2.31, nights: 2, roomCode: "KNGX", roomType: "GuestRoom", startDate: "2026-11-03", mileageProgram: "HYATT", offerCode: "LPRM", createTime: "2026-08-29T00:00:00.000Z" },
+                { avgAwardPoints: 5000, avgSurchargeUsd: 12, avgCashPriceUsd: 120, avgCpp: 2.2, nights: 5, roomCode: "KNGX", roomType: "GuestRoom", startDate: "2026-11-10", mileageProgram: "HYATT", offerCode: "LPRM", createTime: "2026-08-29T00:00:00.000Z" },
+                { avgAwardPoints: 4200, avgSurchargeUsd: 0, avgCashPriceUsd: 98, avgCpp: 2.4, nights: 3, roomCode: "KNGX", roomType: "GuestRoom", startDate: "2026-11-25", mileageProgram: "HYATT", offerCode: "LPRM", createTime: "2026-08-29T00:00:00.000Z" },
+              ],
+            },
+          ],
+          availabilityPercent: 95,
+          lastUpdated: "2026-08-29T00:00:00.000Z",
+        },
+      ],
+    })
+  }
+
+  const ok = (p: RoameHotelAvailablePeriods) =>
+    new Response(JSON.stringify({ data: { hotelAvailablePeriods: p } }), { status: 200, headers: { "Content-Type": "application/json" } })
+
+  it("a 30-day window sends minNights 2 as a filter over the full stayDateRange — never '30-night stays only'", async () => {
+    await withCreds(async () => {
+      let sentInput: any = null
+      const fake = (async (_url: string, init: RequestInit) => {
+        sentInput = JSON.parse(String(init.body)).variables.input
+        return ok(segmentsPage())
+      }) as unknown as typeof fetch
+      const r = await new RoameHotelAwardsProvider(CFG, fake).search({ ...WINDOW30, minNights: 2 })
+      expect(sentInput.minNights).toBe(2)
+      expect(sentInput.stayDateRange).toEqual({ startDate: "2026-11-01", endDate: "2026-12-01" })
+      expect(r.searchState).toBe("complete")                 // no clamp happened, none reported
+      expect(r.appliedMinNights).toBe(2)
+    })
+  })
+
+  it("IF the source states shorter periods, they keep their own source-stated dates/nights and full provenance — never extrapolated, never totalled", async () => {
+    await withCreds(async () => {
+      const fake = (async () => ok(segmentsPage())) as unknown as typeof fetch
+      const r = await new RoameHotelAwardsProvider(CFG, fake).search({ ...WINDOW30, minNights: 2 })
+      expect(r.awards.map(a => [a.checkIn, a.checkOut, a.nights])).toEqual([
+        ["2026-11-03", "2026-11-05", 2],
+        ["2026-11-10", "2026-11-15", 5],
+        ["2026-11-25", "2026-11-28", 3],
+      ])
+      for (const a of r.awards) {
+        expect(a.provider).toBe("roame_hotels")              // provenance survives
+        expect(a.program).toBe("WORLD_OF_HYATT")
+        expect(a.quoteBasis).toBe("per_night")               // per-night stays per-night
+        expect(a.pointsTotal).toBeNull()                     // NEVER avg × nights
+      }
+    })
+  })
+
+  it("without minNights and with a null config default, the old exact-window behavior is preserved", async () => {
+    await withCreds(async () => {
+      let sentMin: number | null = null
+      const fake = (async (_url: string, init: RequestInit) => {
+        sentMin = JSON.parse(String(init.body)).variables.input.minNights
+        return ok(page())
+      }) as unknown as typeof fetch
+      expect(ROAME.search.defaultMinNights ?? null).toBeNull()
+      const r = await new RoameHotelAwardsProvider(CFG, fake).search(QUERY)   // 5-night window, no minNights
+      expect(sentMin).toBe(5)                                // window length, as before
+      expect(r.searchState).toBe("complete")
+      expect(r.appliedMinNights).toBe(5)
+    })
+  })
+
+  it("the config default fills in when the query is silent, and an explicit query minimum beats it", async () => {
+    await withCreds(async () => {
+      const cfgWithDefault = { ...CFG, roame: { ...ROAME, search: { ...ROAME.search, defaultMinNights: 3 } } }
+      const sent: number[] = []
+      const fake = (async (_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)).variables.input.minNights)
+        return ok(segmentsPage())
+      }) as unknown as typeof fetch
+      const p = new RoameHotelAwardsProvider(cfgWithDefault, fake)
+      await p.search(WINDOW30)                               // silent → config default
+      await p.search({ ...WINDOW30, minNights: 2 })          // explicit → wins
+      expect(sent).toEqual([3, 2])
+    })
+  })
+
+  it("night_clamped ONLY when the requested minimum exceeds the window — the one known cap — and the applied value is reported", async () => {
+    await withCreds(async () => {
+      const fake = (async () => ok(segmentsPage())) as unknown as typeof fetch
+      const p = new RoameHotelAwardsProvider(CFG, fake)
+      const clamped = await p.search({ ...WINDOW30, minNights: 45 })
+      expect(clamped.searchState).toBe("night_clamped")      // 45 → 30: a real reduction
+      expect(clamped.appliedMinNights).toBe(30)
+      expect(clamped.awards.length).toBeGreaterThan(0)       // real results still returned
+      const notClamped = await p.search({ ...WINDOW30, minNights: 30 })
+      expect(notClamped.searchState).toBe("complete")        // equal to the window is NOT a clamp
+    })
+  })
+
+  it("a clamped walk that finds nothing stays night_clamped, never a silent empty", async () => {
+    await withCreds(async () => {
+      const fake = (async () => ok(page({ availableHotels: [] }))) as unknown as typeof fetch
+      const r = await new RoameHotelAwardsProvider(CFG, fake).search({ ...WINDOW30, minNights: 45 })
+      expect(r.searchState).toBe("night_clamped")
+      expect(r.awards).toEqual([])
+    })
+  })
+
+  it("discovery pagination stays inside maxPages and a paged-out walk is incomplete", async () => {
+    await withCreds(async () => {
+      let calls = 0
+      const fake = (async () => { calls++; return ok({ ...segmentsPage(), hasMore: true, endCursor: `cur-${calls}` }) }) as unknown as typeof fetch
+      const r = await new RoameHotelAwardsProvider(CFG, fake).search({ ...WINDOW30, minNights: 2 })
+      expect(calls).toBe(ROAME.search.maxPages)              // discovery spends no more than before
+      expect(r.searchState).toBe("incomplete")               // missing pages outrank everything
+    })
+  })
+
+  it("a non-integer or sub-1 minNights is a structured provider error, spending nothing", async () => {
+    await withCreds(async () => {
+      let calls = 0
+      const fake = (async () => { calls++; return ok(page()) }) as unknown as typeof fetch
+      const r = await new RoameHotelAwardsProvider(CFG, fake).search({ ...WINDOW30, minNights: 0 })
+      expect(r.ok).toBe(false)
+      expect(r.reason).toBe("provider-error")
+      expect(calls).toBe(0)
+    })
+  })
+})
+
 let tempCredsCounter = 0
 function writeTempCreds(): string {
   const p = path.join(os.tmpdir(), `roame-test-creds-${tempCredsCounter++}.json`)

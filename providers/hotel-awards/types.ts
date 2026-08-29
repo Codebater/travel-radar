@@ -36,6 +36,16 @@ export interface HotelAwardQuery {
   checkIn: string                  // YYYY-MM-DD
   checkOut: string
   adults: number
+  /** Minimum-nights FILTER passed to the source. LIVE-VERIFIED (2026-08-29):
+   *  Roame is an exact-window quote engine — it always returns the requested
+   *  check-in and the exact requested night count regardless of this value;
+   *  minNights only filters which hotels qualify, it never enumerates
+   *  shorter periods. Long-range coverage comes from the sparse window
+   *  planner (planner.ts) issuing multiple exact sub-window queries; one
+   *  window's quotes are NEVER extrapolated to another (adjacent windows
+   *  were measured to price differently). Omitted = config default, else the
+   *  window length. Gondola ignores this field. */
+  minNights?: number
 }
 
 export interface NormalizedHotelAward {
@@ -117,6 +127,10 @@ export interface HotelAwardSearchResult {
   error?: string
   callsSpent: number
   latencyMs: number
+  /** The minimum-nights value the provider ACTUALLY searched with, when the
+   *  provider supports discovery. Differs from the requested minimum only on
+   *  a night_clamped result (a known cap reduced it) — never silently. */
+  appliedMinNights?: number
 }
 
 /** Every hotel award provider implements this. `search` must never throw. */

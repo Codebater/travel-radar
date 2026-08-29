@@ -19,7 +19,13 @@
       "awardPointsRange": { "start": 1000, "end": 300000 },
       "cppMin": 0,
       "maxPages": 2,
-      "note": "roomTypeEnum/sortByEnum are the SERVER-DICTATED casings (the server rejects 'ALL'/'AWARD_POINTS'). maxPages caps pagination for Phase 1; startCursorGT walks pages while hasMore."
+      "defaultMinNights": null,
+      "note": "roomTypeEnum/sortByEnum are the SERVER-DICTATED casings (the server rejects 'ALL'/'AWARD_POINTS'). maxPages caps pagination for Phase 1; startCursorGT walks pages while hasMore. defaultMinNights: default when a probe states no --min-nights — null means the window length; an explicit query minNights always wins. A minimum larger than the window is clamped to the window length and recorded as night_clamped — the only condition that may ever produce that state. LIVE-VERIFIED 2026-08-29: HotelAvailablePeriods is an EXACT-WINDOW quote engine — it always returns the requested check-in and exact night count; minNights only filters and never enumerates shorter periods; per-night averages differ between adjacent windows, so long-range coverage comes from the sparse window planner, one exact sub-window query at a time."
+    },
+    "discovery": {
+      "candidateNights": [2, 4, 5, 7],
+      "maxWindowsPerRun": 8,
+      "note": "Sparse long-stay planning: for each candidate length that fits the requested range, exact windows are anchored at the range start, middle and end (deduplicated), then deterministically reduced to maxWindowsPerRun (starts kept first, then ends, then middles; dropped windows are reported). Lengths mirror the perk-relevant stays: 2 (Ambassador weekend min), 4 (IHG card 4th night), 5 (Marriott/Hilton 5th night), 7 (plain week). Each window is one independent Roame exact-window search (≤ maxPages calls); windows never blend and per-night figures never become totals."
     },
     "locations": {
       "bangkok": { "bbox": [100.3, 13.5, 100.9, 13.95], "center": [100.5, 13.75] },

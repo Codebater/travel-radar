@@ -297,6 +297,21 @@ export class RoameHotelAwardsProvider implements HotelAwardProvider {
 
     if (nights < 1) return fail("provider-error", "incomplete", `check-out must follow check-in (${query.checkIn}..${query.checkOut})`)
 
+    // minNights is decoupled from the window length, but LIVE-VERIFIED
+    // (2026-08-29): Encore echoes the EXACT requested window either way —
+    // minNights only filters which hotels qualify; it never enumerates
+    // shorter periods. Long-range coverage is the sparse window planner's
+    // job (planner.ts), one exact sub-window query at a time.
+    // Resolution: explicit query value → config default → the window length.
+    const requestedMin = query.minNights ?? this.roame.search.defaultMinNights ?? nights
+    if (!Number.isInteger(requestedMin) || requestedMin < 1) {
+      return fail("provider-error", "incomplete", `minNights must be an integer ≥ 1 (got ${String(requestedMin)})`)
+    }
+    // The window length is a KNOWN cap — a segment cannot be longer than the
+    // window. Only this real reduction may ever produce night_clamped.
+    const minNights = Math.min(requestedMin, nights)
+    const nightClamped = requestedMin > nights
+
     const creds = this.credentials()
     if (!creds) return fail("unconfigured", "blocked", `no Roame session at ${this.roame.credentialsPath} — sign in and save the session cookie`)
 
@@ -312,7 +327,7 @@ export class RoameHotelAwardsProvider implements HotelAwardProvider {
     let cursor: string | null = null
     let pagedOut = false
     for (let pageNum = 0; pageNum < Math.max(1, this.roame.search.maxPages); pageNum++) {
-      const input = buildEncoreInput(this.roame, query, bbox, nights, cursor)
+      const input = buildEncoreInput(this.roame, query, bbox, minNights, cursor)
       const out = await this.postPage(input, creds)
       callsSpent++
       if (out.error !== undefined && out.page === undefined) {
@@ -330,10 +345,14 @@ export class RoameHotelAwardsProvider implements HotelAwardProvider {
     }
 
     if (awards.length === 0) {
-      return { provider: this.name, ok: true, searchState: "empty", awards: [], callsSpent, latencyMs: Date.now() - started }
+      // A clamped-then-empty walk stays night_clamped — the clamp explains
+      // why the request's own minimum was not what actually ran.
+      return { provider: this.name, ok: true, searchState: nightClamped ? "night_clamped" : "empty", awards: [], callsSpent, latencyMs: Date.now() - started, appliedMinNights: minNights }
     }
-    // A hard page cap that stopped mid-results is recorded honestly.
-    const searchState = pagedOut ? "incomplete" : "complete"
-    return { provider: this.name, ok: true, searchState, awards, callsSpent, latencyMs: Date.now() - started }
+    // A hard page cap that stopped mid-results is recorded honestly, and
+    // outranks the clamp (missing results are the bigger truth); the clamp
+    // itself stays visible via appliedMinNights vs the requested value.
+    const searchState = pagedOut ? "incomplete" : nightClamped ? "night_clamped" : "complete"
+    return { provider: this.name, ok: true, searchState, awards, callsSpent, latencyMs: Date.now() - started, appliedMinNights: minNights }
   }
 }

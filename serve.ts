@@ -42,6 +42,10 @@ import { credentialWarnings } from "./notifications/credentials.js"
 import { listStayCandidates, stayCandidateTotals } from "./stays/candidates.js"
 import { listHotelAwards } from "./providers/hotel-awards/store.js"
 import { applicablePerks, loadEntitlements, loadHotelPerkRules, type PerkBadge } from "./providers/hotel-awards/perks.js"
+import { planStayWindows } from "./providers/hotel-awards/planner.js"
+import { executeWindowPlan } from "./providers/hotel-awards/discover.js"
+import { loadHotelAwardsConfig } from "./providers/hotel-awards/gondola.js"
+import { RoameHotelAwardsProvider } from "./providers/hotel-awards/roame.js"
 import { loadStayUniverse } from "./stays/registry.js"
 import { loadStaysConfig } from "./stays/config.js"
 import { listStayWindows } from "./stays/windows.js"
@@ -471,6 +475,87 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(feed, null, 2))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: GET /api/hotel-awards/plan — sparse window planner PREVIEW.
+  // Pure date math (planner.ts): ZERO provider calls, zero writes. Invalid
+  // input is a 400 with the planner's own message, never a guess.
+  if (url.pathname === "/api/hotel-awards/plan") {
+    try {
+      const location = url.searchParams.get("location")?.trim()
+      const checkIn = url.searchParams.get("checkIn")
+      const checkOut = url.searchParams.get("checkOut")
+      if (!location || !checkIn || !checkOut) throw new BadRequest("location, checkIn and checkOut are required")
+      const haCfg = loadHotelAwardsConfig()
+      const nightsParam = url.searchParams.get("nights")
+      const candidateNights = nightsParam !== null
+        ? nightsParam.split(",").map(s => Number(s.trim()))
+        : haCfg.roame?.discovery?.candidateNights
+      const maxParam = url.searchParams.get("maxWindows")
+      const maxWindows = maxParam !== null ? Number(maxParam) : haCfg.roame?.discovery?.maxWindowsPerRun
+      const plan = planStayWindows(checkIn, checkOut, { candidateNights, maxWindows })
+      const maxPages = haCfg.roame?.search.maxPages ?? 1
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        disclaimer: "Plan preview only — zero provider calls were made. Each window is an independent exact-window Roame query; windows never blend and per-night averages never become stay totals.",
+        location,
+        plan,
+        candidatesBeforeBudget: plan.windows.length + plan.dropped.length,
+        maxHttpCalls: plan.windows.length * maxPages,
+        maxPagesPerWindow: maxPages,
+      }, null, 2))
+    } catch (err) {
+      // Planner input errors are the caller's to fix — everything it throws
+      // is a validation message, so the read-only preview answers 400.
+      res.writeHead(400, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: POST /api/hotel-awards/discover — EXPLICIT discovery execution:
+  // the planned exact Roame sub-windows run through the same provider/store
+  // path as the CLI (executeWindowPlan — the loop exists once). POST-only so
+  // nothing spends provider calls on a page load; provider failures are
+  // structured states in the summary, never a broken page. No Gondola, no
+  // SerpAPI — the Roame provider is the only thing constructed here.
+  if (url.pathname === "/api/hotel-awards/discover") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" })
+      res.end(JSON.stringify({ error: "POST only — discovery spends provider calls and requires explicit action" }))
+      return
+    }
+    try {
+      const location = url.searchParams.get("location")?.trim()
+      const checkIn = url.searchParams.get("checkIn")
+      const checkOut = url.searchParams.get("checkOut")
+      if (!location || !checkIn || !checkOut) throw new BadRequest("location, checkIn and checkOut are required")
+      const haCfg = loadHotelAwardsConfig()
+      const nightsParam = url.searchParams.get("nights")
+      const candidateNights = nightsParam !== null
+        ? nightsParam.split(",").map(s => Number(s.trim()))
+        : haCfg.roame?.discovery?.candidateNights
+      const maxParam = url.searchParams.get("maxWindows")
+      const maxWindows = maxParam !== null ? Number(maxParam) : haCfg.roame?.discovery?.maxWindowsPerRun
+      let plan
+      try {
+        plan = planStayWindows(checkIn, checkOut, { candidateNights, maxWindows })
+      } catch (err) {
+        throw new BadRequest((err as Error).message)
+      }
+      const summary = await executeWindowPlan(getDb(), new RoameHotelAwardsProvider(haCfg), plan, {
+        location,
+        adults: url.searchParams.get("adults") !== null ? Number(url.searchParams.get("adults")) : 2,
+        politenessMs: haCfg.budget.politenessMs,
+      })
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ location, plan, summary }, null, 2))
+    } catch (err) {
+      const status = err instanceof BadRequest ? 400 : 500
+      res.writeHead(status, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
     return

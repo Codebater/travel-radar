@@ -50,7 +50,15 @@ export interface HotelAwardsConfig {
       awardPointsRange: { start: number; end: number }
       cppMin: number
       maxPages: number
+      /** Default when a query states no minNights. Null/absent = the window
+       *  length itself. Live-verified: Roame echoes the exact requested
+       *  window either way — minNights only filters, it never enumerates
+       *  shorter periods. */
+      defaultMinNights?: number | null
     }
+    /** Sparse long-stay window planning (providers/hotel-awards/planner.ts):
+     *  candidate exact-window lengths and the per-run window budget. */
+    discovery?: { candidateNights: number[]; maxWindowsPerRun: number }
     /** Explicit map bboxes by location key; NO geocoding — a missing key is
      *  a structured unconfigured, never a guessed box. */
     locations: Record<string, { bbox: [number, number, number, number]; center: [number, number] } | string>
