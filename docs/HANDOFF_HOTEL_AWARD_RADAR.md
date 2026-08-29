@@ -5,8 +5,8 @@ Written 2026-08-28 at the end of the Hotel Award Radar session. Audience: the ne
 ## Current checkpoint
 
 - Branch: `extreme-travel-radar`, no upstream — **nothing pushed**.
-- HEAD: `072449c` ("feat: add travel radar design spine"), on top of `8e82642` (buy-points tools), `bc413a1` (discovery interface), `e199ce0` (sparse discovery), `9d52f2f` (perk semantics), `3e46452` (verified perks), `7441c71` (radar readout).
-- Tests: **1062/1062 passing** (45 files, `npx vitest run`, verified at this HEAD).
+- HEAD: `755a61e` ("feat: add consecutive hotel award stay planner"), on top of `072449c` (design spine), `8e82642` (buy-points tools), `bc413a1` (discovery interface), `e199ce0` (sparse discovery), `9d52f2f` (perk semantics), `3e46452` (verified perks), `7441c71` (radar readout).
+- Tests: **1076/1076 passing** (46 files, `npx vitest run`, verified at this HEAD).
 - Typecheck (`npx tsc --noEmit`): **clean**.
 - Lint (`npm run lint`): **0 errors, 5 pre-existing unused-var warnings** (searchClass, ROOT, balances, config, job) — not from this session's work, leave them unless asked.
 - Nothing deployed. **Vault71 (NAS) still runs the pre-Phase-8 flight radar only** — everything from Phase 8a onward (stays, packages, market, fare radar, deal radar, promos, hotel awards) is local-only on this Windows machine.
@@ -125,11 +125,19 @@ Example perk types: nth-night-free award benefits; Marriott "Stay for 5, Pay for
 - **Buy-points tools** (`8e82642`): sort toolbar (newest default, lowest points/night, lowest cash context, best buy-points opportunity), shared hotel promo-feed enrichment on award cards (promo-enrich.js over `/api/promos/miles`, expired/unmapped never shown), and the **points purchase calculator** ("30,000 points × 0.5¢ = about $150 — Estimated cost to BUY these points", never hotel value/savings). All math in `hotel-awards-ui.js` — explicit promo rates only, structurally incapable of touching `nights` (test-enforced), source-stated full-stay totals usable only on explicit choice.
 - **Shared design spine exists** (`072449c`): `radar.css` tokens + `radar-nav.js` navbar (Flights · Stays · Deals · Trips + Radar menu: Observer · Fare Radar · Market) applied to the dashboard and hotel-awards — hero search bands, split hotel cards with program-branded tiles (no fake photos), larger price anchors, provenance in Details disclosures. Presentation only; every honesty string survives verbatim. Remaining pages adopt the spine in later slices.
 
+## Consecutive-night stay optimizer V1 (DONE, `755a61e`)
+
+`providers/hotel-awards/stayplan.ts` + `GET /api/hotel-awards/stayplan?checkIn&checkOut` + the "Find best stay plan" button on hotel-awards.html — a READ-ONLY projection over stored observations (no searches, no writes, no observations created; explicit click only).
+
+- **Algorithm**: append-only history collapses to one edge per property/program/EXACT observed range (newest wins, deterministic); a forward DP over calendar dates with state (dateIndex, lastProperty) walks stay edges plus 1-night gap edges, so best-partial coverage falls out of the same search. Up to 3 alternative plans come free from the final DP states. Range cap 370 nights.
+- **Ranking doctrine (lexicographic, conservative)**: 1. fewer uncovered nights — complete coverage always wins; 2. fewer hotel switches (gaps never count as switches); 3. lower source-stated points ONLY when the comparison is valid (identical program sets, every segment of every program carries a stated full-stay total, per-program dominance ≤/<) — any per-night-only segment makes plans incomparable and the rule skips; 4. stable lexicographic signature tie-break.
+- **Complete vs partial**: a complete plan beats any partial regardless of switches; when full coverage is impossible the best partial is labelled as such with the EXACT uncovered dates listed.
+- **Points doctrine, enforced and test-asserted**: mixed loyalty programs are NEVER summed into one number (no cross-program total exists anywhere in the output); Roame per-night averages are never synthesized into stay totals — a per-night-only segment nulls its program's total and is flagged ("a per-night average is never multiplied into a stay total"); source-stated full-stay totals are authoritative and sum within one program only.
+- **Live examples (current stored data)**: Bangkok Nov 1 → Dec 1 = complete 30/30 single segment (voco Bangkok Surawong, 30n per-night-only, 0 switches) + 3 alternatives; Nov 1 → 21 over 322 edges = 20/20 via four chained REAL 5-night windows, all Aloft Bangkok Sukhumvit 11, 0 switches, each window at its own observed rate (9,700/9,500/9,200/9,200 pts/night — no rate leaks across windows).
+
 ## NEXT STEP
 
-**The next major product step is the first consecutive-night stay optimizer** — a READ-ONLY projection (Deal Radar precedent) over the observation store: cover-every-night-exactly-once DAG across verified segments for a requested window (e.g. Bangkok, Nov 1 → Dec 1); cash and points totals reported separately, never blended; rule-supported constructions only, each citing its perk-rule id and honoring the machine semantics (repetition, certificates, named rates, constraints, exclusions); a Gondola exact-window confirmation pass for the winning plan only. Two enablers on the way: **explicit Gondola/Roame → `stay_properties` ref mappings** for the target city (all observations still have `propertyId: null`; name-matching stays forbidden) so cash and award sides can join, and per-window segment inventory via the existing sparse discovery.
-
-**Do not implement until the optimizer's design is reviewed.** Hard doctrine in "IMPORTANT NEXT PRODUCT DIRECTION" above is unchanged and binding.
+**Perk-aware optimization**: apply the verified perk layer to V1 plans — machine semantics only (repetition, requiresCertificate, requiredRateName, constraints, exclusions from `config/hotel-perk-rules.json` + declared entitlements), each construction citing its rule id; Hyatt's unverified rule stays excluded from optimizer-grade use. Rule-supported constructions only (e.g. Marriott S5P4 on a 5-night single-reservation award segment with actual per-night values), never from averages. Enablers still pending: explicit Gondola/Roame → `stay_properties` ref mappings (observations still have `propertyId: null`; name-matching forbidden) before any cash mixing, and a Gondola exact-window confirmation pass for a winning plan only. **Do not implement until the perk-aware design is reviewed.** Hard doctrine in "IMPORTANT NEXT PRODUCT DIRECTION" above is unchanged and binding.
 
 ## Key files
 
@@ -147,6 +155,7 @@ Example perk types: nth-night-free award benefits; Marriott "Stay for 5, Pay for
 
 ## Recent commits (most relevant, newest first)
 
+- `755a61e` feat: add consecutive hotel award stay planner (stayplan.ts, API route, plan UI, tests)
 - `072449c` feat: add travel radar design spine (radar.css, radar-nav.js, dashboard + hotel-awards restructure)
 - `8e82642` feat: add hotel award buy-points tools (sorting, promo enrichment, points purchase calculator, hotel-awards-ui.js)
 - `bc413a1` feat: add hotel award discovery interface (search band, plan preview, flight→stay hand-off)
