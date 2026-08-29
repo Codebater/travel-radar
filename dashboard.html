@@ -67,8 +67,10 @@ tailwind.config = {
   .flex-toggle-active { background: #38bdf8; color: #0f172a; }
   .flex-toggle-inactive { background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
 </style>
+<link rel="stylesheet" href="./radar.css">
 </head>
 <body class="bg-surface text-gray-100 min-h-screen">
+<script src="./radar-nav.js"></script>
 
 <!-- Warning Banner (dynamic) -->
 <div id="warningBanner" class="warning-banner border-b border-red-900/50 px-4 py-3 hidden">
@@ -91,14 +93,11 @@ tailwind.config = {
               <span class="text-gray-400">Search flights below</span>
             </h1>
             <p id="routeSubtitle" class="text-sm text-gray-400"></p>
-            <a id="findStayLink" target="_blank" rel="noopener"
-               class="hidden inline-block mt-1 text-xs font-semibold text-emerald hover:text-white transition-colors border border-emerald/30 rounded-lg px-3 py-1">🏨 Find stay</a>
           </div>
         </div>
       </div>
       <div class="flex items-center gap-3">
         <span id="dataSourceBadge"></span>
-        <a href="/observer.html" class="text-xs text-accent hover:underline ml-2">📡 Observer</a>
         <button onclick="toggleBalances()" class="flex items-center gap-2 bg-card hover:bg-cardHover px-4 py-2 rounded-lg text-sm font-medium transition-colors">
           <span>💰</span> Points Balances
           <svg id="balanceChevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -119,10 +118,11 @@ tailwind.config = {
 <!-- Main Content -->
 <main class="max-w-7xl mx-auto px-4 py-6">
 
-  <!-- Search Form -->
+  <!-- Search Form — the hero band -->
   <section id="searchForm" class="mb-8 fade-in">
-    <div class="bg-card rounded-xl p-6 border border-gray-700/50">
-      <h2 class="text-lg font-bold mb-4 flex items-center gap-2">🔍 Search Flights</h2>
+    <div class="r-hero">
+      <h2>Where to next?</h2>
+      <div class="sub">Cash and award fares across every program — searched live, ranked honestly.</div>
       <form onsubmit="handleSearch(event)" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-8 gap-4">
         <div>
           <label class="block text-xs text-gray-400 mb-1">Trip</label>
@@ -263,6 +263,15 @@ tailwind.config = {
 
         <span id="resultCount" class="text-xs text-gray-500"></span>
       </div>
+    </div>
+
+    <!-- Journey CTA: flight → stay hand-off (prefill only, nothing auto-runs) -->
+    <div id="findStayBand" class="r-journey hidden">
+      <div>
+        <div class="msg" id="findStayMsg"></div>
+        <div class="note">Hotel award search opens prefilled with this trip — nothing runs until you search there.</div>
+      </div>
+      <a id="findStayLink" target="_blank" rel="noopener" class="r-btn primary">Find stay →</a>
     </div>
 
     <!-- Flight Cards Container -->
@@ -637,8 +646,9 @@ function renderFlightCard(flight, idx) {
             </div>
           </div>
           <div class="text-right">
-            <p class="text-2xl font-bold text-white">${formatPoints(flight.points)}</p>
-            <div class="flex items-center gap-1 justify-end flex-wrap">
+            <p class="text-3xl font-bold" style="color: var(--amber, #ffd479)">${formatPoints(flight.points)}<span class="text-sm text-gray-400 font-medium"> pts</span></p>
+            <p class="text-xs text-gray-400">+ $${(flight.taxes || 0).toFixed(0)} taxes</p>
+            <div class="flex items-center gap-1 justify-end flex-wrap mt-1">
               <span class="${cabinBadge} text-xs px-2 py-0.5 rounded-full">${cabinLabel}</span>
               ${sourceBadge}${freshness}
             </div>
@@ -650,18 +660,21 @@ function renderFlightCard(flight, idx) {
           ${promoBadge}
           ${flight.cppValue ? `<span class="${cppClass} text-sm font-bold">${flight.cppValue}¢/mi</span>` : ''}
           ${seats ? `<span class="text-xs text-gray-500">${seats}</span>` : ''}
-          ${flight.roameScore ? `<span class="text-xs text-gray-500">Score: ${flight.roameScore}</span>` : ''}
         </div>
-        <div class="text-xs text-gray-400 mb-2 space-y-0.5">
-          <p>📍 ${routeStr}</p>
-          <p>✈️ ${flight.flightNumbers?.join(' / ') || ''} · ⏱ ${duration}</p>
-          ${flight.equipment?.filter(Boolean).length ? `<p>🛩️ ${flight.equipment.join(', ')}</p>` : ''}
-        </div>
+        <p class="text-xs text-gray-400 mb-1">📍 ${routeStr} · ⏱ ${duration}</p>
+        <details class="text-xs text-gray-500 mb-2" onclick="event.stopPropagation()">
+          <summary class="cursor-pointer hover:text-gray-300">Details</summary>
+          <div class="mt-1 space-y-0.5">
+            <p>✈️ ${flight.flightNumbers?.join(' / ') || ''}</p>
+            ${flight.equipment?.filter(Boolean).length ? `<p>🛩️ ${flight.equipment.join(', ')}</p>` : ''}
+            ${flight.roameScore ? `<p>Roame score: ${flight.roameScore}</p>` : ''}
+          </div>
+        </details>
         <div class="flex items-center justify-between text-sm">
-          <span class="text-gray-400">+ $${(flight.taxes || 0).toFixed(0)} taxes</span>
-          ${isSelectable 
+          <span></span>
+          ${isSelectable
             ? `<span class="text-accent font-medium">Select ${rtStep === 'outbound' ? 'outbound' : 'return'} →</span>`
-            : `<a href="${flight.bookingUrl}" target="_blank" class="text-accent hover:text-white font-medium transition-colors">Book →</a>`
+            : `<a href="${flight.bookingUrl}" target="_blank" class="r-btn secondary" style="padding:5px 14px">Book →</a>`
           }
         </div>
         ${combinedPriceHtml}
@@ -680,8 +693,8 @@ function renderFlightCard(flight, idx) {
             </div>
           </div>
           <div class="text-right">
-            <p class="text-2xl font-bold text-white">${flight.cashPrice ? '$' + flight.cashPrice.toLocaleString() : '<span class="text-gray-500 text-base">Price N/A</span>'}</p>
-            <div class="flex items-center gap-1 justify-end flex-wrap">
+            <p class="text-3xl font-bold" style="color: var(--emerald, #34d399)">${flight.cashPrice ? '$' + flight.cashPrice.toLocaleString() : '<span class="text-gray-500 text-base">Price N/A</span>'}</p>
+            <div class="flex items-center gap-1 justify-end flex-wrap mt-1">
               <span class="badge-blue text-xs px-2 py-0.5 rounded-full">Cash</span>
               ${sourceBadge}${freshness}
             </div>
@@ -691,10 +704,11 @@ function renderFlightCard(flight, idx) {
           ${dateBadgeHtml}
           <span class="${cabinBadge} text-xs px-2 py-0.5 rounded-full">${cabinLabel}</span>
         </div>
-        <div class="text-xs text-gray-400 mb-2 space-y-0.5">
-          <p>📍 ${routeStr}</p>
-          <p>✈️ ${flight.flightNumbers?.join(' / ') || ''} · ⏱ ${duration}</p>
-        </div>
+        <p class="text-xs text-gray-400 mb-1">📍 ${routeStr} · ⏱ ${duration}</p>
+        <details class="text-xs text-gray-500 mb-2" onclick="event.stopPropagation()">
+          <summary class="cursor-pointer hover:text-gray-300">Details</summary>
+          <p class="mt-1">✈️ ${flight.flightNumbers?.join(' / ') || ''}</p>
+        </details>
         <div class="flex items-center justify-between text-sm">
           <span></span>
           ${isSelectable 
@@ -1200,15 +1214,17 @@ function displayResults() {
   const retStr = m.returnDate ? ` → ${new Date(m.returnDate + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : ' · ONE WAY';
   document.getElementById('routeSubtitle').textContent = `${dateStr}${retStr}`;
 
-  // Find stay: hand this trip's context to the existing Hotel Award Radar.
-  // A ONE_WAY search passes no check-out — the hotel page asks for one
-  // instead of us inventing it. Navigating never runs a hotel search.
+  // Find stay: hand this trip's context to the existing Hotel Award Radar
+  // as a clear journey step. A ONE_WAY search passes no check-out — the
+  // hotel page asks for one instead of us inventing it. Navigating never
+  // runs a hotel search.
   const stayLink = document.getElementById('findStayLink');
   stayLink.href = hotelStayUrl(m.destination, m.departureDate, m.returnDate);
   stayLink.title = m.returnDate
     ? `Hotel award search for ${m.destination}, ${m.departureDate} → ${m.returnDate}`
     : `One-way flight — pick your own check-out on the hotel page`;
-  stayLink.classList.remove('hidden');
+  document.getElementById('findStayMsg').textContent = `Continue → Find your stay in ${m.destination}`;
+  document.getElementById('findStayBand').classList.remove('hidden');
   document.title = `${m.origin} → ${m.destination} Flight Search`;
   
   // Data source badge

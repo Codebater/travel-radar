@@ -4,15 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hotel Award Radar</title>
+<link rel="stylesheet" href="./radar.css">
 <style>
   :root { color-scheme: dark; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #0b0f14; color: #d7dde5; font: 14px/1.5 ui-monospace, "Cascadia Mono", Consolas, monospace; }
-  header { padding: 18px 22px 10px; border-bottom: 1px solid #1d2733; }
-  h1 { font-size: 16px; margin: 0 0 4px; letter-spacing: 2px; color: #7fd1b9; }
+  body { margin: 0; background: var(--ink-950, #0b0f14); color: #d7dde5; font: 14px/1.5 var(--font, ui-monospace, Consolas, monospace); }
+  header { padding: 18px 22px 10px; }
+  h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: 1px; color: #eef3f8; font-weight: 800; }
   .sub { color: #6b7a8c; font-size: 12px; max-width: 900px; }
   a.back { color: #7fd1b9; font-size: 12px; text-decoration: none; }
-  main { padding: 14px 22px 40px; max-width: 1040px; }
+  main { padding: 14px 22px 40px; max-width: 1080px; margin: 0 auto; }
+  header { max-width: 1080px; margin: 0 auto; }
+  details.adv { margin-top: 10px; }
+  details.adv > summary { color: #55636f; font-size: 11.5px; cursor: pointer; letter-spacing: 0.5px; }
+  .card.split { padding: 0; display: flex; overflow: hidden; }
+  .card.split .body { padding: 12px 15px 10px; flex: 1; min-width: 0; }
   .form { border: 1px solid #1d2733; border-radius: 8px; padding: 12px 14px; background: #0f1520;
           display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; margin-bottom: 14px; }
   .form label { color: #6b7a8c; font-size: 12px; margin-right: 4px; }
@@ -64,29 +70,38 @@
 </style>
 </head>
 <body>
+<script src="./radar-nav.js"></script>
 <header>
-  <h1>HOTEL AWARD RADAR</h1>
+  <h1>Stays — Hotel Award Radar</h1>
   <div class="sub" id="disclaimer">loading…</div>
-  <div style="margin-top:6px"><a class="back" href="/observer.html">← Observer</a> · <a class="back" href="/">Search dashboard</a></div>
 </header>
 <main>
-  <div class="panel" id="discovery">
-    <div class="panel-title">LONG-STAY DISCOVERY — sparse exact Roame windows (no search runs without your click)</div>
-    <div class="form">
+  <div class="r-hero" id="discovery">
+    <h2>Find award stays</h2>
+    <div class="sub">Real hotel points availability across programs — searches run only when you click. No search runs without your click.</div>
+    <div class="form" style="background:transparent;border:none;padding:0;margin-bottom:0">
       <span><label>Destination</label><input id="d-location" value="Bangkok"></span>
       <span><label>Check-in</label><input id="d-in" value="2026-11-01" style="width:110px"></span>
       <span><label>Check-out</label><input id="d-out" value="2026-12-01" style="width:110px"></span>
-      <span><label>Candidate stays</label>
-        <label class="ck"><input type="checkbox" class="d-n" value="2" checked>2 nights</label>
-        <label class="ck"><input type="checkbox" class="d-n" value="4" checked>4 nights</label>
-        <label class="ck"><input type="checkbox" class="d-n" value="5" checked>5 nights</label>
-        <label class="ck"><input type="checkbox" class="d-n" value="7" checked>7 nights</label>
-      </span>
-      <span><label>Max windows</label><input id="d-max" value="8" style="width:52px"></span>
-      <button class="btn" id="d-preview" type="button">Preview plan</button>
-      <button class="btn run" id="d-run" type="button">Run discovery</button>
+      <span><label>Guests</label><input id="d-adults" value="2" style="width:44px"></span>
+      <button class="r-btn primary" id="d-run" type="button">Search stays</button>
     </div>
-    <div id="d-plan"></div>
+    <!-- Advanced planner controls — unchanged behavior (sparse exact Roame
+         windows, explicit budget, plan preview), visually secondary. -->
+    <details class="adv" id="d-advanced">
+      <summary>Advanced search details — window planner, budget, plan preview</summary>
+      <div class="form" style="margin-top:8px">
+        <span><label>Candidate stays</label>
+          <label class="ck"><input type="checkbox" class="d-n" value="2" checked>2 nights</label>
+          <label class="ck"><input type="checkbox" class="d-n" value="4" checked>4 nights</label>
+          <label class="ck"><input type="checkbox" class="d-n" value="5" checked>5 nights</label>
+          <label class="ck"><input type="checkbox" class="d-n" value="7" checked>7 nights</label>
+        </span>
+        <span><label>Max windows</label><input id="d-max" value="8" style="width:52px"></span>
+        <button class="r-btn secondary" id="d-preview" type="button">Preview plan</button>
+      </div>
+      <div id="d-plan"></div>
+    </details>
     <div id="d-status"></div>
   </div>
   <div class="form" id="form">
@@ -132,13 +147,26 @@ let SORT = "newest"
 // yields {} and simply disables enrichment.
 let PROMOS = {}
 
+// A real provider action renders ONLY when the locator actually supports one
+// — otherwise nothing, and the "no trustworthy link" fact lives in Details.
 function action(o) {
   const n = o.navigation
-  if (!n || !n.url || n.quality === "UNAVAILABLE")
-    return `<span class="meta">no trustworthy link</span>`
+  if (!n || !n.url || n.quality === "UNAVAILABLE") return ""
   const label = n.quality === "EXACT_DEEP_LINK" ? "Check & book at provider"
     : n.quality === "SEARCH_REPLAY_LINK" ? "Open provider search" : "Open provider page"
   return `<a class="btn" href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+}
+
+// Program-branded identity tile (never a fake hotel photo).
+const TILES = {
+  HILTON_HONORS: ["p-hilton", "HH"], MARRIOTT_BONVOY: ["p-marriott", "MB"],
+  WORLD_OF_HYATT: ["p-hyatt", "WoH"], IHG_ONE_REWARDS: ["p-ihg", "IHG"],
+  WYNDHAM_REWARDS: ["p-wyndham", "WR"], ACCOR_ALL: ["p-accor", "ALL"],
+  CHOICE_PRIVILEGES: ["p-choice", "CP"],
+}
+function tile(o) {
+  const [cls, mono] = TILES[o.program] || ["p-other", (o.program || "?").slice(0, 3)]
+  return `<div class="r-tile ${cls}"><span class="mono">${esc(mono)}</span><span class="label">${esc(prog(o.program))}</span></div>`
 }
 
 // Verified perk badges — display only. Eligibility is DECLARED config, never
@@ -209,9 +237,13 @@ function card(o) {
   const bounded = o.availabilityState === "unknown"
     ? `<div class="bounded">Historical/period award observation — not a live hold.</div>` : ""
   const calcBtn = o.pointsPerNight != null
-    ? `<button type="button" class="calcbtn" onclick="calcFromCard('${esc(o.program)}', ${o.pointsPerNight}, ${o.quoteBasis === "full_stay" && o.pointsTotal != null ? o.pointsTotal : "null"})">Calculate points cost</button>`
+    ? `<button type="button" class="calcbtn" onclick="calcFromCard('${esc(o.program)}', ${o.pointsPerNight}, ${o.quoteBasis === "full_stay" && o.pointsTotal != null ? o.pointsTotal : "null"})">Calculate points</button>`
     : ""
-  return `<div class="card">
+  const nav = o.navigation
+  const noLink = !nav || !nav.url || nav.quality === "UNAVAILABLE" ? " · no trustworthy provider link" : ""
+  return `<div class="card split">
+    ${tile(o)}
+    <div class="body">
     <div class="top">
       <div>
         <span class="kind ${o.provider === 'roame_hotels' ? 'roame' : 'gondola'}">${esc(provLabel(o.provider))}</span>
@@ -225,14 +257,14 @@ function card(o) {
       ${promoBadge(o)}
       ${acquisitionTag(o)}
       ${perkBadges(o)}
-      <span class="tag">availability ${esc(o.availabilityState)}</span>
       ${calcBtn}
       ${action(o)}
     </div>
     <details class="dcard"><summary>Details</summary>
       ${bounded}
-      <div class="meta"><span class="${o.taxesFeesState === "stated" ? "" : "warn"}">${taxes}</span> · search ${esc(o.searchState)} · ${fresh} · observed ${esc(String(o.fetchedAt).slice(0, 16))} · ${esc(o.verificationLevel)}</div>
+      <div class="meta"><span class="${o.taxesFeesState === "stated" ? "" : "warn"}">${taxes}</span> · availability ${esc(o.availabilityState)} · search ${esc(o.searchState)} · ${fresh} · observed ${esc(String(o.fetchedAt).slice(0, 16))} · ${esc(o.verificationLevel)}${esc(noLink)}</div>
     </details>
+    </div>
   </div>`
 }
 
@@ -290,7 +322,6 @@ async function load() {
 // flight-dashboard hand-off. An unmapped IATA passes through verbatim and the
 // provider answers honestly (structured unconfigured, never a guessed box).
 const IATA_LOCATIONS = { BKK: "Bangkok", DMK: "Bangkok" }
-let tripAdults = null
 
 // Trip hand-off from the flight dashboard (?dest&checkIn&checkOut&adults):
 // PREFILL ONLY. Nothing searches without an explicit click, and a one-way
@@ -307,12 +338,12 @@ function prefillFromTrip() {
     document.getElementById("d-in").value = checkIn
     document.getElementById("d-out").value = checkOut ?? ""
     if (!checkOut) {
-      document.getElementById("d-plan").innerHTML =
-        '<div class="meta">One-way flight hand-off — enter your own check-out date, then preview. No date was invented for you.</div>'
+      document.getElementById("d-status").innerHTML =
+        '<div class="meta">One-way flight hand-off — enter your own check-out date, then search. No date was invented for you.</div>'
     }
   }
   const adults = q.get("adults")
-  if (adults && Number.isInteger(Number(adults)) && Number(adults) >= 1) tripAdults = Number(adults)
+  if (adults && Number.isInteger(Number(adults)) && Number(adults) >= 1) document.getElementById("d-adults").value = adults
 }
 prefillFromTrip()
 
@@ -326,7 +357,8 @@ function discoveryParams() {
   if (nights.length) p.set("nights", nights.join(","))
   const max = document.getElementById("d-max").value.trim()
   if (max) p.set("maxWindows", max)
-  if (tripAdults !== null) p.set("adults", String(tripAdults))
+  const adults = Number(document.getElementById("d-adults").value.trim())
+  if (Number.isInteger(adults) && adults >= 1) p.set("adults", String(adults))
   return p
 }
 
