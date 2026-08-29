@@ -49,6 +49,16 @@
   button.btn.run { border-color: #6b5327; color: #ffd479; }
   button.btn[disabled] { opacity: 0.5; cursor: default; }
   .err { color: #ff9d9d; font-size: 12px; margin-top: 8px; }
+  .tag.buypromo { border-color: #6b5327; color: #ffd479; font-weight: 700; }
+  .tag.acq { border-color: #3a4656; color: #c6d0da; }
+  .calcbtn { font-size: 10px; padding: 1px 6px; border-radius: 8px; border: 1px solid #314052;
+             color: #8fa1b5; background: transparent; cursor: pointer; }
+  .calcbtn:hover { color: #d7dde5; border-color: #6b7a8c; }
+  details.dcard { margin-top: 6px; }
+  details.dcard summary { color: #55636f; font-size: 11px; cursor: pointer; }
+  details.dcard .meta { margin-top: 4px; }
+  .calc-result { font-size: 14px; color: #eef3f8; }
+  .calc-result .big { font-size: 17px; color: #ffd479; font-weight: 700; }
   .plan { margin-top: 10px; }
   .plan .tag { margin: 2px 4px 2px 0; display: inline-block; }
 </style>
@@ -80,13 +90,30 @@
     <div id="d-status"></div>
   </div>
   <div class="form" id="form">
+    <span><label>Sort</label><select id="sort">
+      <option value="newest">Newest</option>
+      <option value="points">Lowest points/night</option>
+      <option value="cash">Lowest cash context</option>
+      <option value="buypoints">Best buy-points opportunity</option>
+    </select></span>
     <span><label>Program</label><select id="program"><option value="">All programs</option></select></span>
     <span><label>Provider</label><select id="provider"><option value="">All</option></select></span>
     <span><label>Property</label><input id="q" placeholder="text search"></span>
   </div>
+  <details class="panel calc" id="calc">
+    <summary class="panel-title" style="cursor:pointer">POINTS COST CALCULATOR — estimated cost to BUY points at the current promo purchase rate (never hotel value)</summary>
+    <div class="form" style="margin-top:8px">
+      <span><label>Program</label><select id="calc-prog"></select></span>
+      <span><label>Points</label><input id="calc-pts" style="width:110px" placeholder="30000"></span>
+    </div>
+    <div id="calc-note" class="meta"></div>
+    <div id="calc-out" style="margin-top:6px"></div>
+  </details>
   <div class="count" id="count"></div>
   <div id="results"><div class="empty">loading award-stay observations…</div></div>
 </main>
+<script src="./promo-enrich.js"></script>
+<script src="./hotel-awards-ui.js"></script>
 <script>
 const fmt = new Intl.NumberFormat("en-US")
 const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))
@@ -98,6 +125,12 @@ const prog = p => PROG[p] || p
 const provLabel = p => p === "roame_hotels" ? "Roame" : p === "gondola_hotels" ? "Gondola" : p
 
 let ALL = []
+let SORT = "newest"
+// Active, mapped HOTEL-category buy-points promos by loyaltyProgram — the
+// shared feed the stay cards already use (promo-enrich.js over
+// /api/promos/miles). Expired/unmapped promos never enter; a failed feed
+// yields {} and simply disables enrichment.
+let PROMOS = {}
 
 function action(o) {
   const n = o.navigation
@@ -135,10 +168,36 @@ function perkBadges(o) {
   }).join("")
 }
 
+// Current hotel buy-points promo for a card's program — a promotion on
+// BUYING the loyalty currency, never a hotel discount. Explicit rate and end
+// date only; no promo (or an expired one) renders nothing.
+function promoBadge(o) {
+  const p = PROMOS[o.program]
+  if (!p) return ""
+  const rate = p.effectiveCostPerMile != null ? ` · ${p.effectiveCostPerMile}¢/pt` : ""
+  const ends = PromoEnrich.promoEndsText(p)
+  const tip = `Promotion on BUYING ${prog(o.program)} points — never a discount on any hotel rate.` +
+    (p.effectiveCostPerMile == null ? " No explicit purchase rate stated — badge only." : "")
+  return `<span class="tag buypromo" title="${esc(tip)}">${esc(PromoEnrich.hotelPromoBadgeText(p))}${esc(rate)}${ends ? " · " + esc(ends) : ""}</span>`
+}
+
+// Shown only under the buy-points sort: the per-night ACQUISITION estimate
+// (source-stated points/night × explicit promo purchase rate) that the sort
+// ordered by. Cost to buy the points — never a hotel value.
+function acquisitionTag(o) {
+  if (SORT !== "buypoints") return ""
+  const cents = HotelAwardsUI.acquisitionPerNightCents(o, PROMOS)
+  if (cents === null) return ""
+  return `<span class="tag acq" title="Estimated cost to BUY the stated points/night at the current promo purchase rate — acquisition cost, not hotel cash value.">≈ ${esc(HotelAwardsUI.centsToDollars(cents))}/night to buy points</span>`
+}
+
 function card(o) {
-  // Points are PER-NIGHT as stored — never a synthesized stay total.
+  // Points are PER-NIGHT as stored — never a synthesized stay total; a
+  // full-stay total appears ONLY when the source stated one.
   const pts = o.pointsPerNight != null ? `${fmt.format(o.pointsPerNight)}<span class="per"> pts/night</span>`
     : (o.quoteBasis === "full_stay" && o.pointsTotal != null ? `${fmt.format(o.pointsTotal)}<span class="per"> pts total (stated)</span>` : "—")
+  const statedTotal = o.quoteBasis === "full_stay" && o.pointsTotal != null && o.pointsPerNight != null
+    ? `<div class="per">${fmt.format(o.pointsTotal)} pts total (stated)</div>` : ""
   const room = o.roomName ? `${esc(o.roomName)}${o.roomClass ? " · " + esc(o.roomClass) : ""}`
     : (o.roomClass ? esc(o.roomClass) : "room not stated")
   const taxes = o.taxesFeesState === "stated" && o.taxesFeesAmount != null
@@ -149,6 +208,9 @@ function card(o) {
   const fresh = o.sourceFreshness ? `source freshness ${esc(String(o.sourceFreshness).slice(0, 16))}` : "source freshness unknown"
   const bounded = o.availabilityState === "unknown"
     ? `<div class="bounded">Historical/period award observation — not a live hold.</div>` : ""
+  const calcBtn = o.pointsPerNight != null
+    ? `<button type="button" class="calcbtn" onclick="calcFromCard('${esc(o.program)}', ${o.pointsPerNight}, ${o.quoteBasis === "full_stay" && o.pointsTotal != null ? o.pointsTotal : "null"})">Calculate points cost</button>`
+    : ""
   return `<div class="card">
     <div class="top">
       <div>
@@ -156,31 +218,54 @@ function card(o) {
         <div class="title">${esc(o.propertyName)}</div>
         <div class="line">${esc(prog(o.program))} · ${esc(o.checkIn)} → ${esc(o.checkOut)} · ${o.nights} night${o.nights === 1 ? "" : "s"} · ${room}</div>
       </div>
-      <div><div class="points">${pts}</div><div class="per">${esc(o.quoteBasis.replace("_", " "))}</div></div>
+      <div><div class="points">${pts}</div>${statedTotal}<div class="per">${esc(o.quoteBasis.replace("_", " "))}</div></div>
     </div>
     <div class="tags">
-      ${perkBadges(o)}
-      <span class="tag ${o.taxesFeesState === "stated" ? "" : "warn"}">${taxes}</span>
       ${cash}
+      ${promoBadge(o)}
+      ${acquisitionTag(o)}
+      ${perkBadges(o)}
       <span class="tag">availability ${esc(o.availabilityState)}</span>
-      <span class="tag">search ${esc(o.searchState)}</span>
+      ${calcBtn}
       ${action(o)}
     </div>
-    ${bounded}
-    <div class="meta">${fresh} · observed ${esc(String(o.fetchedAt).slice(0, 16))} · ${esc(o.verificationLevel)}</div>
+    <details class="dcard"><summary>Details</summary>
+      ${bounded}
+      <div class="meta"><span class="${o.taxesFeesState === "stated" ? "" : "warn"}">${taxes}</span> · search ${esc(o.searchState)} · ${fresh} · observed ${esc(String(o.fetchedAt).slice(0, 16))} · ${esc(o.verificationLevel)}</div>
+    </details>
   </div>`
+}
+
+const SORT_LABELS = {
+  newest: "newest first",
+  points: "lowest stated points/night first",
+  cash: "lowest cash context first (USD first, currencies never converted)",
+  buypoints: "lowest estimated buy-points acquisition cost/night first (explicit promo rate only)",
 }
 
 function apply() {
   const pv = document.getElementById("provider").value
   const q = document.getElementById("q").value.trim().toLowerCase()
+  SORT = document.getElementById("sort").value
   let rows = ALL
   if (pv) rows = rows.filter(o => o.provider === pv)
   if (q) rows = rows.filter(o => (o.propertyName || "").toLowerCase().includes(q))
-  document.getElementById("count").textContent = `${rows.length} observation${rows.length === 1 ? "" : "s"} (newest first)`
+  rows = HotelAwardsUI.sortObservations(rows, SORT, PROMOS)
+  document.getElementById("count").textContent = `${rows.length} observation${rows.length === 1 ? "" : "s"} (${SORT_LABELS[SORT] || "newest first"})`
   document.getElementById("results").innerHTML = rows.length
     ? rows.map(card).join("")
     : '<div class="empty">No award-stay observations match — run npm run hotel-awards:probe.</div>'
+}
+
+async function loadPromos() {
+  try {
+    PROMOS = PromoEnrich.activePromoIndex(await (await fetch("/api/promos/miles")).json(), "hotel")
+  } catch (err) {
+    PROMOS = {}   // feed failure never breaks the read-out — enrichment just disappears
+  }
+  refreshCalcPrograms()
+  calcUpdate()
+  if (ALL.length) apply()   // re-render cards once promo badges are known
 }
 
 async function load() {
@@ -305,10 +390,74 @@ async function runDiscovery() {
 document.getElementById("d-preview").addEventListener("click", previewPlan)
 document.getElementById("d-run").addEventListener("click", runDiscovery)
 
+// ── Points cost calculator ───────────────────────────────────────────────────
+// Answers exactly one question: what would it cost to BUY this many points at
+// the current promo's source-stated purchase rate? Never hotel value, never
+// savings. No explicit rate → no number, badge information only.
+
+let calcStatedTotal = null   // a card's source-stated full-stay total, when it has one
+
+function refreshCalcPrograms() {
+  const sel = document.getElementById("calc-prog")
+  const current = sel.value
+  const programs = [...new Set([...ALL.map(o => o.program), ...Object.keys(PROMOS)])].sort()
+  sel.innerHTML = programs.map(p => `<option value="${esc(p)}">${esc(prog(p))}</option>`).join("")
+  if (programs.includes(current)) sel.value = current
+}
+
+function calcUpdate() {
+  const program = document.getElementById("calc-prog").value
+  const out = document.getElementById("calc-out")
+  const note = document.getElementById("calc-note")
+  const points = Number(String(document.getElementById("calc-pts").value).replace(/[,\s]/g, ""))
+  const p = program ? PROMOS[program] : undefined
+  if (!program) { note.textContent = ""; out.innerHTML = ""; return }
+  if (!p) {
+    note.textContent = `No current buy-points promo for ${prog(program)}.`
+    out.innerHTML = ""
+    return
+  }
+  const ends = PromoEnrich.promoEndsText(p)
+  note.textContent = `${PromoEnrich.hotelPromoBadgeText(p)}${ends ? " · " + ends : ""}` +
+    (p.effectiveCostPerMile == null ? " — no explicit purchase rate stated, so no cost can be estimated (badge only)." : "")
+  if (p.effectiveCostPerMile == null) { out.innerHTML = ""; return }
+  const cents = HotelAwardsUI.buyPointsCostCents(points, p.effectiveCostPerMile)
+  if (cents === null) { out.innerHTML = '<div class="meta">enter a points amount</div>'; return }
+  out.innerHTML = `<div class="calc-result">${fmt.format(points)} points × ${p.effectiveCostPerMile}¢
+    = <span class="big">about ${HotelAwardsUI.centsToDollars(cents)}</span><br>
+    <span class="per">Estimated cost to BUY these points at the current promo purchase rate — not hotel value, not savings.</span>
+    ${calcStatedTotal !== null && points !== calcStatedTotal ? `<div class="meta" style="margin-top:4px"><button type="button" class="calcbtn" onclick="calcUseTotal()">Full stay: use the source-stated total (${fmt.format(calcStatedTotal)} pts)</button></div>` : ""}
+  </div>`
+}
+
+// Prefill from a card: ALWAYS the source-stated points/night. A stay total is
+// offered only when the source itself stated one (Gondola full-stay quotes) —
+// a Roame per-night average is never multiplied into a total.
+function calcFromCard(program, pointsPerNight, statedTotal) {
+  calcStatedTotal = statedTotal
+  document.getElementById("calc").open = true
+  refreshCalcPrograms()
+  document.getElementById("calc-prog").value = program
+  document.getElementById("calc-pts").value = String(pointsPerNight)
+  calcUpdate()
+  document.getElementById("calc").scrollIntoView({ behavior: "smooth", block: "center" })
+}
+
+function calcUseTotal() {
+  if (calcStatedTotal === null) return
+  document.getElementById("calc-pts").value = String(calcStatedTotal)
+  calcUpdate()
+}
+
+document.getElementById("calc-prog").addEventListener("change", () => { calcStatedTotal = null; calcUpdate() })
+document.getElementById("calc-pts").addEventListener("input", calcUpdate)
+
+document.getElementById("sort").addEventListener("change", apply)
 document.getElementById("program").addEventListener("change", load)
 document.getElementById("provider").addEventListener("change", apply)
 document.getElementById("q").addEventListener("input", apply)
-load().catch(err => { document.getElementById("results").innerHTML = '<div class="empty">failed to load: ' + esc(err.message) + "</div>" })
+loadPromos()
+load().then(refreshCalcPrograms).catch(err => { document.getElementById("results").innerHTML = '<div class="empty">failed to load: ' + esc(err.message) + "</div>" })
 </script>
 </body>
 </html>
