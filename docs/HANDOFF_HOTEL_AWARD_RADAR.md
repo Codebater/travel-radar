@@ -5,8 +5,8 @@ Written 2026-08-28 at the end of the Hotel Award Radar session. Audience: the ne
 ## Current checkpoint
 
 - Branch: `extreme-travel-radar`, no upstream — **nothing pushed**.
-- HEAD: `9d52f2f` ("feat: add optimizer-ready hotel perk semantics"), on top of `3e46452` (verified hotel award perks) and `7441c71` (hotel award radar readout).
-- Tests: **1004/1004 passing** (41 files, `npx vitest run`, verified at this HEAD).
+- HEAD: `072449c` ("feat: add travel radar design spine"), on top of `8e82642` (buy-points tools), `bc413a1` (discovery interface), `e199ce0` (sparse discovery), `9d52f2f` (perk semantics), `3e46452` (verified perks), `7441c71` (radar readout).
+- Tests: **1062/1062 passing** (45 files, `npx vitest run`, verified at this HEAD).
 - Typecheck (`npx tsc --noEmit`): **clean**.
 - Lint (`npm run lint`): **0 errors, 5 pre-existing unused-var warnings** (searchClass, ROOT, balances, config, job) — not from this session's work, leave them unless asked.
 - Nothing deployed. **Vault71 (NAS) still runs the pre-Phase-8 flight radar only** — everything from Phase 8a onward (stays, packages, market, fare radar, deal radar, promos, hotel awards) is local-only on this Windows machine.
@@ -118,15 +118,18 @@ Example perk types: nth-night-free award benefits; Marriott "Stay for 5, Pay for
 - Direct-booking perks apply only to compatible (direct/qualifying) rates.
 - Provider/source provenance preserved on every leg of the plan.
 
+## Since the perk layer: discovery, interface, buy-points tools, design spine (all DONE, 2026-08-29)
+
+- **Sparse long-window discovery** (`e199ce0`): LIVE-VERIFIED — Roame's HotelAvailablePeriods is an EXACT-WINDOW quote engine (always echoes the requested check-in + night count; `minNights` only filters; adjacent windows price differently, so cross-window extrapolation is invalid). Long ranges are covered by the deterministic sparse planner (`providers/hotel-awards/planner.ts`: 2/4/5/7-night windows anchored start/middle/end, explicit pre-stated budget, deterministic reduction with dropped windows reported) executed via the shared `executeWindowPlan` (`discover.ts` — one loop for CLI `discover` and `POST /api/hotel-awards/discover`; `GET /api/hotel-awards/plan` previews with zero provider calls). Blocked stops the run, no retries; Gondola keeps its exact-window verifier role and budget.
+- **Discovery is visible and testable** (`bc413a1`): hotel-awards.html carries the search band (destination/dates/guests → Search stays) with the planner demoted to a collapsed "Advanced search details" disclosure; nothing runs without an explicit click. The **flight → stay hand-off exists**: the dashboard's journey CTA ("Continue → Find your stay in BKK") and the RT-summary "Find stay" pass destination/dates/adults via URL; one-way passes NO check-out (the hotel page clears the field and refuses until the user picks one — never invented).
+- **Buy-points tools** (`8e82642`): sort toolbar (newest default, lowest points/night, lowest cash context, best buy-points opportunity), shared hotel promo-feed enrichment on award cards (promo-enrich.js over `/api/promos/miles`, expired/unmapped never shown), and the **points purchase calculator** ("30,000 points × 0.5¢ = about $150 — Estimated cost to BUY these points", never hotel value/savings). All math in `hotel-awards-ui.js` — explicit promo rates only, structurally incapable of touching `nights` (test-enforced), source-stated full-stay totals usable only on explicit choice.
+- **Shared design spine exists** (`072449c`): `radar.css` tokens + `radar-nav.js` navbar (Flights · Stays · Deals · Trips + Radar menu: Observer · Fare Radar · Market) applied to the dashboard and hotel-awards — hero search bands, split hotel cards with program-branded tiles (no fake photos), larger price anchors, provenance in Details disclosures. Presentation only; every honesty string survives verbatim. Remaining pages adopt the spine in later slices.
+
 ## NEXT STEP
 
-Perk-rule data, entitlements, and machine-readable perk semantics are DONE (see above). What remains, in order, all still gated on review before implementation:
+**The next major product step is the first consecutive-night stay optimizer** — a READ-ONLY projection (Deal Radar precedent) over the observation store: cover-every-night-exactly-once DAG across verified segments for a requested window (e.g. Bangkok, Nov 1 → Dec 1); cash and points totals reported separately, never blended; rule-supported constructions only, each citing its perk-rule id and honoring the machine semantics (repetition, certificates, named rates, constraints, exclusions); a Gondola exact-window confirmation pass for the winning plan only. Two enablers on the way: **explicit Gondola/Roame → `stay_properties` ref mappings** for the target city (all observations still have `propertyId: null`; name-matching stays forbidden) so cash and award sides can join, and per-window segment inventory via the existing sparse discovery.
 
-1. **Long-window Roame discovery** — THE next step: decouple Roame's `minNights` from the window length (currently hardcoded to the full window in `providers/hotel-awards/roame.ts` search(); make it config-capped), so a wide `stayDateRange` (e.g. Bangkok, Nov 1 → Dec 1) yields the per-property segment inventory (`offerPeriods` with their own `startDate` + `nights`) a 30-night plan needs. Gondola stays the exact-window verifier under its budget caps, emitting `night_clamped` where measured. No search-behavior change lands without its design being reviewed first.
-2. **Explicit Gondola/Roame → `stay_properties` ref mappings** for the target city (all observations still have `propertyId: null`; name-matching stays forbidden) so cash and award sides can join.
-3. **Consecutive-night optimizer** as a READ-ONLY projection (Deal Radar precedent): cover-every-night-exactly-once DAG over verified segments; cash and points totals reported separately; rule-supported constructions only, each citing its rule id and honoring the machine semantics (repetition, certificates, named rates, constraints, exclusions); a Gondola confirmation pass for the winning plan only.
-
-**Do not implement any step until its design is reviewed.** Hard doctrine in "IMPORTANT NEXT PRODUCT DIRECTION" above is unchanged and binding.
+**Do not implement until the optimizer's design is reviewed.** Hard doctrine in "IMPORTANT NEXT PRODUCT DIRECTION" above is unchanged and binding.
 
 ## Key files
 
@@ -144,6 +147,10 @@ Perk-rule data, entitlements, and machine-readable perk semantics are DONE (see 
 
 ## Recent commits (most relevant, newest first)
 
+- `072449c` feat: add travel radar design spine (radar.css, radar-nav.js, dashboard + hotel-awards restructure)
+- `8e82642` feat: add hotel award buy-points tools (sorting, promo enrichment, points purchase calculator, hotel-awards-ui.js)
+- `bc413a1` feat: add hotel award discovery interface (search band, plan preview, flight→stay hand-off)
+- `e199ce0` feat: add sparse hotel award discovery (exact-window semantics, planner, executor, CLI/API, config)
 - `9d52f2f` feat: add optimizer-ready hotel perk semantics (repetition, certificates, named rates, constraints/exclusions, acquisition alternatives)
 - `3e46452` feat: add verified hotel award perks (perk rules + entitlements configs, perks.ts, API/UI badges, tests)
 - `7441c71` feat: add hotel award radar readout (`hotel-awards.html`, `/api/hotel-awards`, observer overview row)
