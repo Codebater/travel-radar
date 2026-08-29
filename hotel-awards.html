@@ -41,6 +41,16 @@
   .btn { font-size: 12px; padding: 4px 12px; border-radius: 6px; border: 1px solid #314052;
          color: #d7dde5; background: #131b27; text-decoration: none; }
   .empty { color: #6b7a8c; padding: 24px 0; font-size: 13px; }
+  .panel { border: 1px solid #1d2733; border-radius: 10px; padding: 12px 15px; margin: 0 0 14px; background: #0d131c; }
+  .panel-title { font-size: 11px; letter-spacing: 1.5px; color: #8fa1b5; margin-bottom: 8px; }
+  .ck { font-size: 12px; color: #c6d0da; margin-right: 8px; white-space: nowrap; }
+  .ck input { vertical-align: -2px; }
+  button.btn { cursor: pointer; }
+  button.btn.run { border-color: #6b5327; color: #ffd479; }
+  button.btn[disabled] { opacity: 0.5; cursor: default; }
+  .err { color: #ff9d9d; font-size: 12px; margin-top: 8px; }
+  .plan { margin-top: 10px; }
+  .plan .tag { margin: 2px 4px 2px 0; display: inline-block; }
 </style>
 </head>
 <body>
@@ -50,6 +60,25 @@
   <div style="margin-top:6px"><a class="back" href="/observer.html">← Observer</a> · <a class="back" href="/">Search dashboard</a></div>
 </header>
 <main>
+  <div class="panel" id="discovery">
+    <div class="panel-title">LONG-STAY DISCOVERY — sparse exact Roame windows (no search runs without your click)</div>
+    <div class="form">
+      <span><label>Destination</label><input id="d-location" value="Bangkok"></span>
+      <span><label>Check-in</label><input id="d-in" value="2026-11-01" style="width:110px"></span>
+      <span><label>Check-out</label><input id="d-out" value="2026-12-01" style="width:110px"></span>
+      <span><label>Candidate stays</label>
+        <label class="ck"><input type="checkbox" class="d-n" value="2" checked>2 nights</label>
+        <label class="ck"><input type="checkbox" class="d-n" value="4" checked>4 nights</label>
+        <label class="ck"><input type="checkbox" class="d-n" value="5" checked>5 nights</label>
+        <label class="ck"><input type="checkbox" class="d-n" value="7" checked>7 nights</label>
+      </span>
+      <span><label>Max windows</label><input id="d-max" value="8" style="width:52px"></span>
+      <button class="btn" id="d-preview" type="button">Preview plan</button>
+      <button class="btn run" id="d-run" type="button">Run discovery</button>
+    </div>
+    <div id="d-plan"></div>
+    <div id="d-status"></div>
+  </div>
   <div class="form" id="form">
     <span><label>Program</label><select id="program"><option value="">All programs</option></select></span>
     <span><label>Provider</label><select id="provider"><option value="">All</option></select></span>
@@ -167,6 +196,114 @@ async function load() {
   ALL = data.observations || []
   apply()
 }
+
+// ── Long-stay discovery panel ────────────────────────────────────────────────
+// Preview is READ-ONLY (zero provider calls); discovery runs ONLY on the
+// explicit Run click — nothing on this page searches automatically.
+
+// Known hotel regions by destination airport — presentation data for the
+// flight-dashboard hand-off. An unmapped IATA passes through verbatim and the
+// provider answers honestly (structured unconfigured, never a guessed box).
+const IATA_LOCATIONS = { BKK: "Bangkok", DMK: "Bangkok" }
+let tripAdults = null
+
+// Trip hand-off from the flight dashboard (?dest&checkIn&checkOut&adults):
+// PREFILL ONLY. Nothing searches without an explicit click, and a one-way
+// hand-off (no checkOut) clears the check-out field instead of inventing one.
+function prefillFromTrip() {
+  const q = new URLSearchParams(location.search)
+  const dest = q.get("dest")
+  const loc = q.get("location")
+  if (loc) document.getElementById("d-location").value = loc
+  else if (dest) document.getElementById("d-location").value = IATA_LOCATIONS[dest.toUpperCase()] || dest.toUpperCase()
+  const checkIn = q.get("checkIn")
+  const checkOut = q.get("checkOut")
+  if (checkIn) {
+    document.getElementById("d-in").value = checkIn
+    document.getElementById("d-out").value = checkOut ?? ""
+    if (!checkOut) {
+      document.getElementById("d-plan").innerHTML =
+        '<div class="meta">One-way flight hand-off — enter your own check-out date, then preview. No date was invented for you.</div>'
+    }
+  }
+  const adults = q.get("adults")
+  if (adults && Number.isInteger(Number(adults)) && Number(adults) >= 1) tripAdults = Number(adults)
+}
+prefillFromTrip()
+
+function discoveryParams() {
+  const nights = [...document.querySelectorAll(".d-n")].filter(c => c.checked).map(c => c.value)
+  const p = new URLSearchParams({
+    location: document.getElementById("d-location").value.trim(),
+    checkIn: document.getElementById("d-in").value.trim(),
+    checkOut: document.getElementById("d-out").value.trim(),
+  })
+  if (nights.length) p.set("nights", nights.join(","))
+  const max = document.getElementById("d-max").value.trim()
+  if (max) p.set("maxWindows", max)
+  if (tripAdults !== null) p.set("adults", String(tripAdults))
+  return p
+}
+
+// Both actions refuse a missing check-out up front with the honest reason.
+function checkOutMissing(el) {
+  if (document.getElementById("d-out").value.trim()) return false
+  el.innerHTML = '<div class="err">check-out is required — a one-way flight hand-off does not invent one; pick your own date</div>'
+  return true
+}
+
+async function previewPlan() {
+  const box = document.getElementById("d-plan")
+  if (checkOutMissing(box)) return
+  box.innerHTML = '<div class="meta">planning… (read-only — zero provider calls)</div>'
+  try {
+    const res = await fetch("/api/hotel-awards/plan?" + discoveryParams())
+    const data = await res.json()
+    if (!res.ok) { box.innerHTML = `<div class="err">${esc(data.error || "plan failed")}</div>`; return }
+    const p = data.plan
+    box.innerHTML = `<div class="plan">
+      <div class="meta">Requested ${esc(p.rangeStart)} → ${esc(p.rangeEnd)} (${p.totalNights} nights) ·
+        candidate windows before budget: ${data.candidatesBeforeBudget} · selected: ${p.windows.length} ·
+        dropped: ${p.dropped.length} · budget ${p.budget} · at most ${data.maxHttpCalls} Roame HTTP calls
+        (${data.maxPagesPerWindow} page(s)/window) · this preview spent zero provider calls</div>
+      <div>${p.windows.map(w => `<span class="tag">${esc(w.checkIn)} → ${esc(w.checkOut)} · ${w.nights}n · ${esc(w.anchor)}</span>`).join("")}</div>
+      ${p.dropped.length ? `<div class="meta">dropped over budget (deterministic): ${p.dropped.map(w => `${esc(w.checkIn)} ${w.nights}n`).join(", ")}</div>` : ""}
+    </div>`
+  } catch (err) {
+    box.innerHTML = `<div class="err">plan failed: ${esc(err.message)}</div>`
+  }
+}
+
+async function runDiscovery() {
+  const btn = document.getElementById("d-run")
+  const status = document.getElementById("d-status")
+  if (checkOutMissing(status)) return
+  btn.disabled = true
+  status.innerHTML = '<div class="meta">running discovery — executing planned exact Roame windows…</div>'
+  try {
+    const res = await fetch("/api/hotel-awards/discover?" + discoveryParams(), { method: "POST" })
+    const data = await res.json()
+    if (!res.ok) { status.innerHTML = `<div class="err">${esc(data.error || "discovery failed")}</div>`; return }
+    const s = data.summary
+    const oddStates = s.results.filter(r => r.searchState !== "complete")
+    status.innerHTML = `<div class="plan">
+      <div class="meta">windows ${s.windowsCompleted}/${s.windowsPlanned} · provider calls ${s.providerCalls} ·
+        observations stored ${s.observationsStored} · distinct hotels ${s.distinctHotels} ·
+        programs: ${s.programs.map(p => esc(prog(p))).join(", ") || "—"}</div>
+      ${s.stoppedOnBlock ? '<div class="err">BLOCKED — the run stopped early; no retries were attempted.</div>' : ""}
+      ${oddStates.length ? `<div class="meta">non-complete windows: ${oddStates.map(r =>
+        `${esc(r.window.checkIn)} ${r.window.nights}n — ${esc(r.searchState)}${r.error ? " (" + esc(r.error) + ")" : ""}`).join("; ")}</div>` : ""}
+    </div>`
+    await load()   // the stored observations render through the existing cards + filters
+  } catch (err) {
+    status.innerHTML = `<div class="err">discovery failed: ${esc(err.message)}</div>`
+  } finally {
+    btn.disabled = false
+  }
+}
+
+document.getElementById("d-preview").addEventListener("click", previewPlan)
+document.getElementById("d-run").addEventListener("click", runDiscovery)
 
 document.getElementById("program").addEventListener("change", load)
 document.getElementById("provider").addEventListener("change", apply)
