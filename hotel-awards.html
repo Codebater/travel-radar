@@ -85,6 +85,7 @@
       <span><label>Check-out</label><input id="d-out" value="2026-12-01" style="width:110px"></span>
       <span><label>Guests</label><input id="d-adults" value="2" style="width:44px"></span>
       <button class="r-btn primary" id="d-run" type="button">Search stays</button>
+      <button class="r-btn amber" id="p-run" type="button" title="Read-only: builds a night-by-night plan from ALREADY STORED observations — no provider calls, no new searches.">Find best stay plan</button>
     </div>
     <!-- Advanced planner controls — unchanged behavior (sparse exact Roame
          windows, explicit budget, plan preview), visually secondary. -->
@@ -103,6 +104,7 @@
       <div id="d-plan"></div>
     </details>
     <div id="d-status"></div>
+    <div id="plan-out"></div>
   </div>
   <div class="form" id="form">
     <span><label>Sort</label><select id="sort">
@@ -421,6 +423,61 @@ async function runDiscovery() {
 
 document.getElementById("d-preview").addEventListener("click", previewPlan)
 document.getElementById("d-run").addEventListener("click", runDiscovery)
+
+// ── Consecutive-night stay optimizer (V1) ────────────────────────────────────
+// READ-ONLY projection over already-stored observations: zero provider
+// calls, no new observations. Segments are valid only for their exact
+// observed dates; per-night figures never become totals; program totals
+// stay separate — no cross-program points number exists.
+
+function planSegmentLine(s) {
+  const pts = s.pointsTotal !== null
+    ? `${fmt.format(s.pointsTotal)} pts total (stated)`
+    : (s.pointsPerNight !== null ? `${fmt.format(s.pointsPerNight)} pts/night (per-night only — no stay total stated)` : "points not stated")
+  return `<div class="line" style="margin:3px 0">${esc(s.checkIn)} → ${esc(s.checkOut)} (${s.nights}n) · <b>${esc(s.propertyName)}</b> · ${esc(prog(s.program))} · <span style="color:#ffd479">${pts}</span></div>`
+}
+
+function renderPlan(p, requestedNights, label) {
+  const totals = p.programTotals.map(t => t.statedTotal !== null
+    ? `<div class="line">${esc(prog(t.program))}: ${fmt.format(t.statedTotal)} pts (${t.statedSegments} source-stated stay total${t.statedSegments === 1 ? "" : "s"})</div>`
+    : `<div class="line">${esc(prog(t.program))}: no source-supported total — ${t.perNightOnlySegments} per-night-only segment${t.perNightOnlySegments === 1 ? "" : "s"} (a per-night average is never multiplied into a stay total)</div>`
+  ).join("")
+  const uncovered = p.uncoveredDates.length
+    ? `<div class="err">Uncovered nights (${p.uncoveredDates.length}): ${p.uncoveredDates.map(esc).join(", ")}</div>` : ""
+  return `<div class="plan">
+    <div class="meta" style="color:#9fb0c0"><b>${label}</b> — ${p.coveredNights}/${requestedNights} nights covered · ${p.segments.length} hotel segment${p.segments.length === 1 ? "" : "s"} · ${p.switches} switch${p.switches === 1 ? "" : "es"}</div>
+    ${p.segments.map(planSegmentLine).join("")}
+    ${uncovered}
+    <div class="meta" style="margin-top:6px">Totals (per program — never combined across programs):</div>
+    ${totals || '<div class="line">no segments</div>'}
+  </div>`
+}
+
+async function findStayPlan() {
+  const box = document.getElementById("plan-out")
+  if (checkOutMissing(box)) return
+  box.innerHTML = '<div class="meta">planning from stored observations… (read-only, zero provider calls)</div>'
+  try {
+    const cin = document.getElementById("d-in").value.trim()
+    const cout = document.getElementById("d-out").value.trim()
+    const res = await fetch(`/api/hotel-awards/stayplan?checkIn=${encodeURIComponent(cin)}&checkOut=${encodeURIComponent(cout)}`)
+    const data = await res.json()
+    if (!res.ok) { box.innerHTML = `<div class="err">${esc(data.error || "plan failed")}</div>`; return }
+    if (!data.plans.length) {
+      box.innerHTML = '<div class="err">No stored observations fall inside this range — run a discovery search first.</div>'
+      return
+    }
+    const [best, ...alts] = data.plans
+    const bestLabel = best.coveredNights === data.requestedNights ? "Best complete plan" : "Best PARTIAL plan (full coverage impossible with stored observations)"
+    box.innerHTML = `<div class="meta" style="margin-top:8px">${esc(data.disclaimer)}</div>`
+      + renderPlan(best, data.requestedNights, bestLabel)
+      + (alts.length ? `<details class="adv"><summary>Alternative plans (${alts.length})</summary>${alts.map((p, i) => renderPlan(p, data.requestedNights, `Alternative ${i + 1}`)).join("")}</details>` : "")
+  } catch (err) {
+    box.innerHTML = `<div class="err">plan failed: ${esc(err.message)}</div>`
+  }
+}
+
+document.getElementById("p-run").addEventListener("click", findStayPlan)
 
 // ── Points cost calculator ───────────────────────────────────────────────────
 // Answers exactly one question: what would it cost to BUY this many points at

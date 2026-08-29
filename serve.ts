@@ -43,6 +43,7 @@ import { listStayCandidates, stayCandidateTotals } from "./stays/candidates.js"
 import { listHotelAwards } from "./providers/hotel-awards/store.js"
 import { applicablePerks, loadEntitlements, loadHotelPerkRules, type PerkBadge } from "./providers/hotel-awards/perks.js"
 import { planStayWindows } from "./providers/hotel-awards/planner.js"
+import { buildStayPlan } from "./providers/hotel-awards/stayplan.js"
 import { executeWindowPlan } from "./providers/hotel-awards/discover.js"
 import { loadHotelAwardsConfig } from "./providers/hotel-awards/gondola.js"
 import { RoameHotelAwardsProvider } from "./providers/hotel-awards/roame.js"
@@ -475,6 +476,31 @@ const server = http.createServer(async (req, res) => {
       res.end(JSON.stringify(feed, null, 2))
     } catch (err) {
       res.writeHead(500, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: GET /api/hotel-awards/stayplan — consecutive-night stay optimizer
+  // V1: a READ-ONLY projection over STORED award observations (no searches,
+  // no writes, no observations created). Edges are exact observation ranges
+  // only; per-night averages never become totals; program totals stay
+  // separate. Ranking: coverage, then switches, then valid stated-points
+  // dominance, then a deterministic signature.
+  if (url.pathname === "/api/hotel-awards/stayplan") {
+    try {
+      const checkIn = url.searchParams.get("checkIn")
+      const checkOut = url.searchParams.get("checkOut")
+      if (!checkIn || !checkOut) throw new BadRequest("checkIn and checkOut are required")
+      const observations = listHotelAwards(getDb(), { limit: 2000 })
+      const result = buildStayPlan(observations, checkIn, checkOut)
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({
+        disclaimer: "Read-only plan over stored observations. Segments are valid ONLY for their exact observed dates. Per-night figures stay per-night — no stay total is ever synthesized from them; program totals sum SOURCE-STATED full-stay totals of one program only, and no cross-program total exists.",
+        ...result,
+      }, null, 2))
+    } catch (err) {
+      res.writeHead(400, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
     return

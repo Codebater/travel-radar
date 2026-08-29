@@ -198,8 +198,8 @@ describe("flight dashboard → Find stay hand-off", () => {
     expect(hotel).toContain("No date was invented for you")
     expect(hotel).toContain("function checkOutMissing")
     expect(hotel).toContain("check-out is required — a one-way flight hand-off does not invent one")
-    // Both preview and run guard before any fetch.
-    expect(hotel.match(/checkOutMissing\((box|status)\)/g)).toHaveLength(2)
+    // Preview, run, and the stay-plan action all guard before any fetch.
+    expect(hotel.match(/checkOutMissing\((box|status)\)/g)).toHaveLength(3)
   })
 
   it("adults from the hand-off travel into discovery params when present", () => {
