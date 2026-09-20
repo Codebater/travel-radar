@@ -18,7 +18,7 @@
       "node"
     ]
   },
-  "//": "Scoped to the live search path. arkalis/ and awardwiz-scrapers/ are inherited AwardWiz code that is not on the search.ts/serve.ts path and is not typechecked here.",
+  "//": "Scoped to the live search path (search.ts / serve.ts and the modules they reach).",
   "include": [
     "search.ts",
     "serve.ts",

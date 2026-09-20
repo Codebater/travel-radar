@@ -27,9 +27,6 @@
     "lint": "eslint search.ts serve.ts load-env.ts atf-register.ts roame-scraper.ts atf-scraper.ts value-engine.ts value-compare.ts sweet-spots.ts transfer-partners.ts db providers cache observer anomaly discovery notifications stays trips packages market offers fareradar tests --ext .ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:scrapers": "vitest run --config awardwiz-scrapers/vite.config.ts awardwiz-scrapers/scrapers.test.ts",
-    "dev:scrapers": "vite-node --watch awardwiz-scrapers/main-debug.ts",
-    "legacy:cli": "tsx cli.ts",
     "anomaly:evaluate": "tsx anomaly/cli.ts evaluate",
     "anomaly:backfill": "tsx anomaly/cli.ts backfill",
     "anomaly:candidates": "tsx anomaly/cli.ts candidates",
@@ -94,7 +91,7 @@
     "hotel-awards:probe": "tsx providers/hotel-awards/cli.ts probe",
     "hotel-awards:list": "tsx providers/hotel-awards/cli.ts list"
   },
-  "name": "awardwiz",
+  "name": "travel-radar",
   "engines": {
     "node": ">=22.0.0"
   },

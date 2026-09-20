@@ -41,8 +41,8 @@ npm install
 
 `.npmrc` sets `legacy-peer-deps=true`. Without it npm aborts with `ERESOLVE`:
 `vite-plugin-watch-and-run@1.8.x` wants `vite >= 5` while the project pins
-`vite ^4.3.9` for the inherited AwardWiz scraper tooling. Nothing else in the
-tree is affected.
+`vite ^4.3.9`. Both are legacy dev dependencies that nothing in the live search
+path uses; the pin is kept only so the lockfile resolves reproducibly.
 
 Optional — the Python search sources:
 
@@ -195,10 +195,6 @@ The suite covers cache keys and itinerary identity, cache hit/expiry/corruption,
 database insertion and append-only history, deduplication, provider fallback,
 concurrent quota updates, the SerpAPI budget guard, and the Phase 1 security
 fixes.
-
-`npm run test:scrapers` runs the inherited AwardWiz suite. It drives real
-airline sites through headless Chrome and every scraper in it is commented out
-upstream, so it currently collects zero tests. Don't expect it to pass.
 
 ### Stopping / restarting
 
@@ -916,15 +912,10 @@ Check the server console to see which source failed and why.
   and does not kick off a background refresh. Adding one meant either a job
   runner or fire-and-forget promises that outlive the request; Phase 2 chose
   reliability over cleverness, and a cache miss is only ~1.3s anyway.
-- **`npm run legacy:cli`** (`cli.ts`) does not run: it imports
-  `awardwiz-scrapers/integrations/`, which is git-ignored and absent from the
-  repo. `npm run search` (`search.ts`) is the working orchestrator.
 - **`gateway-scanner.ts`** is documented in `CLAUDE.md` but does not exist in
   the repo.
-- **Individual airline scrapers** under `awardwiz-scrapers/scrapers/` are either
-  broken (United, Alaska, Delta, Aeroplan) or unimplemented skeletons
-  (Air France, BA, Qatar, Emirates). Roame covers those programs instead. See
-  `SCRAPER_RESEARCH_NEEDED.md`.
+- **Per-airline scrapers are not implemented here.** Roame covers those
+  programs instead.
 - **The dashboard requires internet even for cached data** — Tailwind and Inter
   load from CDNs.
 - **No sample captures are committed.** `results*.json` is git-ignored; generate

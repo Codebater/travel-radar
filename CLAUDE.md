@@ -9,7 +9,6 @@ search.ts (Orchestrator)
 ├── roame-scraper.ts → Roame GraphQL API (award flights, ALL programs)
 ├── SerpAPI → Google Flights (cash prices, needs SERP_API_KEY)
 ├── hidden city engine → Python script (savings opportunities)
-├── awardwiz-scrapers/scrapers/aa.ts → AA direct (detailed data, backup)
 ├── AwardWallet API → Points balances
 └── results.json → dashboard.html
 ```
@@ -45,7 +44,7 @@ search.ts (Orchestrator)
 - Warning banners
 - Source badges (LIVE for Roame data)
 
-### ✅ AA Direct Scraper (via Arkalis)
+### ✅ AA Direct Scraper
 - `evaluate(fetch())` pattern bypasses CORS
 - Returns detailed fare class data, saver fare detection
 - 37 real flights in 3 seconds
@@ -85,8 +84,8 @@ search.ts (Orchestrator)
 - Hidden city engine also uses it for real price data
 - **Tested**: 28 economy fares for LAX→JFK in single API call
 
-### 🔴 Individual Airline Scrapers (via Arkalis)
-These use Arkalis (headless Chrome CDP engine) and need the APIs to be reverse-engineered.
+### 🔴 Individual Airline Scrapers
+Not implemented here. Roame covers these programs instead.
 Roame replaces them for award search. They're only needed for cash prices and fare class detail.
 
 - **United** (`united.ts`): BROKEN. Auth flow changed — `/api/auth/anonymous-token` returns a hash that `FetchFlights` rejects with 403 "AuthenticationSkipped". Research (Feb 16): GitHub wiki shows token is a long base64 string from cookie-based auth, not the anonymous endpoint. United blocks all non-browser requests. The correct token endpoint may be `/api/svc/token/anonymous` or require login. Needs real browser DevTools to capture current auth flow.
@@ -141,12 +140,9 @@ roame-scraper.ts     # Roame GraphQL client + CLI
 search.ts            # Unified orchestrator (Roame + Google + Hidden City)
 serve.ts             # HTTP server for dashboard
 dashboard.html       # Dynamic flight comparison UI
-cli.ts               # Legacy CLI (Arkalis-based scrapers)
 gateway-scanner.ts   # Gateway positioning flight scanner
 results.json         # Latest search results (auto-generated)
 .env                 # Environment variables (SERP_API_KEY, etc.)
-arkalis/             # Headless Chrome engine (from AwardWiz)
-awardwiz-scrapers/   # Individual airline scrapers + integrations
 scripts/             # Python search scripts (Google, hidden city, etc.)
 data/                # Static data (airport alternates, hub connections)
 ```

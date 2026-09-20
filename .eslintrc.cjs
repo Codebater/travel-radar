@@ -1,6 +1,5 @@
 /**
- * Scoped to the live search path. arkalis/ and awardwiz-scrapers/ are inherited
- * AwardWiz code that is not linted here — see DEVELOPMENT.md.
+ * Scoped to the live search path — see DEVELOPMENT.md.
  */
 module.exports = {
   root: true,
@@ -9,7 +8,7 @@ module.exports = {
   parserOptions: { ecmaVersion: 2022, sourceType: "module" },
   plugins: ["@typescript-eslint"],
   extends: ["eslint:recommended", "plugin:@typescript-eslint/recommended"],
-  ignorePatterns: ["arkalis/**", "awardwiz-scrapers/**", "node_modules/**", "*.js", "scripts/**"],
+  ignorePatterns: ["node_modules/**", "*.js", "scripts/**"],
   rules: {
     "@typescript-eslint/no-explicit-any": "off",
     "@typescript-eslint/no-non-null-assertion": "off",
