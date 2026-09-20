@@ -1,31 +1,19 @@
 # Development Guide
 
-> ## ⚠️ UNRESOLVED SECURITY ISSUE — real loyalty balances are in public git history
+> ## Note on sample capture files
 >
-> `results-dxb-outbound.json` and `results-dxb-return.json` were committed
-> before the `results*.json` ignore rule existed. They contain **34 real
-> loyalty-account balances** (Marriott 984,722; Chase UR 387,429; Aeroplan
-> 475,663; and 31 more) and are reachable in the public GitHub history of
-> `wiziswiz/flight-search-agent`.
+> Earlier revisions of the upstream project carried committed search captures
+> (`results.json`, `results-dxb-outbound.json`, `results-dxb-return.json`) that
+> included real loyalty-account balances belonging to the upstream author. They
+> predate the `results*.json` ignore rule.
 >
-> **This is still unfixed.** Deleting the files from the working tree would not
-> remove them from history. Fixing it requires a history rewrite plus a force
-> push to the public repository, which destroys the existing commit hashes for
-> anyone who has cloned it.
+> **They are not in this repository.** They were removed from every commit before
+> it was first published, verified by scanning all 110 commits for balance data
+> and for credential-shaped strings. No API key, session cookie or password was
+> ever committed at any point in this history.
 >
-> **Nothing has been done about this without your explicit approval.** No
-> history has been rewritten, nothing has been force-pushed, no remote history
-> has been deleted, and no credentials have been rotated. When you want it
-> resolved, the options are:
->
-> 1. `git filter-repo --path results-dxb-outbound.json --path results-dxb-return.json --invert-paths`, then force-push, then ask GitHub Support to purge cached views.
-> 2. Delete and recreate the repository from a clean tree.
-> 3. Accept the exposure — the data is account balances, not credentials; no API
->    key, session cookie or password was ever committed (verified by scanning
->    the full history).
->
-> Balances alone cannot be used to log in or book anything, so this is a privacy
-> exposure rather than an account-takeover risk. It is still worth resolving.
+> If you need sample data for dashboard work, run a search and use your own
+> `results.json` — it is ignored by git.
 
 Local setup for the flight search agent. Written against a Windows 11 machine
 (PowerShell + Git Bash); the macOS/Linux differences are called out inline.
@@ -834,16 +822,17 @@ and remains the fallback for the server-down / file:// case.
 | `roame-results.json` | `roame-scraper.ts` CLI | Raw Roame payload | ignored |
 | `.venv/` | you | Python deps | ignored |
 
-`results-dxb-outbound.json` / `results-dxb-return.json` are committed sample
-captures from Feb 2026, useful for working on the dashboard without spending API
-budget (see the warning at the top of this file about their contents):
+This repository ships **no** committed captures — see the note at the top of
+this file. To work on the dashboard without spending API budget, run one search
+and keep its output:
 
 ```bash
-cp results-dxb-outbound.json results.json
+npm run search -- --from LAX --to DXB   # writes results.json (git-ignored)
+cp results.json results-sample.json     # also ignored; reuse it freely
 ```
 
-Reload the dashboard and you get 131 real flights to click through. **This is
-sample data, not a live search** — the header timestamp shows the capture date.
+Reload the dashboard and you get real flights to click through. **That is a
+saved capture, not a live search** — the header timestamp shows the capture date.
 
 ---
 
@@ -938,6 +927,5 @@ Check the server console to see which source failed and why.
   `SCRAPER_RESEARCH_NEEDED.md`.
 - **The dashboard requires internet even for cached data** — Tailwind and Inter
   load from CDNs.
-- **`results-dxb-*.json` in git contain 34 real loyalty balances.** They predate
-  the `results*.json` ignore rule. Removing them from the working tree does not
-  remove them from history.
+- **No sample captures are committed.** `results*.json` is git-ignored; generate
+  your own with a search.
