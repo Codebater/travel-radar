@@ -153,6 +153,6 @@ data/                # Static data (airport alternates, hub connections)
 
 ## Credentials
 
-- `~/.openclaw/credentials/roame.json` — Roame session cookie (expires Feb 23, 2026)
+- `~/.openclaw/credentials/roame.json` — Roame session cookie (expiry = `sessionExpiresAt` in the file; `GET /api/hotel-awards/status` shows it — re-save the session from roame.travel when it lapses)
 - `~/.openclaw/credentials/awardwallet.json` — AwardWallet API key + user ID
 - `.env` file — `SERP_API_KEY` for Google Flights via SerpAPI

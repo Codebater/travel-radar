@@ -337,6 +337,42 @@ describe("§39 the notification destination is never served", () => {
   })
 })
 
+describe("stay-plan re-check route spends nothing before the explicit run", () => {
+  const post = (body: unknown) => fetch(`${base}/api/hotel-awards/recheck-windows`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  })
+
+  it("refuses an unconfigured destination up front and caps the preview at the config budget — no usage row appears", async () => {
+    expect((await post({ location: "nowhere", windows: [{ checkIn: "2026-11-01", nights: 5 }] })).status).toBe(400)
+    const many = Array.from({ length: 20 }, (_, i) => ({ checkIn: `2026-11-${String(i + 1).padStart(2, "0")}`, nights: 2 }))
+    const pv = await post({ location: "bangkok", windows: many, preview: true, maxWindows: 100 })
+    expect(pv.status).toBe(200)
+    const p = await pv.json() as any
+    expect(p.preview).toBe(true)
+    expect(p.plan.windows).toHaveLength(8)
+    expect(p.plan.dropped).toHaveLength(12)
+    expect(JSON.stringify(p)).not.toMatch(/csrfSecret|"session"/)
+    // Neither the 400 nor the preview constructed a provider: no roame_hotels
+    // usage was recorded on this fresh database.
+    const status = await (await fetch(`${base}/api/hotel-awards/status`)).json() as any
+    expect(status.usage).toBeNull()
+    expect((await fetch(`${base}/api/hotel-awards/recheck-windows`)).status).toBe(405)
+  })
+
+  it("the status pre-flight and the balances snapshot are reads with no secrets", async () => {
+    const s = await fetch(`${base}/api/hotel-awards/status`)
+    expect(s.status).toBe(200)
+    const text = await s.text()
+    expect(text).not.toMatch(/csrfSecret|\.openclaw/)
+    const b = await fetch(`${base}/api/balances`)
+    expect(b.status).toBe(200)
+    expect(b.headers.get("cache-control")).toBe("no-store")
+    const body = await b.json() as any
+    expect(["none", "snapshot"]).toContain(body.state)
+    expect(JSON.stringify(body)).not.toContain("1392260")           // the upstream demo/fallback value never appears
+  })
+})
+
 describe("provider endpoints do not spend money", () => {
   it("reports health without performing a billable call", async () => {
     const res = await fetch(`${base}/api/providers`)

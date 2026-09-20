@@ -12,6 +12,12 @@
       "runtimeExecutable": "npx",
       "runtimeArgs": ["tsx", "serve.ts", "--port", "8899"],
       "port": 8899
+    },
+    {
+      "name": "travel-radar-8901",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["tsx", "serve.ts", "--port", "8901"],
+      "port": 8901
     }
   ]
 }

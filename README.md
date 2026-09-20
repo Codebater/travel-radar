@@ -1,4 +1,29 @@
-# ✈️ Flight Search Agent
+# ✈️ Travel Radar
+
+> **Built on [wiziswiz/flight-search-agent](https://github.com/wiziswiz/flight-search-agent)**
+> (MIT). That project is the flight-search core described below and its licence and
+> copyright are kept intact in [LICENSE](LICENSE). Travel Radar is what grew on top of
+> it: hotels, trips, packages, and a set of standing radars that watch for value instead
+> of waiting to be asked.
+
+## What was added on top
+
+| | |
+|---|---|
+| **Stay Radar** (`stays/`) | Standing watch on hotel award and cash rates, with triggers, verification and opportunity scoring |
+| **Hotel awards** (`providers/hotel-awards/`) | Award availability, perks, buy-points maths and a consecutive-night stay planner |
+| **Trip Composer** (`trips/`) | Assembles flights and stays into whole trips rather than isolated bookings |
+| **Packages** (`packages/`) | Calendar, offers and comparison across package options |
+| **Fare Radar** (`fareradar/`) | Standing business- and first-class fare watch, including one-way |
+| **Market layer** (`market/`) | FX handling and verdicts, so prices compare honestly across currencies |
+| **Offers** (`offers/`) | Bookable offers built from observations, with rechecks |
+| **Discovery / anomaly** (`discovery/`, `anomaly/`) | Finds routes and prices worth a second look |
+| **Observer / notifications** (`observer/`, `notifications/`) | Unattended scheduling and push, with secrets redacted everywhere |
+
+1,232 tests across 64 files. `npm test`.
+
+---
+
 
 Multi-source flight search that always finds the best value path — whether points or cash. Searches 19+ award programs and Google Flights in parallel, then scores every result with real CPP analysis, sweet spot detection, and transfer path awareness.
 

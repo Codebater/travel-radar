@@ -282,6 +282,48 @@ export function loadEntitlements(force = false, configPath = ENTITLEMENTS_PATH):
   return raw
 }
 
+/** Persist a DECLARED entitlements config — the "Edit entitlements" write
+ *  path. Validated with the same refuse-loudly rules as loading; an invalid
+ *  config never reaches disk and the cache only updates on success. */
+export function saveEntitlements(config: EntitlementsConfig, configPath = ENTITLEMENTS_PATH): EntitlementsConfig {
+  const problems = validateEntitlements(config)
+  if (problems.length > 0) throw new Error(`refusing to save invalid entitlements:\n  - ${problems.join("\n  - ")}`)
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n")
+  if (configPath === ENTITLEMENTS_PATH) cachedEntitlements = config
+  return config
+}
+
+export interface EntitlementKeyOption { kind: EntitlementKind; key: string; programs: string[] }
+export interface CertificateTypeOption { type: string; programs: string[] }
+
+/** Every entitlement key and certificate type the perk rules can actually
+ *  consume — the closed vocabulary a declaration UI offers. Derived from the
+ *  rules, never guessed; deterministic order. */
+export function entitlementKeyCatalog(rules: HotelPerkRulesConfig): {
+  eligibility: EntitlementKeyOption[]
+  certificates: CertificateTypeOption[]
+} {
+  const elig = new Map<string, EntitlementKeyOption>()
+  const certs = new Map<string, CertificateTypeOption>()
+  for (const rule of rules.rules) {
+    for (const k of rule.eligibility.anyOf) {
+      const [kind, key] = k.split(":") as [EntitlementKind, string]
+      const cur = elig.get(k) ?? { kind, key, programs: [] }
+      if (!cur.programs.includes(rule.program)) cur.programs.push(rule.program)
+      elig.set(k, cur)
+    }
+    if (rule.requiresCertificate) {
+      const cur = certs.get(rule.requiresCertificate.type) ?? { type: rule.requiresCertificate.type, programs: [] }
+      if (!cur.programs.includes(rule.program)) cur.programs.push(rule.program)
+      certs.set(rule.requiresCertificate.type, cur)
+    }
+  }
+  return {
+    eligibility: [...elig.values()].sort((a, b) => a.kind.localeCompare(b.kind) || a.key.localeCompare(b.key)),
+    certificates: [...certs.values()].sort((a, b) => a.type.localeCompare(b.type)),
+  }
+}
+
 // ── Matching (pure, deterministic — the date is an argument, never Date.now)──
 
 export type PerkEligibilityState = "eligible" | "purchasable" | "requires"
@@ -320,7 +362,10 @@ export interface PerkMatchStay {
   checkIn: string
 }
 
-function heldKeys(ents: EntitlementsConfig): Set<string> {
+/** The DECLARED entitlement keys as "kind:KEY" — the only thing eligibility
+ *  is ever tested against. Exported so plan-level attribution can say WHICH
+ *  declared key satisfied a rule (never inferred). */
+export function heldKeys(ents: EntitlementsConfig): Set<string> {
   const s = new Set<string>()
   for (const k of ents.held.memberships) s.add(`membership:${k}`)
   for (const k of ents.held.statuses) s.add(`status:${k}`)

@@ -79,6 +79,10 @@ export function mapProgramKey(name: string): string {
   if (lower.includes("hilton")) return "hilton"
   if (lower.includes("southwest")) return "southwest"
   if (lower.includes("bilt")) return "bilt"
+  // Hotel keys match transfer-partners.ts exactly ("hyatt" lower, "IHG" upper)
+  // so a snapshot row can be joined to its transfer edges without a second map.
+  if (lower.includes("hyatt")) return "hyatt"
+  if (lower.includes("ihg") || lower.includes("one rewards")) return "IHG"
   return lower.replace(/\s+/g, "-")
 }
 
@@ -329,5 +333,72 @@ export function balancesHealth(db: DB = getDb()): ProviderHealth {
   return {
     provider: "awardwallet", status: "ok", latencyMs: null, checkedAt, quota: null,
     detail: "configured; no snapshot yet — first search will fetch",
+  }
+}
+
+/** One stored account row, exactly as snapshotted — never merged with another. */
+export interface BalancesSnapshotAccount {
+  program: string
+  programKey: string
+  balance: number
+  /** en-US thousands grouping of `balance`; presentation only, never re-parsed. */
+  displayBalance: string
+}
+
+/**
+ * Read-only view of the LOCAL balance snapshot for the hotel-awards page.
+ *
+ * HONESTY: this payload never triggers a fetch and never carries the fallback
+ * list — a page that shows balances must show the user's own numbers or none.
+ * `state` says which of the two happened:
+ *   - "snapshot": `source`, `fetchedAt`, `ageMinutes` are set; `accounts` holds
+ *     one row per stored account in stored order. Two accounts of the same
+ *     program appear as two rows — nothing is summed, within or across programs.
+ *   - "none": `accounts` is empty and `health` carries balancesHealth(db) so
+ *     the page can say WHY (unconfigured / degraded / no snapshot yet) in the
+ *     provider's own words rather than showing a blank.
+ */
+export interface BalancesSnapshotPayload {
+  disclaimer: string
+  state: "snapshot" | "none"
+  /** Present only when state === "snapshot". Always "awardwallet-cached" — this path has no live source. */
+  source?: "awardwallet-cached"
+  /** Present only when state === "snapshot". */
+  fetchedAt?: string
+  /** Present only when state === "snapshot". Age of `fetchedAt` against Date.now(), whole minutes. */
+  ageMinutes?: number
+  accounts: BalancesSnapshotAccount[]
+  /** Present only when state === "none". */
+  health?: ProviderHealth
+}
+
+const SNAPSHOT_DISCLAIMER =
+  "Local AwardWallet snapshot only — no network call, never demo/fallback numbers. " +
+  "One row per account; accounts of one program are listed, never summed; nothing is summed across programs."
+
+/**
+ * Local snapshot only, with NO max-age: an old snapshot is still the user's
+ * own balance and is served with its age attached; the absence of one is
+ * reported as such. No TTL check, no refresh, no network, no substitute list.
+ */
+export function balancesSnapshotPayload(db: DB): BalancesSnapshotPayload {
+  const snapshot = latestBalanceSnapshot(db)
+  if (!snapshot) {
+    return { disclaimer: SNAPSHOT_DISCLAIMER, state: "none", accounts: [], health: balancesHealth(db) }
+  }
+  return {
+    disclaimer: SNAPSHOT_DISCLAIMER,
+    state: "snapshot",
+    source: "awardwallet-cached",
+    fetchedAt: snapshot.fetchedAt,
+    // Age is computed by the repository from fetched_at vs Date.now() — the
+    // same number the cache-hit path reports.
+    ageMinutes: snapshot.ageMinutes,
+    accounts: snapshot.balances.map(r => ({
+      program: r.program,
+      programKey: r.programKey,
+      balance: r.balance,
+      displayBalance: r.balance.toLocaleString("en-US"),
+    })),
   }
 }

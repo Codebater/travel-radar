@@ -180,6 +180,7 @@ describe("points doctrine", () => {
     const mk = (total: number | null, program = "WORLD_OF_HYATT"): StayPlan => ({
       coveredNights: 5, requestedNights: 5, segments: [], switches: 0, uncoveredDates: [],
       programTotals: [{ program, statedTotal: total, statedSegments: total === null ? 0 : 1, perNightOnlySegments: total === null ? 1 : 0 }],
+      appliedPerkNights: 0,
       signature: String(total),
     })
     expect(comparePlansByStatedPoints(mk(30000), mk(40000))).toBe(-1)   // valid: lower stated wins
@@ -202,5 +203,138 @@ describe("edge hygiene", () => {
     expect(() => buildStayPlan([], "2026-13-99", NOV.end)).toThrow(/YYYY-MM-DD/)
     expect(() => buildStayPlan([], NOV.end, NOV.start)).toThrow(/must follow/)
     expect(() => buildStayPlan([], "2026-01-01", "2028-01-01")).toThrow(/at most 370/)
+  })
+})
+
+describe("evidence pass-through", () => {
+  it("every segment carries its observation's provenance verbatim — and it never enters ranking or signatures", () => {
+    const rows = [
+      ob("2026-11-01", 5, { fetchedAt: "2026-08-28T19:05:37.809Z", taxesFeesState: "stated", taxesFeesAmount: 38.5, taxesFeesCurrency: "USD", cashComparisonAmount: 104, cashComparisonCurrency: "USD" }),
+      ob("2026-11-06", 5, { fetchedAt: "2026-08-29T08:30:41.423Z" }),
+    ]
+    const r = buildStayPlan(rows, "2026-11-01", "2026-11-11")
+    const best = r.plans[0]
+    expect(best.segments[0].evidence).toMatchObject({
+      fetchedAt: "2026-08-28T19:05:37.809Z", availabilityState: "unknown", searchState: "complete",
+      verificationLevel: "discovered", taxesFeesState: "stated", taxesFeesAmount: 38.5, taxesFeesCurrency: "USD",
+      roomName: "1 King Bed", roomClass: "GuestRoom", cashComparisonAmount: 104, cashComparisonCurrency: "USD",
+    })
+    expect(best.evidence).toEqual({
+      oldestFetchedAt: "2026-08-28T19:05:37.809Z", newestFetchedAt: "2026-08-29T08:30:41.423Z",
+      availabilityUnknownSegments: 2, verificationLevels: { discovered: 2 },
+    })
+    // Same plans, same order, same signatures when evidence is stripped away.
+    const stripped = buildStayPlan(rows.map(o => ({ ...o, taxesFeesState: "unknown" as const, taxesFeesAmount: null, taxesFeesCurrency: null, cashComparisonAmount: null, cashComparisonCurrency: null })), "2026-11-01", "2026-11-11")
+    expect(stripped.plans.map(p => p.signature)).toEqual(r.plans.map(p => p.signature))
+    // Cash context is echoed, never turned into a number elsewhere: no
+    // per-night × nights (22500/250000) and no cash-points blend anywhere.
+    expect(JSON.stringify(best)).not.toContain("22500")
+    expect(JSON.stringify(best)).not.toContain("250000")
+  })
+})
+
+describe("read-only edge filters", () => {
+  it("excludeProperties removes a hotel from every plan and the result turns honestly partial", () => {
+    const rows = chain30()                                       // alternating hyattp / jwbkk
+    const r = buildStayPlan(rows, NOV.start, NOV.end, { filters: { excludeProperties: ["roame_hotels|hyattp"] } })
+    expect(r.plans.flatMap(p => p.segments).some(s => s.providerPropertyRef === "hyattp")).toBe(false)
+    expect(r.plans[0].coveredNights).toBe(15)
+    expect(r.plans[0].uncoveredDates[0]).toBe("2026-11-01")     // the Hyatt windows are gone, not filled
+    expect(r.filters).toEqual({ programs: [], excludeProperties: ["roame_hotels|hyattp"] })
+  })
+
+  it("programs keeps only the named programs — other programs' segments disappear", () => {
+    const r = buildStayPlan(chain30(), NOV.start, NOV.end, { filters: { programs: ["MARRIOTT_BONVOY"] } })
+    expect(r.plans.flatMap(p => p.segments).every(s => s.program === "MARRIOTT_BONVOY")).toBe(true)
+    expect(r.filters.programs).toEqual(["MARRIOTT_BONVOY"])
+  })
+
+  it("empty or omitted filters change nothing — filters only ever remove evidence", () => {
+    const a = buildStayPlan(chain30(), NOV.start, NOV.end)
+    const b = buildStayPlan(chain30(), NOV.start, NOV.end, { filters: {} })
+    expect(b.plans.map(p => p.signature)).toEqual(a.plans.map(p => p.signature))
+    expect(a.filters).toEqual({ programs: [], excludeProperties: [] })
+  })
+
+  it("filters are pure subtraction: subset of ids, edges never grow, unknown program is NOT a fallback to all, programs+exclude intersect", () => {
+    const rows = chain30()
+    const all = buildStayPlan(rows, NOV.start, NOV.end, { maxAlternatives: 20 })
+    const allIds = new Set(all.plans.flatMap(p => p.segments.map(s => s.observationId)))
+    for (const filters of [
+      { programs: ["MARRIOTT_BONVOY"] },
+      { excludeProperties: ["roame_hotels|hyattp"] },
+      { programs: ["MARRIOTT_BONVOY"], excludeProperties: ["roame_hotels|jwbkk"] },
+      { excludeProperties: ["roame_hotels|does-not-exist"] },
+    ]) {
+      const r = buildStayPlan(rows, NOV.start, NOV.end, { filters, maxAlternatives: 20 })
+      expect(r.edges).toBeLessThanOrEqual(all.edges)
+      for (const id of r.plans.flatMap(p => p.segments.map(s => s.observationId))) expect(allIds.has(id)).toBe(true)
+    }
+    const both = buildStayPlan(rows, NOV.start, NOV.end, { filters: { programs: ["MARRIOTT_BONVOY"], excludeProperties: ["roame_hotels|jwbkk"] } })
+    expect(both.edges).toBe(0)                                     // intersection, never union
+    expect(both.plans[0].coveredNights).toBe(0)
+    const unknown = buildStayPlan(rows, NOV.start, NOV.end, { filters: { programs: ["ACCOR_ALL"] } })
+    expect(unknown.edges).toBe(0)                                  // never "no match → all programs"
+    expect(unknown.plans[0].uncoveredDates).toHaveLength(30)
+    const noop = buildStayPlan(rows, NOV.start, NOV.end, { filters: { excludeProperties: ["roame_hotels|does-not-exist"] } })
+    expect(noop.plans.map(p => p.signature)).toEqual(buildStayPlan(rows, NOV.start, NOV.end).plans.map(p => p.signature))
+  })
+})
+
+describe("stated-points prefixes survive the search", () => {
+  const mc = { provider: "gondola_hotels", program: "MARRIOTT_BONVOY", sourceProgramName: "MARRIOTT", chain: "MC", quoteBasis: "full_stay" as const }
+
+  it("a stated-points-cheaper prefix is never pruned before the final points_cost ranking", () => {
+    const rows = [
+      ob("2026-11-01", 5, { ...mc, providerPropertyRef: "aaa", propertyName: "Dear", pointsTotal: 200000, pointsPerNight: 40000 }),
+      ob("2026-11-01", 5, { ...mc, providerPropertyRef: "zzz", propertyName: "Cheap", pointsTotal: 100000, pointsPerNight: 20000 }),
+      ob("2026-11-06", 5, { ...mc, providerPropertyRef: "yyy", propertyName: "Tail", pointsTotal: 100000, pointsPerNight: 20000 }),
+    ]
+    const r = buildStayPlan(rows, "2026-11-01", "2026-11-11", { goal: "points_cost", maxAlternatives: 20 })
+    expect(r.plans[0].segments.map(s => s.providerPropertyRef)).toEqual(["zzz", "yyy"])
+    expect(r.plans[0].programTotals).toEqual([{ program: "MARRIOTT_BONVOY", statedTotal: 200000, statedSegments: 2, perNightOnlySegments: 0 }])
+  })
+
+  it("a cheaper complete plan with ONE MORE switch beats a dearer single-hotel plan under points_cost — and still ranks second under fewest_switches, never lost", () => {
+    const rows = [
+      ob("2026-11-01", 5, { ...mc, providerPropertyRef: "A", propertyName: "Hotel A", pointsTotal: 100000, pointsPerNight: 20000 }),
+      ob("2026-11-01", 2, { ...mc, providerPropertyRef: "B", propertyName: "Hotel B", pointsTotal: 20000, pointsPerNight: 10000 }),
+      ob("2026-11-03", 3, { ...mc, providerPropertyRef: "A", propertyName: "Hotel A", pointsTotal: 20000, pointsPerNight: 6667 }),
+    ]
+    const pc = buildStayPlan(rows, "2026-11-01", "2026-11-06", { goal: "points_cost", maxAlternatives: 5 })
+    expect(pc.plans[0].segments.map(s => s.providerPropertyRef)).toEqual(["B", "A"])
+    expect(pc.plans[0].programTotals[0].statedTotal).toBe(40000)
+    const fw = buildStayPlan(rows, "2026-11-01", "2026-11-06", { goal: "fewest_switches", maxAlternatives: 5 })
+    expect(fw.plans[0].segments.map(s => s.providerPropertyRef)).toEqual(["A"])          // 0 switches wins
+    expect(fw.plans.some(p => p.programTotals[0]?.statedTotal === 40000)).toBe(true)      // the cheaper plan is an alternative, not lost
+  })
+
+  it("per-night-only (poisoned) prefixes stay equal on points — the search keeps only coverage/switch trade-offs and the complete plan still wins", () => {
+    const r = buildStayPlan(chain30(), NOV.start, NOV.end, { maxAlternatives: 50 })
+    expect(r.plans[0].coveredNights).toBe(30)
+    expect(r.plans[0].switches).toBe(5)
+    // Finalists are bounded by the coverage/switch trade-offs per end-hotel
+    // (never an explosion of equal-points per-night variants).
+    expect(r.plans.length).toBeLessThanOrEqual(31)
+    // Coverage still ranks first — every complete plan precedes every partial one.
+    const firstPartial = r.plans.findIndex(p => p.coveredNights < 30)
+    expect(r.plans.slice(0, firstPartial === -1 ? r.plans.length : firstPartial).every(p => p.coveredNights === 30)).toBe(true)
+  })
+})
+
+describe("evidence is ranking- and signature-neutral", () => {
+  it("availability, verification level, room and freshness never reorder tied candidates and never appear in signatures", () => {
+    const rows = [
+      ob("2026-11-01", 3, { providerPropertyRef: "bbb", availabilityState: "available", verificationLevel: "verified", roomName: "Suite", sourceFreshness: "2026-08-30T00:00:00Z" }),
+      ob("2026-11-01", 3, { providerPropertyRef: "aaa", availabilityState: "unknown", verificationLevel: "discovered", roomName: null, sourceFreshness: null }),
+    ]
+    const r = buildStayPlan(rows, "2026-11-01", "2026-11-04")
+    expect(r.plans[0].segments[0].providerPropertyRef).toBe("aaa")          // signature, not "available", decides
+    expect(r.plans.map(p => p.signature).join("")).not.toMatch(/available|verified|Suite|discovered|2026-08-30/)
+    const swapped = buildStayPlan([
+      { ...rows[0], availabilityState: "unknown", verificationLevel: "discovered" },
+      { ...rows[1], availabilityState: "available", verificationLevel: "verified" },
+    ], "2026-11-01", "2026-11-04")
+    expect(swapped.plans.map(p => p.signature)).toEqual(r.plans.map(p => p.signature))
   })
 })

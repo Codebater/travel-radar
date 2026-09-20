@@ -145,12 +145,25 @@ export interface StoredHotelAward extends NormalizedHotelAward {
   createdAt: string
 }
 
-export function listHotelAwards(db: DB, opts: { limit?: number; program?: string } = {}): StoredHotelAward[] {
+export function listHotelAwards(
+  db: DB,
+  opts: { limit?: number; program?: string; range?: { from: string; to: string } } = {},
+): StoredHotelAward[] {
+  // `range` keeps only observations whose EXACT window lies inside
+  // [from, to] — the stay planner's edge condition, applied in SQL so a row
+  // cap can never silently hide older in-range evidence.
+  const where: string[] = []
+  if (opts.program) where.push("program = @program")
+  if (opts.range) where.push("check_in >= @from AND check_out <= @to")
   const rows = db.prepare(`
     SELECT * FROM hotel_award_observations
-    ${opts.program ? "WHERE program = @program" : ""}
+    ${where.length ? "WHERE " + where.join(" AND ") : ""}
     ORDER BY id DESC LIMIT @limit
-  `).all({ limit: opts.limit ?? 50, ...(opts.program ? { program: opts.program } : {}) }) as Record<string, unknown>[]
+  `).all({
+    limit: opts.limit ?? 50,
+    ...(opts.program ? { program: opts.program } : {}),
+    ...(opts.range ? { from: opts.range.from, to: opts.range.to } : {}),
+  }) as Record<string, unknown>[]
   return rows.map(r => ({
     id: r.id as number,
     dedupeKey: r.dedupe_key as string,

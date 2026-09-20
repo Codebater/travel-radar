@@ -13,8 +13,8 @@
   h1 { font-size: 19px; margin: 0 0 4px; letter-spacing: 1px; color: #eef3f8; font-weight: 800; }
   .sub { color: #6b7a8c; font-size: 12px; max-width: 900px; }
   a.back { color: #7fd1b9; font-size: 12px; text-decoration: none; }
-  main { padding: 14px 22px 40px; max-width: 1080px; margin: 0 auto; }
-  header { max-width: 1080px; margin: 0 auto; }
+  main { padding: 16px 22px 40px; max-width: 1560px; margin: 0 auto; }
+  header { max-width: 1560px; margin: 0 auto; }
   details.adv { margin-top: 10px; }
   details.adv > summary { color: #55636f; font-size: 11.5px; cursor: pointer; letter-spacing: 0.5px; }
   .card.split { padding: 0; display: flex; overflow: hidden; }
@@ -67,70 +67,391 @@
   .calc-result .big { font-size: 17px; color: #ffd479; font-weight: 700; }
   .plan { margin-top: 10px; }
   .plan .tag { margin: 2px 4px 2px 0; display: inline-block; }
+
+  /* ── Life-Perk Stay Planner (approved mockup look) ──────────────────── */
+
+  /* Search band: labeled boxed fields, amber plan action, emerald search. */
+  .searchband { display: flex; flex-wrap: wrap; align-items: stretch; gap: 10px;
+                background: #10151d; border: 1px solid #1d2733; border-radius: 14px;
+                padding: 14px; margin-bottom: 6px; }
+  .sfield { display: flex; flex-direction: column; gap: 2px; background: #0b0f15;
+            border: 1px solid #232d3a; border-radius: 10px; padding: 7px 13px; min-width: 150px; flex: 1; }
+  .sfield.date { flex: 0 0 150px; min-width: 130px; }
+  .sfield.guests { flex: 0 0 84px; min-width: 70px; }
+  .sfield label { font-size: 11px; color: #6b7a8c; }
+  .sfield input { background: transparent; border: none; outline: none; color: #eef3f8;
+                  font: inherit; font-size: 14px; font-weight: 600; padding: 0; width: 100%; color-scheme: dark; }
+  .sfield input[type="date"]::-webkit-calendar-picker-indicator { opacity: 0.6; cursor: pointer; filter: invert(0.8); }
+  .searchband .r-btn { align-self: center; white-space: nowrap; }
+  .bandnote { margin: 0 4px 14px; font-size: 11.5px; }
+
+  .presets { display: inline-flex; gap: 6px; align-items: center; }
+  .preset-btn { font: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 14px; border-radius: 9px;
+                border: 1px solid transparent; background: transparent; color: #8fa1b5; cursor: pointer; }
+  .preset-btn:hover { color: #d7dde5; }
+  .preset-btn.active { border-color: #3a4656; color: #eef3f8; background: #1a2330; }
+
+  .plan-shell { display: grid; grid-template-columns: 262px minmax(0, 1fr); gap: 16px; align-items: start; }
+  .plan-side .panel, .plan-side details.adv { margin-bottom: 12px; background: #10151d;
+    border: 1px solid #1d2733; border-radius: 14px; padding: 14px 16px; }
+  .plan-side .panel-title { font-size: 13.5px; letter-spacing: 0; color: #e5ebf2;
+                            font-weight: 700; margin-bottom: 9px; text-transform: none; }
+  .plan-side .opt-row { display: flex; gap: 9px; align-items: flex-start; margin: 9px 0;
+                        font-size: 12.5px; color: #c6d0da; cursor: pointer; }
+  .plan-side .opt-row input { margin-top: 2px; accent-color: var(--emerald, #34d399); }
+  .plan-side .opt-row .opt-sub { display: block; color: #55636f; font-size: 11px; }
+  .plan-side details.adv > summary { color: #8fa1b5; }
+  .ent-row { display: flex; justify-content: space-between; align-items: center; gap: 8px;
+             font-size: 12.5px; color: #c6d0da; margin: 8px 0; cursor: pointer; }
+  .ent-row .ent-val { color: #8fa1b5; text-align: right; }
+  .ent-row .ent-val.held { color: #d7dde5; font-weight: 600; }
+  .ent-row .chev { color: #55636f; margin-left: 3px; }
+  .ent-edit-link { color: var(--emerald, #34d399); font-size: 12.5px; font-weight: 600;
+                   background: none; border: none; padding: 0; cursor: pointer; font-family: inherit; }
+  #ent-editor { margin-top: 8px; border-top: 1px solid #1d2733; padding-top: 8px; }
+  #ent-editor .ent-group { margin: 6px 0 2px; color: #8fa1b5; font-size: 10.5px; letter-spacing: 1px; }
+  #ent-editor label { display: flex; gap: 7px; font-size: 12px; color: #c6d0da; margin: 4px 0; cursor: pointer; }
+  #ent-editor input[type="number"] { width: 52px; background: #131b27; border: 1px solid #314052; color: #d7dde5; border-radius: 6px; padding: 2px 6px; font: inherit; }
+
+  /* Plan status band: result facts left, trip-length presets + More plans right. */
+  .plan-band { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+               padding: 2px 2px 12px; font-size: 13.5px; color: #c6d0da; }
+  .plan-band .ok-dot { color: var(--emerald, #34d399); font-weight: 700; }
+  .plan-band .warn-dot { color: #ffd479; font-weight: 700; }
+  .plan-band .spacer { flex: 1; }
+  #plan-alts { position: relative; }
+  #plan-alts > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 7px;
+                         font-size: 12.5px; font-weight: 600; padding: 6px 14px; border-radius: 9px;
+                         border: 1px solid #3a4656; color: #eef3f8; background: #131b27; }
+  #plan-alts > summary::-webkit-details-marker { display: none; }
+  #plan-alts > summary .n { background: var(--emerald, #34d399); color: #06281c; font-weight: 800;
+                            font-size: 11px; border-radius: 6px; padding: 1px 7px; }
+  #plan-alts .alts-body { position: absolute; right: 0; top: calc(100% + 8px); z-index: 40;
+                          width: min(720px, 78vw); max-height: 60vh; overflow: auto;
+                          background: #0d131c; border: 1px solid #314052; border-radius: 12px;
+                          padding: 6px 12px 12px; box-shadow: 0 18px 44px rgba(0,0,0,0.55); }
+  .alt-plan { border: 1px solid #1d2733; border-radius: 10px; background: #0f1520; padding: 10px 14px; margin-top: 10px; }
+
+  /* Calendar — the visual centerpiece. */
+  .cal-wrap { overflow-x: auto; border: 1px solid #1d2733; border-radius: 14px;
+              background: #10151d; padding: 14px 14px 12px; margin-bottom: 8px; }
+  .cal { display: grid; row-gap: 4px; min-width: 900px; }
+  .cal .cal-month { grid-row: 1; font-size: 13.5px; color: #d7dde5; padding: 0 0 8px 2px;
+                    white-space: nowrap; font-weight: 700; }
+  .cal .cal-month.next { text-align: right; padding-right: 2px; color: #8fa1b5; }
+  .cal .cal-day { grid-row: 2; text-align: center; font-size: 10px; color: #55636f; padding: 2px 0 8px; min-width: 26px; }
+  .cal .cal-day .dnum { display: block; font-size: 13px; font-weight: 600; color: #c6d0da; }
+  .cal .cal-day.weekend .dnum, .cal .cal-day.weekend { color: #ffd479; }
+  .cal .cal-block { grid-row: 3; border-radius: 11px; padding: 9px 11px; margin: 0 3px;
+                    min-height: 72px; overflow: hidden; border: 1px solid rgba(255,255,255,0.10); }
+  .cal .cal-block .b-name { font-size: 13px; font-weight: 700; color: #eef3f8; white-space: nowrap;
+                            overflow: hidden; text-overflow: ellipsis; }
+  .cal .cal-block .b-dates { font-size: 11px; color: rgba(238,243,248,0.72); white-space: nowrap; margin-top: 1px;
+                             overflow: hidden; text-overflow: ellipsis; }
+  /* 1–2 night blocks: name only (dates + nights live in the title tooltip). */
+  .cal .cal-block.tiny { padding: 8px 6px; }
+  .cal .cal-block.tiny .b-dates, .cal .cal-block.tiny .b-perk { display: none; }
+  .cal .cal-block .b-perk { display: inline-block; margin-top: 6px; font-size: 10px; font-weight: 700;
+                            letter-spacing: 0.3px; padding: 2px 8px; border-radius: 8px;
+                            background: rgba(8, 13, 20, 0.45); color: #ffd479;
+                            border: 1px solid rgba(255, 212, 121, 0.3); white-space: nowrap;
+                            max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .cal .cal-block .b-perk.q { background: transparent; border-style: dashed; color: #d9b96a; }
+  #plan-area.no-cal-perks .b-perk { display: none; }
+  .cal .cal-block.gap { background: repeating-linear-gradient(135deg, rgba(255,157,157,0.08) 0 8px, transparent 8px 16px);
+                        border: 1px dashed #6b3a3a; color: #ff9d9d; display: flex; align-items: center;
+                        justify-content: center; font-size: 11px; text-align: center; }
+  /* Mockup program palette: Marriott purple, IHG blue, Hilton green, gold for
+     certificate/status-perk segments. Identity tints only — never photos. */
+  .cal .cal-block.p-marriott { background: linear-gradient(150deg, rgba(109,40,217,0.42), rgba(50,17,102,0.6)); border-color: rgba(139,92,246,0.45); }
+  .cal .cal-block.p-ihg      { background: linear-gradient(150deg, rgba(29,78,216,0.42), rgba(15,39,108,0.6)); border-color: rgba(96,145,250,0.45); }
+  .cal .cal-block.p-hilton   { background: linear-gradient(150deg, rgba(5,122,85,0.42), rgba(4,58,42,0.6)); border-color: rgba(52,211,153,0.4); }
+  .cal .cal-block.p-hyatt    { background: linear-gradient(150deg, rgba(79,91,102,0.5), rgba(35,48,60,0.65)); border-color: rgba(159,176,192,0.35); }
+  .cal .cal-block.p-wyndham  { background: linear-gradient(150deg, rgba(14,116,144,0.45), rgba(8,51,68,0.62)); border-color: rgba(103,232,249,0.35); }
+  .cal .cal-block.p-accor    { background: linear-gradient(150deg, rgba(138,109,59,0.45), rgba(69,50,19,0.62)); border-color: rgba(217,185,106,0.4); }
+  .cal .cal-block.p-choice   { background: linear-gradient(150deg, rgba(154,91,31,0.45), rgba(74,42,12,0.62)); border-color: rgba(240,177,110,0.4); }
+  .cal .cal-block.p-other    { background: linear-gradient(150deg, rgba(58,70,86,0.5), rgba(29,39,51,0.65)); }
+  .cal .cal-block.gold { background: linear-gradient(150deg, rgba(176,134,32,0.4), rgba(94,68,12,0.62)) !important;
+                         border: 1.5px solid rgba(255, 212, 121, 0.55) !important; }
+  .cal-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: #9fb0c0;
+                margin: 2px 4px 16px; align-items: center; }
+  .cal-legend .spacer { flex: 1; }
+  .cal-legend .sw { display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+                    vertical-align: -1px; margin-right: 6px; background: #3a4656; }
+  .cal-legend .sw.p-marriott { background: #7c3aed; }
+  .cal-legend .sw.p-ihg { background: #2563eb; }
+  .cal-legend .sw.p-hilton { background: #059669; }
+  .cal-legend .sw.p-hyatt { background: #4f5b66; }
+  .cal-legend .sw.p-wyndham { background: #0e7490; }
+  .cal-legend .sw.p-accor { background: #8a6d3b; }
+  .cal-legend .sw.p-choice { background: #9a5b1f; }
+
+  /* Plan cards + summary rail. */
+  .plan-columns { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 16px; align-items: start; }
+  .plan-cards h3 { font-size: 16px; letter-spacing: 0; color: #eef3f8; margin: 4px 0 12px; font-weight: 700; }
+  .plan-cards .card { background: #10151d; border-radius: 14px; margin-bottom: 12px; }
+  .plan-cards .r-tile { flex: 0 0 96px; min-height: 96px; border-radius: 11px; margin: 10px 0 10px 10px; }
+  .plan-cards .r-tile .mono { font-size: 21px; }
+  /* One program identity per page: the planner palette applies to EVERY
+     tile here (plan cards AND the results list below), so the same hotel
+     never shows two colours and the legend agrees with both. */
+  .r-tile.p-marriott { background: linear-gradient(150deg, #6d28d9, #321166); }
+  .r-tile.p-ihg      { background: linear-gradient(150deg, #1d4ed8, #0f276c); }
+  .r-tile.p-hilton   { background: linear-gradient(150deg, #057a55, #043a2a); }
+  .r-tile.p-wyndham  { background: linear-gradient(150deg, #0e7490, #083344); }
+  .plan-cards .title { font-size: 15.5px; }
+  .plan-cards .points { color: #eef3f8; font-size: 18px; font-weight: 800; }
+  .viewdetails { background: none; border: none; color: #8fa1b5; font: inherit; font-size: 12px;
+                 cursor: pointer; padding: 0; white-space: nowrap; }
+  .viewdetails:hover { color: #eef3f8; }
+  .seg-badge { font-size: 10.5px; padding: 3px 9px; border-radius: 9px; font-weight: 700; letter-spacing: 0.3px; }
+  .seg-badge.applied { border: 1px solid rgba(255, 212, 121, 0.45); background: rgba(255, 212, 121, 0.12); color: #ffd479; }
+  .seg-badge.qualifies { border: 1px dashed #6b5327; color: #d9b96a; }
+  .seg-badge.benefit { border: 1px solid #2c5d4b; color: #7fd1b9; }
+  .seg-status { color: #8fa1b5; font-size: 12.5px; }
+  .plan-summary { border: 1px solid #1d2733; border-radius: 14px; background: #10151d; padding: 16px 18px; }
+  .plan-summary .sum-head { font-size: 15px; font-weight: 700; color: #eef3f8; margin-bottom: 10px; }
+  .plan-summary .stat { margin: 10px 0; }
+  .plan-summary .stat .num { font-size: 21px; font-weight: 800; color: #eef3f8; line-height: 1.1; }
+  .plan-summary .stat .num .of { color: #55636f; font-size: 15px; font-weight: 600; }
+  .plan-summary .stat .num.green { color: var(--emerald, #34d399); }
+  .plan-summary .stat .lbl { font-size: 12px; color: #8fa1b5; }
+  .plan-summary .sum-title { font-size: 13px; color: #e5ebf2; margin: 16px 0 7px; font-weight: 700; }
+  .plan-summary .prog-row { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; color: #c6d0da; margin: 5px 0; }
+  .plan-summary .prog-row .amt { color: #ffd479; white-space: nowrap; }
+  .plan-summary .prog-row .amt.unavail { color: #6b7a8c; font-style: italic; white-space: normal; text-align: right; }
+  .plan-summary .perkline { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; color: #c6d0da; margin: 6px 0; }
+  .plan-summary .perkline .pmark { color: #ffd479; margin-right: 6px; }
+  .plan-summary .perkline .times { color: #8fa1b5; }
+  .plan-summary details.allperks summary { color: var(--emerald, #34d399); font-size: 12.5px; font-weight: 600;
+                                           cursor: pointer; margin-top: 10px; list-style: none; }
+  .plan-summary details.allperks summary::-webkit-details-marker { display: none; }
+
+  /* Coverage band + honesty footer. */
+  .plan-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px;
+               border: 1px solid #1d2733; border-radius: 14px; background: #10151d;
+               padding: 12px 16px; margin-top: 14px; font-size: 12px; color: #8fa1b5; }
+  .plan-foot .cover-ic { flex: 0 0 auto; width: 30px; height: 30px; border-radius: 50%;
+                         border: 1.5px solid var(--emerald, #34d399); color: var(--emerald, #34d399);
+                         display: flex; align-items: center; justify-content: center; font-weight: 800; }
+  .plan-foot .cover-ic.warn { border-color: #ffd479; color: #ffd479; }
+  .plan-foot .cover-txt b { display: block; color: #eef3f8; font-size: 13px; }
+  .plan-foot .spacer { flex: 1; }
+  .plan-foot details summary { list-style: none; color: #eef3f8; cursor: pointer; font-weight: 700; font-size: 12.5px;
+                               padding: 8px 16px; border: 1px solid #3a4656; border-radius: 9px; background: #131b27;
+                               display: inline-block; }
+  .plan-foot details summary::-webkit-details-marker { display: none; }
+  .plan-foot details[open] { flex-basis: 100%; }
+  .plan-foot details[open] summary { margin-bottom: 4px; }
+  .plan-foot li { margin: 4px 0; color: #9fb0c0; }
+  .plan-footer { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 16px; align-items: center;
+                 border: 1px solid #1d2733; border-radius: 14px; background: #10151d;
+                 padding: 16px 18px; margin-top: 14px; }
+  .plan-footer .pf-col { display: flex; gap: 10px; align-items: flex-start; }
+  .plan-footer .pf-ic { flex: 0 0 auto; width: 26px; height: 26px; border-radius: 50%; font-size: 13px;
+                        border: 1.5px solid #3a4656; color: #8fa1b5; display: flex; align-items: center; justify-content: center; }
+  .plan-footer .pf-ic.ok { border-color: var(--emerald, #34d399); color: var(--emerald, #34d399); }
+  .plan-footer b { display: block; color: #eef3f8; font-size: 13px; margin-bottom: 2px; }
+  .plan-footer span { font-size: 11.5px; color: #8fa1b5; }
+  .plan-footer .r-btn { justify-self: end; }
+
+  /* Evidence, booking, re-check, filters. */
+  .hastatus { margin: 0 4px 10px; line-height: 1.6; }
+  .hastatus .warn { color: #ffd479; }
+  .hastatus .bad { color: #ff9d9d; }
+  .evidence { color: #55636f; font-size: 11.5px; margin-top: 3px; }
+  .seg-badge.payfor { border: 1px solid rgba(255, 212, 121, 0.35); color: #e6c97a; }
+  .seg-badge.attrib { border: 1px solid #3a4656; color: #9fb0c0; }
+  .swapbtn { font: inherit; font-size: 11px; padding: 2px 9px; border-radius: 8px; border: 1px solid #314052;
+             color: #8fa1b5; background: transparent; cursor: pointer; }
+  .swapbtn:hover { color: #eef3f8; border-color: #6b7a8c; }
+  .amber { color: #ffd479; }
+  .pb-ent { flex-basis: 100%; font-size: 12px; color: #ffd479; }
+  .plan-book { border: 1px solid #1d2733; border-radius: 14px; background: #10151d; padding: 12px 16px; margin-top: 14px; }
+  .plan-book > summary { cursor: pointer; font-weight: 700; color: #eef3f8; font-size: 13.5px; list-style: none; }
+  .plan-book > summary::-webkit-details-marker { display: none; }
+  .plan-book > summary::after { content: " ›"; color: #55636f; }
+  .plan-book ol { margin: 10px 0 6px; padding-left: 20px; }
+  .plan-book li { margin: 8px 0; font-size: 12.5px; color: #c6d0da; }
+  .plan-book li .meta { margin-top: 2px; }
+  .plan-book .bookfoot { font-size: 11.5px; color: #8fa1b5; margin-top: 8px; }
+  .plan-book textarea { position: absolute; left: -9999px; }
+  .prog-row .held { flex-basis: 100%; font-size: 11px; color: #8fa1b5; margin: -2px 0 4px; }
+  .prog-row .held.covers { color: #7fd1b9; }
+  .prog-row .held.shortfall { color: #ffd479; }
+  .plan-summary .prog-row { flex-wrap: wrap; }
+  #p-recheck-box { margin-top: 10px; }
+  #p-recheck-box .plan { border: 1px solid #1d2733; border-radius: 12px; background: #0d131c; padding: 10px 14px; }
+  .excl .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: #c6d0da;
+                border: 1px solid #3a4656; border-radius: 8px; padding: 2px 8px; margin: 3px 4px 0 0; }
+  .excl .chip button { font: inherit; background: none; border: none; color: #8fa1b5; cursor: pointer; padding: 0; }
+  .excl .chip button:hover { color: #ff9d9d; }
+  #pp-panel.pulse { animation: pulse 1.2s ease-out 1; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(52,211,153,0.5); } 100% { box-shadow: 0 0 0 14px rgba(52,211,153,0); } }
+
+  @media (max-width: 1280px) {
+    .plan-columns { grid-template-columns: 1fr; }     /* rail stacks under the cards on laptops */
+  }
+  @media (max-width: 980px) {
+    .plan-shell { grid-template-columns: 1fr; }
+    .plan-columns { grid-template-columns: 1fr; }
+    .plan-footer { grid-template-columns: 1fr; }
+    .plan-footer .r-btn { justify-self: start; }
+    #plan-alts .alts-body { width: 92vw; }
+  }
 </style>
 </head>
 <body>
 <script src="./radar-nav.js"></script>
-<header>
-  <h1>Stays — Hotel Award Radar</h1>
-  <div class="sub" id="disclaimer">loading…</div>
-</header>
 <main>
-  <div class="r-hero" id="discovery">
-    <h2>Find award stays</h2>
-    <div class="sub">Real hotel points availability across programs — searches run only when you click. No search runs without your click.</div>
-    <div class="form" style="background:transparent;border:none;padding:0;margin-bottom:0">
-      <span><label>Destination</label><input id="d-location" value="Bangkok"></span>
-      <span><label>Check-in</label><input id="d-in" value="2026-11-01" style="width:110px"></span>
-      <span><label>Check-out</label><input id="d-out" value="2026-12-01" style="width:110px"></span>
-      <span><label>Guests</label><input id="d-adults" value="2" style="width:44px"></span>
-      <button class="r-btn primary" id="d-run" type="button">Search stays</button>
-      <button class="r-btn amber" id="p-run" type="button" title="Read-only: builds a night-by-night plan from ALREADY STORED observations — no provider calls, no new searches.">Find best stay plan</button>
-    </div>
-    <!-- Advanced planner controls — unchanged behavior (sparse exact Roame
-         windows, explicit budget, plan preview), visually secondary. -->
-    <details class="adv" id="d-advanced">
-      <summary>Advanced search details — window planner, budget, plan preview</summary>
-      <div class="form" style="margin-top:8px">
-        <span><label>Candidate stays</label>
-          <label class="ck"><input type="checkbox" class="d-n" value="2" checked>2 nights</label>
-          <label class="ck"><input type="checkbox" class="d-n" value="4" checked>4 nights</label>
-          <label class="ck"><input type="checkbox" class="d-n" value="5" checked>5 nights</label>
-          <label class="ck"><input type="checkbox" class="d-n" value="7" checked>7 nights</label>
-        </span>
-        <span><label>Max windows</label><input id="d-max" value="8" style="width:52px"></span>
-        <button class="r-btn secondary" id="d-preview" type="button">Preview plan</button>
+  <!-- ── Search band (labeled fields + amber plan action + green search) ── -->
+  <div class="searchband" id="discovery">
+    <div class="sfield"><label>Destination</label><input id="d-location" value="Bangkok"></div>
+    <div class="sfield date"><label>Check-in</label><input id="d-in" type="date" value="2026-11-01"></div>
+    <div class="sfield date"><label>Check-out</label><input id="d-out" type="date" value="2026-12-01"></div>
+    <div class="sfield guests"><label>Guests</label><input id="d-adults" value="2"></div>
+    <button class="r-btn amber" id="p-run" type="button" title="Read-only: builds a night-by-night plan from ALREADY STORED observations — no provider calls, no new searches.">Find best stay plan</button>
+    <button class="r-btn primary" id="d-run" type="button">Search stays</button>
+  </div>
+  <div class="sub bandnote">Real hotel points availability across programs — searches run only when you click. No search runs without your click. <span id="disclaimer"></span></div>
+  <div id="d-status"></div>
+  <div id="ha-status" class="meta hastatus"></div>
+  <div id="plan-out"></div>
+
+  <!-- ── Persistent two-column shell: controls sidebar + main content ── -->
+  <div class="plan-shell">
+    <aside class="plan-side">
+      <div class="panel">
+        <div class="panel-title">Optimize for</div>
+        <label class="opt-row"><input type="radio" name="goal" value="life_perks" checked>
+          <span>Best life perk coverage<span class="opt-sub">Maximize verified free nights (status perks are annotated, never ranked) — full coverage always first</span></span></label>
+        <label class="opt-row"><input type="radio" name="goal" value="points_cost">
+          <span>Lowest points cost<span class="opt-sub">Source-stated totals only, per program — never combined</span></span></label>
+        <label class="opt-row"><input type="radio" name="goal" value="fewest_switches">
+          <span>Fewest hotel switches<span class="opt-sub">Stay in fewer properties</span></span></label>
       </div>
-      <div id="d-plan"></div>
-    </details>
-    <div id="d-status"></div>
-    <div id="plan-out"></div>
-  </div>
-  <div class="form" id="form">
-    <span><label>Sort</label><select id="sort">
-      <option value="newest">Newest</option>
-      <option value="points">Lowest points/night</option>
-      <option value="cash">Lowest cash context</option>
-      <option value="buypoints">Best buy-points opportunity</option>
-    </select></span>
-    <span><label>Program</label><select id="program"><option value="">All programs</option></select></span>
-    <span><label>Provider</label><select id="provider"><option value="">All</option></select></span>
-    <span><label>Property</label><input id="q" placeholder="text search"></span>
-  </div>
-  <details class="panel calc" id="calc">
-    <summary class="panel-title" style="cursor:pointer">POINTS COST CALCULATOR — estimated cost to BUY points at the current promo purchase rate (never hotel value)</summary>
-    <div class="form" style="margin-top:8px">
-      <span><label>Program</label><select id="calc-prog"></select></span>
-      <span><label>Points</label><input id="calc-pts" style="width:110px" placeholder="30000"></span>
+      <div class="panel">
+        <div class="panel-title">Include in plan</div>
+        <label class="opt-row"><input type="checkbox" id="pk-cert" checked><span>Use free night certificates</span></label>
+        <label class="opt-row"><input type="checkbox" id="pk-nth" checked><span>5th night free benefits</span></label>
+        <label class="opt-row"><input type="checkbox" id="pk-card" checked><span>Card 4th night benefit</span></label>
+        <label class="opt-row"><input type="checkbox" id="pk-promos" checked><span>Buy points (current promos)<span class="opt-sub">Context only — a promo never changes ranking</span></span></label>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Status &amp; entitlements</div>
+        <div id="ent-list" class="meta">loading…</div>
+        <button class="ent-edit-link" id="ent-edit-btn" type="button">Edit entitlements</button>
+        <div id="ent-editor" hidden></div>
+        <div class="meta" style="margin-top:8px">Declared by you, never inferred — a status, card or certificate is never silently assumed.</div>
+        <div id="bal-line" class="meta" style="margin-top:6px"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">Display</div>
+        <label class="opt-row"><input type="checkbox" id="dsp-cal-perks" checked><span>Show perks on calendar</span></label>
+        <label class="opt-row"><input type="checkbox" id="dsp-alts" checked><span>Show alternative plans</span></label>
+      </div>
+      <!-- Hotels & programs — read-only edge filters over ALREADY STORED
+           observations: they only remove evidence from the plan search,
+           never add any, never run a provider search. -->
+      <div class="panel" id="pp-panel">
+        <div class="panel-title">Hotels &amp; programs</div>
+        <div id="pp-progs" class="meta">programs appear after the first plan</div>
+        <div class="meta" style="margin-top:8px">Excluded hotels</div>
+        <div id="plan-excl" class="excl"><span class="meta">none — use “Swap this hotel” on a plan card</span></div>
+      </div>
+      <!-- Advanced planner controls — unchanged behavior (sparse exact Roame
+           windows, explicit budget, plan preview), visually secondary. -->
+      <details class="adv" id="d-advanced">
+        <summary>Advanced search details — window planner, budget, plan preview</summary>
+        <div class="form" style="margin-top:8px;background:transparent;border:none;padding:0">
+          <span><label>Candidate stays</label>
+            <label class="ck"><input type="checkbox" class="d-n" value="2" checked>2 nights</label>
+            <label class="ck"><input type="checkbox" class="d-n" value="4" checked>4 nights</label>
+            <label class="ck"><input type="checkbox" class="d-n" value="5" checked>5 nights</label>
+            <label class="ck"><input type="checkbox" class="d-n" value="7" checked>7 nights</label>
+          </span>
+          <span><label>Max windows</label><input id="d-max" value="8" style="width:52px"></span>
+          <button class="r-btn secondary" id="d-preview" type="button">Preview plan</button>
+        </div>
+        <div id="d-plan"></div>
+      </details>
+    </aside>
+
+    <div class="plan-maincol">
+      <!-- ── Life-Perk Stay Planner ──────────────────────────────────────
+           Read-only projection over ALREADY STORED observations — the
+           calendar is visualization only: every block is a segment at its
+           EXACT observed dates and it never manufactures availability
+           between observed windows; gaps stay visible. Appears after
+           "Find best stay plan". -->
+      <section id="plan-area" hidden>
+        <div class="plan-band">
+          <span id="pb-status"></span>
+          <span id="pb-facts"></span>
+          <span class="spacer"></span>
+          <span class="presets" title="Quick trip length — sets check-out from check-in; both dates stay editable.">
+            <button class="preset-btn" type="button" data-days="7">7 days</button>
+            <button class="preset-btn" type="button" data-days="14">14 days</button>
+            <button class="preset-btn" type="button" data-days="30">30 days</button>
+          </span>
+          <details id="plan-alts" hidden><summary>More plans <span class="n" id="plan-alts-n"></span></summary>
+            <div class="alts-body" id="plan-alts-body"></div>
+          </details>
+          <div id="pb-ent" class="pb-ent" hidden></div>
+        </div>
+        <div class="cal-wrap"><div class="cal" id="plan-cal"></div></div>
+        <div class="cal-legend" id="plan-legend"></div>
+        <div class="plan-columns">
+          <div class="plan-cards">
+            <h3>Your best stay plan</h3>
+            <div id="plan-cards"></div>
+          </div>
+          <aside class="plan-summary" id="plan-summary"></aside>
+        </div>
+        <!-- Book this plan — one reservation per segment, copyable. No
+             "Book now", no combined booking, no combined price. -->
+        <details class="plan-book" id="plan-book">
+          <summary id="plan-book-summary">Book this plan</summary>
+          <div id="plan-book-body"></div>
+        </details>
+        <div class="plan-foot" id="plan-foot"></div>
+        <div id="p-recheck-box"></div>
+        <div class="plan-footer">
+          <div class="pf-col"><span class="pf-ic ok">✓</span><div><b>Honesty first</b><span>Prices are source-stated. No synthetic totals. Averages remain per-night only.</span></div></div>
+          <div class="pf-col"><span class="pf-ic">♥</span><div><b>Why this plan</b><span id="pf-why">Complete night coverage always ranks first; the chosen optimization goal orders the rest.</span></div></div>
+          <div class="pf-col"><span class="pf-ic">↻</span><div><b>Need something different?</b><span>Adjust entitlements, dates, or optimization goal and rebuild your plan.</span></div></div>
+          <button class="r-btn secondary" id="pf-rebuild" type="button">Adjust &amp; rebuild plan</button>
+        </div>
+      </section>
+      <!-- ── Normal hotel award search results (unchanged behavior) ── -->
+      <div class="form" id="form">
+        <span><label>Sort</label><select id="sort">
+          <option value="newest">Newest</option>
+          <option value="points">Lowest points/night</option>
+          <option value="cash">Lowest cash context</option>
+          <option value="buypoints">Best buy-points opportunity</option>
+        </select></span>
+        <span><label>Program</label><select id="program"><option value="">All programs</option></select></span>
+        <span><label>Provider</label><select id="provider"><option value="">All</option></select></span>
+        <span><label>Property</label><input id="q" placeholder="text search"></span>
+      </div>
+      <details class="panel calc" id="calc">
+        <summary class="panel-title" style="cursor:pointer">POINTS COST CALCULATOR — estimated cost to BUY points at the current promo purchase rate (never hotel value)</summary>
+        <div class="form" style="margin-top:8px">
+          <span><label>Program</label><select id="calc-prog"></select></span>
+          <span><label>Points</label><input id="calc-pts" style="width:110px" placeholder="30000"></span>
+        </div>
+        <div id="calc-note" class="meta"></div>
+        <div id="calc-out" style="margin-top:6px"></div>
+      </details>
+      <div class="count" id="count"></div>
+      <div id="results"><div class="empty">loading award-stay observations…</div></div>
     </div>
-    <div id="calc-note" class="meta"></div>
-    <div id="calc-out" style="margin-top:6px"></div>
-  </details>
-  <div class="count" id="count"></div>
-  <div id="results"><div class="empty">loading award-stay observations…</div></div>
+  </div>
 </main>
 <script src="./promo-enrich.js"></script>
 <script src="./hotel-awards-ui.js"></script>
+<script src="./stayplan-ui.js"></script>
 <script>
 const fmt = new Intl.NumberFormat("en-US")
 const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]))
@@ -142,6 +463,7 @@ const prog = p => PROG[p] || p
 const provLabel = p => p === "roame_hotels" ? "Roame" : p === "gondola_hotels" ? "Gondola" : p
 
 let ALL = []
+let ALL_PROGRAMS = []   // every program in the store (server-side, unfiltered) — the filter universe
 let SORT = "newest"
 // Active, mapped HOTEL-category buy-points promos by loyaltyProgram — the
 // shared feed the stay cards already use (promo-enrich.js over
@@ -310,6 +632,7 @@ async function load() {
   // Populate program/provider filters once (from the full set).
   const progSel = document.getElementById("program")
   if (progSel.options.length === 1) for (const p of data.programs || []) progSel.add(new Option(prog(p), p))
+  ALL_PROGRAMS = data.programs || []
   const provSel = document.getElementById("provider")
   if (provSel.options.length === 1) for (const p of data.providers || []) provSel.add(new Option(provLabel(p), p))
   ALL = data.observations || []
@@ -424,60 +747,771 @@ async function runDiscovery() {
 document.getElementById("d-preview").addEventListener("click", previewPlan)
 document.getElementById("d-run").addEventListener("click", runDiscovery)
 
-// ── Consecutive-night stay optimizer (V1) ────────────────────────────────────
+// ── Life-Perk Stay Planner (perk-aware stay optimizer) ───────────────────────
 // READ-ONLY projection over already-stored observations: zero provider
 // calls, no new observations. Segments are valid only for their exact
 // observed dates; per-night figures never become totals; program totals
-// stay separate — no cross-program points number exists.
+// stay separate — no cross-program points number exists. The calendar is
+// visualization only and never manufactures availability between observed
+// windows. Perk states rest on DECLARED entitlements; an applied perk
+// contributes a rule-supported free-night COUNT only — no discounted total.
 
-function planSegmentLine(s) {
-  const pts = s.pointsTotal !== null
-    ? `${fmt.format(s.pointsTotal)} pts total (stated)`
-    : (s.pointsPerNight !== null ? `${fmt.format(s.pointsPerNight)} pts/night (per-night only — no stay total stated)` : "points not stated")
-  return `<div class="line" style="margin:3px 0">${esc(s.checkIn)} → ${esc(s.checkOut)} (${s.nights}n) · <b>${esc(s.propertyName)}</b> · ${esc(prog(s.program))} · <span style="color:#ffd479">${pts}</span></div>`
+// ── Quick trip-length presets: set check-out from check-in; dates stay
+//    editable and a manual edit simply deselects the preset highlight.
+function refreshPresets() {
+  const active = StayPlanUI.activePreset(
+    document.getElementById("d-in").value.trim(),
+    document.getElementById("d-out").value.trim())
+  for (const b of document.querySelectorAll(".preset-btn")) {
+    b.classList.toggle("active", Number(b.dataset.days) === active)
+  }
+}
+for (const b of document.querySelectorAll(".preset-btn")) {
+  b.addEventListener("click", () => {
+    const cout = StayPlanUI.presetCheckout(document.getElementById("d-in").value.trim(), Number(b.dataset.days))
+    if (!cout) return
+    document.getElementById("d-out").value = cout
+    refreshPresets()
+    if (!document.getElementById("plan-area").hidden) findStayPlan()
+  })
+}
+document.getElementById("d-in").addEventListener("input", refreshPresets)
+document.getElementById("d-out").addEventListener("input", refreshPresets)
+refreshPresets()
+
+const currentGoal = () => document.querySelector('input[name="goal"]:checked').value
+function currentInclude() {
+  const inc = []
+  if (document.getElementById("pk-cert").checked) inc.push("certificate")
+  if (document.getElementById("pk-nth").checked) inc.push("nth_night")
+  if (document.getElementById("pk-card").checked) inc.push("card")
+  return inc
 }
 
-function renderPlan(p, requestedNights, label) {
-  const totals = p.programTotals.map(t => t.statedTotal !== null
-    ? `<div class="line">${esc(prog(t.program))}: ${fmt.format(t.statedTotal)} pts (${t.statedSegments} source-stated stay total${t.statedSegments === 1 ? "" : "s"})</div>`
-    : `<div class="line">${esc(prog(t.program))}: no source-supported total — ${t.perNightOnlySegments} per-night-only segment${t.perNightOnlySegments === 1 ? "" : "s"} (a per-night average is never multiplied into a stay total)</div>`
-  ).join("")
-  const uncovered = p.uncoveredDates.length
-    ? `<div class="err">Uncovered nights (${p.uncoveredDates.length}): ${p.uncoveredDates.map(esc).join(", ")}</div>` : ""
-  return `<div class="plan">
-    <div class="meta" style="color:#9fb0c0"><b>${label}</b> — ${p.coveredNights}/${requestedNights} nights covered · ${p.segments.length} hotel segment${p.segments.length === 1 ? "" : "s"} · ${p.switches} switch${p.switches === 1 ? "" : "es"}</div>
-    ${p.segments.map(planSegmentLine).join("")}
-    ${uncovered}
-    <div class="meta" style="margin-top:6px">Totals (per program — never combined across programs):</div>
-    ${totals || '<div class="line">no segments</div>'}
+let ENTITLEMENTS = null   // /api/hotel-awards/entitlements payload (declared only)
+
+const PROGRAM_KEY_PREFIX = { HILTON_HONORS: "HILTON", MARRIOTT_BONVOY: "MARRIOTT", WORLD_OF_HYATT: "HYATT", IHG_ONE_REWARDS: "IHG" }
+function heldForProgram(program) {
+  if (!ENTITLEMENTS) return []
+  const prefix = PROGRAM_KEY_PREFIX[program]
+  const all = [...ENTITLEMENTS.held.statuses, ...ENTITLEMENTS.held.cards, ...ENTITLEMENTS.held.memberships]
+  return prefix ? all.filter(k => k.startsWith(prefix)) : []
+}
+
+function renderEntitlements() {
+  const box = document.getElementById("ent-list")
+  if (!ENTITLEMENTS) { box.innerHTML = '<span class="err">entitlements unavailable</span>'; return }
+  const rows = Object.keys(PROGRAM_KEY_PREFIX).map(p => {
+    const held = heldForProgram(p)
+    return `<div class="ent-row" title="Open the entitlement editor"><span>${esc(prog(p))}</span><span class="ent-val ${held.length ? "held" : ""}">${
+      held.length ? held.map(k => esc(StayPlanUI.humanizeKey(k))).join(", ") : "none declared"}<span class="chev">⌄</span></span></div>`
+  }).join("")
+  const certs = (ENTITLEMENTS.certificates || []).filter(c => c.quantity > 0)
+    .map(c => `<div class="ent-row"><span>${esc(StayPlanUI.humanizeKey(c.key))}</span><span class="ent-val held">× ${c.quantity}</span></div>`).join("")
+  box.innerHTML = rows + certs
+}
+
+async function loadEntitlementsPanel() {
+  try {
+    const res = await fetch("/api/hotel-awards/entitlements")
+    ENTITLEMENTS = res.ok ? await res.json() : null
+  } catch { ENTITLEMENTS = null }
+  renderEntitlements()
+}
+
+// Edit entitlements — declaration UI over the closed catalog the rules can
+// actually consume. Saving writes the DECLARED config; nothing is inferred.
+function openEntEditor() {
+  const ed = document.getElementById("ent-editor")
+  if (!ed.hidden) { ed.hidden = true; return }
+  if (!ENTITLEMENTS) return
+  const cat = ENTITLEMENTS.catalog || { eligibility: [], certificates: [] }
+  const heldSet = new Set([
+    ...ENTITLEMENTS.held.memberships.map(k => "membership:" + k),
+    ...ENTITLEMENTS.held.statuses.map(k => "status:" + k),
+    ...ENTITLEMENTS.held.cards.map(k => "card:" + k),
+  ])
+  const groups = { membership: "MEMBERSHIPS", status: "STATUSES", card: "CARDS" }
+  let html = ""
+  for (const kind of Object.keys(groups)) {
+    const opts = cat.eligibility.filter(e => e.kind === kind)
+    if (!opts.length) continue
+    html += `<div class="ent-group">${groups[kind]}</div>` + opts.map(e =>
+      `<label><input type="checkbox" class="ent-ck" data-kind="${esc(e.kind)}" data-key="${esc(e.key)}" ${heldSet.has(e.kind + ":" + e.key) ? "checked" : ""}>
+        <span>${esc(StayPlanUI.humanizeKey(e.key))}</span></label>`).join("")
+  }
+  if (cat.certificates.length) {
+    html += `<div class="ent-group">CERTIFICATES (declared quantity)</div>` + cat.certificates.map(c => {
+      const cur = (ENTITLEMENTS.certificates || []).find(x => x.key === c.type)
+      return `<label><input type="number" min="0" max="9" class="ent-cert" data-type="${esc(c.type)}" data-program="${esc(c.programs[0] || "")}" value="${cur ? cur.quantity : 0}">
+        <span>${esc(StayPlanUI.humanizeKey(c.type))}</span></label>`
+    }).join("")
+  }
+  html += `<button class="r-btn secondary" id="ent-save" type="button" style="margin-top:8px;padding:5px 14px;font-size:12px">Save declaration</button>
+    <span class="meta" id="ent-save-msg"></span>`
+  ed.innerHTML = html
+  ed.hidden = false
+  document.getElementById("ent-save").addEventListener("click", saveEntitlementsDecl)
+}
+document.getElementById("ent-edit-btn").addEventListener("click", openEntEditor)
+document.getElementById("ent-list").addEventListener("click", () => {
+  if (document.getElementById("ent-editor").hidden) openEntEditor()
+})
+
+async function saveEntitlementsDecl() {
+  const held = { memberships: [], statuses: [], cards: [] }
+  for (const ck of document.querySelectorAll(".ent-ck")) {
+    if (!ck.checked) continue
+    if (ck.dataset.kind === "membership") held.memberships.push(ck.dataset.key)
+    else if (ck.dataset.kind === "status") held.statuses.push(ck.dataset.key)
+    else held.cards.push(ck.dataset.key)
+  }
+  const certificates = [...document.querySelectorAll(".ent-cert")].map(i => ({
+    key: i.dataset.type, program: i.dataset.program, quantity: Number(i.value) || 0,
+  }))
+  const msg = document.getElementById("ent-save-msg")
+  try {
+    const res = await fetch("/api/hotel-awards/entitlements", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ held, certificates }),
+    })
+    const data = await res.json()
+    if (!res.ok) { msg.textContent = data.error || "save failed"; return }
+    msg.textContent = "saved"
+    await loadEntitlementsPanel()
+    document.getElementById("ent-editor").hidden = true
+    if (!document.getElementById("plan-area").hidden) findStayPlan()
+  } catch (err) {
+    msg.textContent = "save failed: " + err.message
+  }
+}
+
+// Segment perk badges: APPLIED (verified rule + declared entitlement; counts
+// a rule-supported free night, never a points value) vs QUALIFIES — PRICE
+// EFFECT UNKNOWN (highlight only, never a number) vs benefit annotations.
+// `compact` (alternative-plan lines) renders only the state chips — no
+// pay-for or attribution repeats — so the popover stays scannable.
+function segPerkBadges(s, compact = false) {
+  const out = []
+  const attributions = new Map()   // one chip per distinct attribution, never per rule
+  for (const r of s.perks || []) {
+    if (r.state === "applied" && r.affectsArithmetic) {
+      out.push(`<span class="seg-badge applied" title="${esc(r.badgeLabel)} — APPLIED per verified rule ${esc(r.ruleId)}. Free-night COUNT is rule-supported; its points value is never invented.${r.bookingConditions.length ? " Book: " + esc(r.bookingConditions.join("; ")) + "." : ""}">${esc(r.badgeLabel)} · ${esc(StayPlanUI.perkStateLabel(r.state))}</span>`)
+      // "Stay for 5, pay for 4" — a NIGHT-COUNT subtraction, never points.
+      const pay = compact ? null : StayPlanUI.payForText(s, r)
+      if (pay) out.push(`<span class="seg-badge payfor" title="Night COUNT per the verified rule — the free night's points value is never invented; no discounted total is shown.">${esc(pay)}</span>`)
+    } else if (r.state === "applied") {
+      out.push(`<span class="seg-badge benefit" title="${esc(r.badgeLabel)} — verified benefit, never monetized into any comparison.">${esc(r.badgeLabel)}</span>`)
+    } else if (r.state === "qualifies_but_unpriced") {
+      out.push(`<span class="seg-badge qualifies" title="${esc(r.badgeLabel)} — qualifies, but the price effect on this segment is unknown (${esc(r.reason)}). QUALIFIES — PRICE EFFECT UNKNOWN. No discounted total is shown.">${esc(r.badgeLabel)} · ${esc(StayPlanUI.perkStateLabel(r.state))}</span>`)
+    }
+    // Attribution names the DECLARED key kind that satisfied the rule —
+    // "Card benefit" / "Hilton Diamond benefit" / "Member benefit".
+    if (r.state === "applied" && !compact) {
+      const attr = StayPlanUI.perkAttribution(r)
+      if (attr && !attributions.has(attr)) attributions.set(attr, (r.satisfiedBy || []).join(", "))
+    }
+  }
+  for (const [attr, keys] of attributions) {
+    out.push(`<span class="seg-badge attrib" title="Satisfied by your DECLARED key(s): ${esc(keys)} — declared, never inferred.">${esc(attr)}</span>`)
+  }
+  return out.join(" ")
+}
+
+// A segment's "cash context" is an echo of the same response, labelled by the
+// PROVIDER's basis so a per-night average and a stay figure are never read as
+// comparable — never summed, never converted, never a comparison.
+const CASH_BASIS = { roame_hotels: "per-night average (Roame)", gondola_hotels: "stay total (Gondola)" }
+function cashContextTag(s) {
+  const e = s.evidence
+  if (!e || e.cashComparisonAmount === null || e.cashComparisonAmount === undefined) return ""
+  const basis = CASH_BASIS[s.provider] || "basis not stated"
+  return `<span class="tag">cash context ${money(e.cashComparisonAmount, e.cashComparisonCurrency)} — not a comparison (${esc(basis)})</span>`
+}
+
+/** Does any perk rule exist for this program? (From the entitlements catalog
+ *  the rules define — a program without rules has nothing to declare.) */
+function programHasRules(program) {
+  const cat = ENTITLEMENTS && ENTITLEMENTS.catalog
+  return !!cat && cat.eligibility.some(e => e.programs.includes(program))
+}
+
+function segCard(s) {
+  const price = StayPlanUI.segmentPriceText(s)
+  const held = ENTITLEMENTS ? ENTITLEMENTS.held : null
+  const nothing = !ENTITLEMENTS || StayPlanUI.nothingDeclared({ held: ENTITLEMENTS.held, certificates: ENTITLEMENTS.certificates })
+  let status = StayPlanUI.heldSummary(held, s.program)
+  if (status === "no entitlement declared" && !programHasRules(s.program)) status = "no perk rules for this program"
+  // One "declare" prompt at a time: the band carries it while nothing at all
+  // is declared; cards prompt only for a program that HAS rules to satisfy.
+  const declare = status === "no entitlement declared" && !nothing
+    ? ` <button class="ent-edit-link" type="button" data-declare>declare ›</button>` : ""
+  const notEligible = (s.perks || []).filter(r => r.state === "not_eligible" && r.reason !== "stay-shape-not-matched")
+  // When the source stated BOTH a stay total and a per-night figure, both are
+  // echoes and both may show — still nothing is ever computed from nights.
+  const avgSub = s.pointsTotal !== null && s.pointsPerNight !== null
+    ? `<div class="per">avg ${fmt.format(s.pointsPerNight)} pts/night (source-stated)</div>` : ""
+  const e = s.evidence
+  const ev = StayPlanUI.evidenceText(s, LAST_PLAN_DATA ? LAST_PLAN_DATA.generatedAt : null)
+  const nav = s.navigation
+  const noLink = !nav || !nav.url || nav.quality === "UNAVAILABLE" ? " · no trustworthy provider link" : ""
+  const bounded = e && e.availabilityState === "unknown"
+    ? `<div class="bounded">Historical/period award observation — not a live hold.</div>` : ""
+  const taxes = e && e.taxesFeesState === "stated" && e.taxesFeesAmount !== null
+    ? `taxes/fees ${money(e.taxesFeesAmount, e.taxesFeesCurrency)}`
+    : `taxes/fees ${esc(e ? e.taxesFeesState : "unknown")}`
+  const needs = r => (r.requires || []).length
+    ? ` — needs ${r.requires.map(k => StayPlanUI.humanizeKey(k.split(":")[1] || k)).join(" or ")}` : ""
+  const acq = r => r.acquisition
+    ? ` (declared acquisition cost: ${r.acquisition.cost ? money(r.acquisition.cost.amount, r.acquisition.cost.currency) : "not stated"}${
+        (r.acquisition.alternatives || []).map(a => `, or ${fmt.format(a.amount)} ${prog(a.pointsProgram)} points`).join("")} — cash and points listed separately, never blended)` : ""
+  return `<div class="card split">
+    ${tile(s)}
+    <div class="body">
+      <div class="top">
+        <div>
+          <div class="title">${esc(s.propertyName)}</div>
+          <div class="seg-status">${esc(prog(s.program))} · ${esc(status)}${declare}</div>
+          <div class="line">${esc(s.checkIn)} → ${esc(s.checkOut)} · ${s.nights} night${s.nights === 1 ? "" : "s"}${e && (e.roomName || e.roomClass) ? " · " + esc(e.roomName ? e.roomName + (e.roomClass ? " · " + e.roomClass : "") : e.roomClass) : ""}</div>
+          <div class="evidence">${esc(ev.line)}</div>
+        </div>
+        <div style="text-align:right">
+          <div class="points">${esc(price.main)}</div>
+          ${price.sub ? `<div class="per">${esc(price.sub)}</div>` : ""}
+          ${avgSub}
+          <button class="viewdetails" type="button" onclick="const d=this.closest('.card').querySelector('details.dcard'); d.open=!d.open">View details ›</button>
+        </div>
+      </div>
+      <div class="tags">${segPerkBadges(s)}${document.getElementById("pk-promos").checked ? promoBadge(s) : ""}${action(s)}
+        <button type="button" class="swapbtn" data-key="${esc(s.provider)}|${esc(s.providerPropertyRef)}" data-name="${esc(s.propertyName)}" title="Exclude this hotel and re-project the plan from the remaining stored observations — read-only, never a search.">Swap this hotel</button></div>
+      <details class="dcard"><summary>Details</summary>
+        ${bounded}
+        <div class="meta">observation #${s.observationId} · ${esc(provLabel(s.provider))} · quote basis ${esc(s.quoteBasis.replace("_", " "))} · exact observed window only — never extrapolated${esc(noLink)}</div>
+        ${e ? `<div class="meta"><span class="${e.taxesFeesState === "stated" ? "" : "warn"}">${taxes}</span> · availability ${esc(e.availabilityState)} · search ${esc(e.searchState)} · ${e.sourceFreshness ? "source freshness " + esc(String(e.sourceFreshness).slice(0, 16)) : "source freshness unknown"} · ${esc(e.verificationLevel)} · source program “${esc(e.sourceProgramName)}”</div>` : ""}
+        <div class="tags">${cashContextTag(s)}</div>
+        ${notEligible.length ? `<div class="meta">Not applied here: ${notEligible.map(r => `${esc(r.badgeLabel)} (${esc(r.reason)}${needs(r)}${acq(r)})`).join("; ")}</div>` : ""}
+      </details>
+    </div>
   </div>`
 }
 
+/** A segment renders GOLD when a certificate/weekend-night perk is applied
+ *  or qualifies on it — the mockup's status-perk highlight. */
+function segIsGold(s) {
+  return (s.perks || []).some(r =>
+    (r.state === "applied" || r.state === "qualifies_but_unpriced")
+    && (r.certificateConsumed !== null || r.perkType === "weekend_night_certificate"))
+}
+
+function renderCalendar(plan, data) {
+  const cal = document.getElementById("plan-cal")
+  const model = StayPlanUI.calendarModel(plan, data.rangeStart, data.requestedNights)
+  cal.style.gridTemplateColumns = `repeat(${data.requestedNights}, minmax(40px, 1fr))`
+  let html = ""
+  // Month labels span from each month start to the next; later months sit
+  // right-aligned like the mockup's "December 2026".
+  const monthStarts = model.days.filter(d => d.monthLabel)
+  monthStarts.forEach((d, i) => {
+    const end = i + 1 < monthStarts.length ? monthStarts[i + 1].col : data.requestedNights + 1
+    html += `<div class="cal-month ${i > 0 ? "next" : ""}" style="grid-column:${d.col} / ${end}">${esc(d.monthLabel)}</div>`
+  })
+  for (const d of model.days) {
+    html += `<div class="cal-day ${d.isWeekend ? "weekend" : ""}" style="grid-column:${d.col}" title="${esc(d.date)}"><span class="dnum">${d.dayOfMonth}</span>${esc(d.weekday)}</div>`
+  }
+  for (const b of model.blocks) {
+    if (b.kind === "gap") {
+      html += `<div class="cal-block gap" style="grid-column:${b.startCol} / span ${b.span}" title="No stored observation covers: ${b.dates.map(esc).join(", ")}">no coverage · ${b.span}n</div>`
+    } else {
+      const s = plan.segments[b.segmentIndex]
+      const gold = segIsGold(s)
+      const applied = (s.perks || []).find(r => r.state === "applied" && r.affectsArithmetic)
+      const qualifies = (s.perks || []).find(r => r.state === "qualifies_but_unpriced")
+      // 🎁 = a rule-supported free night is APPLIED here (the legend's
+      // "Free night used"); 👑 = certificate/status weekend-night segment.
+      const perk = applied ? `<span class="b-perk">${gold ? "👑 " : "🎁 "}${esc(applied.badgeLabel)}</span>`
+        : qualifies ? `<span class="b-perk q">${gold ? "👑 " : ""}${esc(qualifies.badgeLabel)} · unpriced</span>` : ""
+      html += `<div class="cal-block ${StayPlanUI.programClass(b.program)}${gold ? " gold" : ""}${b.span <= 2 ? " tiny" : ""}" style="grid-column:${b.startCol} / span ${b.span}" title="${esc(b.propertyName)} · ${esc(b.checkIn)} → ${esc(b.checkOut)} · ${b.nights} night${b.nights === 1 ? "" : "s"} · exact observed window">
+        <div class="b-name">${esc(b.propertyName)}</div>
+        <div class="b-dates">${esc(b.checkIn.slice(5))} → ${esc(b.checkOut.slice(5))} · ${b.nights} nights</div>
+        ${perk}</div>`
+    }
+  }
+  cal.innerHTML = html
+  const progs = [...new Set(plan.segments.map(s => s.program))]
+  document.getElementById("plan-legend").innerHTML =
+    progs.map(p => `<span><span class="sw ${StayPlanUI.programClass(p)}"></span>${esc(prog(p))}</span>`).join("")
+    + (plan.uncoveredDates.length ? `<span style="color:#ff9d9d">▨ uncovered nights stay visible — never filled in</span>` : "")
+    + `<span class="spacer"></span>`
+    + `<span title="A rule-supported free night is applied on this segment — counted as a night, never priced.">🎁 Free night used</span>`
+    + `<span title="A certificate/status weekend-night perk marks its segment gold.">👑 Status perk</span>`
+}
+
+// "held: …" beside a program's total — the LARGEST SINGLE account from the
+// local AwardWallet snapshot vs a SOURCE-STATED total only. Accounts are
+// never summed, programs never crossed, per-night figures never touched.
+function heldLine(t) {
+  const accounts = BALANCES && BALANCES.state === "snapshot" ? BALANCES.accounts : []
+  const h = StayPlanUI.heldForProgramTotal(accounts, t)
+  return `<span class="held ${esc(h.verdict)}" title="Points held per the local AwardWallet snapshot — never demo/fallback numbers, transfers not assumed.">${esc(h.text)}</span>`
+}
+
+function renderSummary(plan) {
+  const m = StayPlanUI.summaryModel(plan)
+  const viaDeclared = ruleId => {
+    for (const s of plan.segments) {
+      const r = (s.perks || []).find(x => x.ruleId === ruleId && x.state === "applied" && (x.satisfiedBy || []).length)
+      if (r) return ` — via declared ${r.satisfiedBy.map(k => StayPlanUI.humanizeKey(k.split(":")[1] || k)).join(", ")}`
+    }
+    return ""
+  }
+  const perkLines = m.appliedPerks.map(p =>
+    `<div class="perkline"><span><span class="pmark">✓</span>${esc(p.badgeLabel)} · ${esc(prog(p.program))}<span class="meta">${esc(viaDeclared(p.ruleId))}</span></span><span class="times">${p.count}x</span></div>`).join("")
+  const annLines = m.annotations.map(p =>
+    `<div class="perkline"><span><span class="pmark" style="color:#7fd1b9">•</span>${esc(p.badgeLabel)} (benefit — never priced)</span></div>`).join("")
+  const qualLines = m.qualifiesUnpriced.map(p =>
+    `<div class="perkline"><span><span class="pmark" style="color:#d9b96a">?</span>${esc(p.badgeLabel)} — price effect unknown</span><span class="times">${p.count}x</span></div>`).join("")
+  document.getElementById("plan-summary").innerHTML = `
+    <div class="sum-head">Plan summary</div>
+    <div class="stat"><div class="num green">${m.coveredNights} <span class="of">/ ${m.requestedNights}</span></div><div class="lbl">Nights covered</div></div>
+    <div class="stat"><div class="num">${m.segments}</div><div class="lbl">Hotel segments</div></div>
+    <div class="stat"><div class="num">${m.switches}</div><div class="lbl">Hotel switches</div></div>
+    <div class="stat"><div class="num" style="color:#ffd479">${m.appliedFreeNights}</div><div class="lbl">Free nights from verified perks</div></div>
+    <div class="sum-title">Points by program</div>
+    ${plan.programTotals.map(t => `<div class="prog-row"><span>${esc(prog(t.program))}</span><span class="amt ${t.statedTotal === null ? "unavail" : ""}">${esc(StayPlanUI.programTotalText(t))}</span>${heldLine(t)}</div>`).join("") || '<div class="meta">no segments</div>'}
+    <div class="meta" style="margin-top:6px">Totals shown only where source-stated. Per program only — points of different programs are never combined into one total. A per-night average is never multiplied into a stay total.</div>
+    ${perkLines ? `<div class="sum-title">Perks applied</div>${perkLines}` : ""}
+    ${m.certificatesConsumed.length ? `<div class="meta">Certificates consumed by this plan: ${m.certificatesConsumed.map(c => `${esc(StayPlanUI.humanizeKey(c.type))} × ${c.quantity}`).join(", ")}</div>` : ""}
+    ${(annLines || qualLines) ? `<details class="allperks"><summary>See all perks ›</summary>${qualLines}${annLines}</details>` : ""}
+    <div style="margin-top:12px"><button class="ent-edit-link" type="button" id="sum-book">Book this plan ›</button></div>`
+  document.getElementById("sum-book").addEventListener("click", () => {
+    const b = document.getElementById("plan-book")
+    b.open = true
+    b.scrollIntoView({ behavior: "smooth", block: "start" })
+  })
+}
+
+function renderBand(plan, data) {
+  const complete = plan.coveredNights === plan.requestedNights
+  document.getElementById("pb-status").innerHTML =
+    `<span class="${complete ? "ok-dot" : "warn-dot"}">${complete ? "✓ Best plan found" : "◐ Best partial plan"}</span>`
+  // Evidence age is a FACT (observation timestamps vs server time), not a
+  // freshness score; the 7-day amber is a display threshold only.
+  let evidence = ""
+  const ev = plan.evidence
+  if (ev && ev.oldestFetchedAt) {
+    const oldest = StayPlanUI.evidenceAgeDays(ev.oldestFetchedAt, data.generatedAt)
+    const newest = StayPlanUI.evidenceAgeDays(ev.newestFetchedAt, data.generatedAt)
+    if (oldest !== null && newest !== null) {
+      evidence = ` · <span class="${oldest > 7 ? "amber" : ""}" title="display threshold only — quotes can change at any time">evidence ${newest === oldest ? oldest : newest + "–" + oldest} day${oldest === 1 ? "" : "s"} old · no live holds</span>`
+    }
+  }
+  const filtered = EXCLUDED.size > 0 || (data.filters && data.filters.programs.length > 0)
+  document.getElementById("pb-facts").innerHTML =
+    `${plan.coveredNights}/${plan.requestedNights} nights covered · ${plan.segments.length} segment${plan.segments.length === 1 ? "" : "s"} · ${plan.switches} switch${plan.switches === 1 ? "" : "es"}`
+    + evidence
+    + (complete ? "" : ` · <span class="err" style="display:inline">full coverage impossible with stored observations${filtered ? " — with filters applied: restore a hotel/program, or run a discovery search (explicit click) to add evidence" : ""}</span>`)
+  // A perk-config failure is a different truth than "nothing declared": say
+  // which one applies. With nothing declared every perk resolves not eligible,
+  // so the life-perk ranking is exactly the fewest-switches ranking.
+  const ent = document.getElementById("pb-ent")
+  if (data.perksError) {
+    ent.hidden = false
+    ent.innerHTML = `Perk layer unavailable: ${esc(data.perksError)} — perks were not evaluated and the ranking fell back to fewest switches.`
+  } else {
+    ent.hidden = !StayPlanUI.nothingDeclared(data.heldEntitlements)
+    ent.innerHTML = ent.hidden ? "" : `No entitlements declared — every perk resolves not eligible and the life-perk ranking currently equals the fewest-switches ranking. <button class="ent-edit-link" type="button" data-declare>Declare under Status &amp; entitlements ›</button>`
+  }
+  // "Why this plan" states the ordering that was ACTUALLY used for this goal.
+  const why = {
+    life_perks: "Complete night coverage first, then the most verified free nights from your declared entitlements (a count of nights, never a points value), then the fewest switches.",
+    points_cost: "Complete night coverage first, then lower source-stated points per program where the comparison is valid (same programs, every segment stated), then the fewest switches. Per-night-only segments make plans incomparable on points.",
+    fewest_switches: "Complete night coverage first, then the fewest hotel switches, then valid source-stated points. Perks are annotated, not ranked.",
+  }
+  document.getElementById("pf-why").textContent = why[data.goal] || why.fewest_switches
+}
+
+// "Book this plan" — one reservation per segment, copyable as text. No
+// combined booking, no combined price, availability never claimed.
+let LAST_BOOK_TEXT = ""
+function renderBook(plan) {
+  const m = StayPlanUI.bookingChecklist(plan)
+  document.getElementById("plan-book-summary").textContent =
+    `Book this plan — ${m.lines.length} separate reservation${m.lines.length === 1 ? "" : "s"} · provider links: ${m.linked} of ${m.lines.length} segments have a trustworthy link`
+  const items = m.lines.map((l, i) => {
+    const s = plan.segments[i]
+    const link = l.noLink
+      ? `<span class="meta">no trustworthy provider link — search manually at ${esc(provLabel(s.provider))} for exactly these dates</span>`
+      : action(s)
+    return `<li><b>${esc(l.dates)}</b> · ${l.nights} night${l.nights === 1 ? "" : "s"} · <b>${esc(l.propertyName)}</b> · ${esc(prog(l.program))} · <span class="amber">${esc(l.priceMain)}</span>${l.priceSub ? ` <span class="meta">(${esc(l.priceSub)})</span>` : ""}
+      <div class="meta">${link}${l.conditions.length ? ` · Book: ${l.conditions.map(esc).join("; ")}` : ""}</div>
+      <div class="meta">${esc(l.availabilityText)}${l.observedAt ? ` · observed ${esc(l.observedAt)}` : ""}</div>
+      ${l.sameHotelAsPrevious ? `<div class="meta">same hotel as the previous segment — separate observed windows; book as separate reservations unless the hotel confirms one (a ONE-reservation perk condition applies per segment)</div>` : ""}</li>`
+  }).join("")
+  document.getElementById("plan-book-body").innerHTML = `<ol>${items}</ol>
+    <div class="bookfoot">${m.lines.length} separate reservation${m.lines.length === 1 ? "" : "s"}. No combined booking, no combined price — per-program totals appear in the summary only where source-stated. RECHECK before booking — a provider link restores the search window, it never confirms the quote.</div>
+    <div style="margin-top:8px"><button class="r-btn secondary" id="book-copy" type="button" style="padding:6px 14px;font-size:12px">Copy as text</button> <span class="meta" id="book-copy-msg"></span></div>`
+  LAST_BOOK_TEXT = m.text
+  document.getElementById("book-copy").addEventListener("click", copyBookText)
+}
+
+async function copyBookText() {
+  const msg = document.getElementById("book-copy-msg")
+  try {
+    await navigator.clipboard.writeText(LAST_BOOK_TEXT)
+    msg.textContent = "copied"
+  } catch {
+    const ta = document.createElement("textarea")
+    ta.value = LAST_BOOK_TEXT; ta.readOnly = true
+    document.getElementById("plan-book-body").appendChild(ta)
+    ta.select(); document.execCommand("copy"); ta.remove()
+    msg.textContent = "copied"
+  }
+}
+
+function altPlanBlock(p, i) {
+  const lines = p.segments.map(s => {
+    const price = StayPlanUI.segmentPriceText(s)
+    return `<div class="line" style="margin:3px 0">${esc(s.checkIn)} → ${esc(s.checkOut)} (${s.nights}n) · <b>${esc(s.propertyName)}</b> · ${esc(prog(s.program))} · <span style="color:#ffd479">${esc(price.main)}</span>${price.sub ? ` <span class="per">(${esc(price.sub)})</span>` : ""} ${segPerkBadges(s, true)}${action(s)}</div>`
+  }).join("")
+  const totals = p.programTotals.map(t => `<div class="meta">${esc(prog(t.program))}: ${esc(StayPlanUI.programTotalText(t))}</div>`).join("")
+  return `<div class="alt-plan">
+    <div class="meta" style="color:#9fb0c0"><b>Alternative ${i + 1}</b> — ${p.coveredNights}/${p.requestedNights} nights · ${p.switches} switch${p.switches === 1 ? "" : "es"} · ${p.appliedPerkNights} rankable free night${p.appliedPerkNights === 1 ? "" : "s"} from verified perks</div>
+    ${lines}${totals}
+    ${p.uncoveredDates.length ? `<div class="err">Uncovered: ${p.uncoveredDates.map(esc).join(", ")}</div>` : ""}
+  </div>`
+}
+
+let LAST_PLAN_DATA = null   // the last /api/hotel-awards/stayplan payload rendered
+let BALANCES = null         // /api/balances payload — local snapshot or an explicit "none"
+
+function renderStayPlan(data) {
+  LAST_PLAN_DATA = data
+  const [best, ...alts] = data.plans
+  document.getElementById("plan-area").hidden = false
+  // A re-check preview describes ONE plan — any re-plan invalidates it, so
+  // its "Run now" button can never spend calls on windows no longer shown.
+  document.getElementById("p-recheck-box").innerHTML = ""
+  ensureProgramFilters(data)
+  renderBand(best, data)
+  renderCalendar(best, data)
+  document.getElementById("plan-cards").innerHTML = best.segments.map(segCard).join("")
+    || '<div class="empty">No stored observation covers any night of this range.</div>'
+  renderSummary(best)
+  renderBook(best)
+  const explain = StayPlanUI.planExplanation(best, data.goal, data.generatedAt)
+  const complete = best.coveredNights === best.requestedNights
+  const gaps = best.uncoveredDates.length
+  document.getElementById("plan-foot").innerHTML = `
+    <span class="cover-ic ${complete ? "" : "warn"}">${complete ? "✓" : "◐"}</span>
+    <span class="cover-txt"><b>${complete ? "All nights covered. No gaps." : `${gaps} night${gaps === 1 ? "" : "s"} uncovered — shown on the calendar, never filled in.`}</b>
+      Plan built from real observed award windows · read-only over stored observations · zero provider calls</span>
+    <span class="spacer"></span>
+    <button class="r-btn secondary" id="p-recheck" type="button" title="Re-observe exactly this plan's windows via Roame — a two-step action that spends provider calls only after you confirm the preview.">Re-check these exact windows (spends calls)</button>
+    ${gaps ? `<button class="r-btn secondary" id="p-fill" type="button" title="Search exactly the uncovered gap ranges — two-step, spends provider calls only after you confirm the preview.">Search the ${gaps} uncovered night${gaps === 1 ? "" : "s"} (spends calls)</button>` : ""}
+    <details><summary>How this plan works</summary>
+      <div class="foot-body"><ul style="margin:8px 0 4px;padding-left:18px">${explain.map(s => `<li>${esc(s)}</li>`).join("")}</ul>
+      <div class="meta" style="margin-top:6px">${esc(data.disclaimer)}${data.perksError ? " · perk layer unavailable: " + esc(data.perksError) : ""}</div></div>
+    </details>`
+  document.getElementById("p-recheck").addEventListener("click", recheckPlanWindows)
+  const fill = document.getElementById("p-fill")
+  if (fill) fill.addEventListener("click", searchGapWindows)
+  const altsEl = document.getElementById("plan-alts")
+  altsEl.hidden = alts.length === 0 || !document.getElementById("dsp-alts").checked
+  altsEl.open = false
+  document.getElementById("plan-alts-n").textContent = String(alts.length)
+  document.getElementById("plan-alts-body").innerHTML = alts.map(altPlanBlock).join("")
+}
+
+// ── Hotels & programs filters — read-only re-projection, never a search ─────
+const EXCLUDED = new Map()   // "provider|ref" → property name ("Swap this hotel")
+
+function ensureProgramFilters(data) {
+  const box = document.getElementById("pp-progs")
+  // The universe is the SERVER's unfiltered program list (every program with
+  // stored evidence), so unchecking one can never silently drop a program the
+  // user never saw; plan programs are only an additive fallback.
+  const seen = new Set([...ALL_PROGRAMS, ...data.plans.flatMap(p => p.segments.map(s => s.program))])
+  const existing = new Set([...box.querySelectorAll(".pp-prog")].map(i => i.dataset.program))
+  if (existing.size === 0) box.innerHTML = ""
+  for (const p of [...seen].sort()) {
+    if (existing.has(p)) continue
+    const label = document.createElement("label")
+    label.className = "opt-row"
+    label.innerHTML = `<input type="checkbox" class="pp-prog" data-program="${esc(p)}" checked><span>${esc(prog(p))}</span>`
+    box.appendChild(label)
+  }
+}
+// [] = no filter (every program ticked); null = NOTHING ticked — an explicit
+// empty choice the caller must refuse, never a silent fallback to everything.
+function currentPrograms() {
+  const boxes = [...document.querySelectorAll(".pp-prog")]
+  const on = boxes.filter(b => b.checked).map(b => b.dataset.program)
+  if (boxes.length === 0 || on.length === boxes.length) return []
+  return on.length === 0 ? null : on
+}
+function renderExcluded() {
+  const box = document.getElementById("plan-excl")
+  if (EXCLUDED.size === 0) { box.innerHTML = '<span class="meta">none — use “Swap this hotel” on a plan card</span>'; return }
+  box.innerHTML = [...EXCLUDED.entries()].map(([k, name]) =>
+    `<span class="chip">${esc(name)} <button type="button" data-unexclude="${esc(k)}" title="restore this hotel">×</button></span>`).join("")
+    + ` <button type="button" class="ent-edit-link" id="excl-clear">Clear</button>`
+}
+document.getElementById("plan-cards").addEventListener("click", e => {
+  const b = e.target.closest(".swapbtn")
+  if (!b) return
+  EXCLUDED.set(b.dataset.key, b.dataset.name)
+  renderExcluded()
+  findStayPlan()
+})
+document.getElementById("plan-excl").addEventListener("click", e => {
+  const x = e.target.closest("[data-unexclude]")
+  if (x) { EXCLUDED.delete(x.dataset.unexclude); renderExcluded(); if (!document.getElementById("plan-area").hidden) findStayPlan(); return }
+  if (e.target.id === "excl-clear") { EXCLUDED.clear(); renderExcluded(); if (!document.getElementById("plan-area").hidden) findStayPlan() }
+})
+document.getElementById("pp-progs").addEventListener("change", () => { if (!document.getElementById("plan-area").hidden) findStayPlan() })
+// "declare ›" anywhere in the plan opens the existing entitlement editor.
+document.querySelector(".plan-maincol").addEventListener("click", e => {
+  if (!e.target.closest("[data-declare]")) return
+  if (document.getElementById("ent-editor").hidden) openEntEditor()
+  document.querySelector(".plan-side").scrollIntoView({ behavior: "smooth", block: "start" })
+})
+
+// ── Points held — the LOCAL AwardWallet snapshot, or an honest "unavailable" ─
+async function loadBalances() {
+  try {
+    const res = await fetch("/api/balances")
+    BALANCES = res.ok ? await res.json() : null
+  } catch { BALANCES = null }
+  renderBalancesLine()
+}
+function renderBalancesLine() {
+  const el = document.getElementById("bal-line")
+  if (!BALANCES) { el.textContent = "Balances unavailable — the local snapshot could not be read (no numbers shown, never demo/fallback values)." ; return }
+  if (BALANCES.state === "snapshot") {
+    const hours = Math.round((BALANCES.ageMinutes || 0) / 60)
+    el.textContent = `Balances: AwardWallet snapshot, ${hours}h old (${BALANCES.accounts.length} accounts) — one row per account, never summed.`
+  } else {
+    el.textContent = `Balances unavailable — ${BALANCES.health && BALANCES.health.detail ? BALANCES.health.detail : "no local snapshot"} (never demo/fallback numbers).`
+  }
+}
+
+// ── Data-status pre-flight (zero calls) ─────────────────────────────────────
+let HA_STATUS = null
+async function loadHaStatus() {
+  try {
+    const res = await fetch("/api/hotel-awards/status")
+    HA_STATUS = res.ok ? await res.json() : null
+  } catch { HA_STATUS = null }
+  renderHaStatus()
+}
+function sessionLineText(sess) {
+  if (!sess || !sess.present) return `<span class="bad">no Roame session file — every window would return unconfigured (0 calls)</span>`
+  if (sess.expired) return `<span class="bad">Roame session EXPIRED ${esc(String(sess.expiresAt).slice(0, 10))} per the saved file — sign in at roame.travel and save the session; a run would spend 1 call only to be rejected</span>`
+  if (sess.daysRemaining === null) return "Roame session file present — expiry not stated in the file"
+  if (sess.daysRemaining === 0) return `<span class="warn">Roame session expires today per the saved file</span>`
+  return `Roame session valid until ${esc(String(sess.expiresAt).slice(0, 10))} (${sess.daysRemaining} days) per the saved file`
+}
+function renderHaStatus() {
+  const el = document.getElementById("ha-status")
+  if (!HA_STATUS) { el.innerHTML = ""; return }
+  const s = HA_STATUS
+  const loc = document.getElementById("d-location").value.trim()
+  const locLine = s.locations.includes(loc.toLowerCase())
+    ? `Destination ${esc(loc)}: configured map box`
+    : `<span class="warn">Destination “${esc(loc)}”: no configured map box — discovery returns unconfigured for every window; add it to config roame.locations (never geocoded)</span>`
+  const age = s.observations.newest ? StayPlanUI.evidenceAgeDays(s.observations.newest, s.checkedAt) : null
+  const evLine = s.observations.total
+    ? `Stored evidence: ${fmt.format(s.observations.total)} observations · newest ${esc(String(s.observations.newest).slice(0, 10))}${age === null ? "" : ` (${age} day${age === 1 ? "" : "s"} ago)`}`
+    : "Stored evidence: none yet"
+  const u = s.usage
+  const runLine = u
+    ? `Last Roame run: ${u.lastCallAt ? esc(String(u.lastCallAt).slice(0, 16)) : "—"} · this month ${u.attempted} attempted / ${u.succeeded} succeeded${u.lastError ? ` · <span class="warn">last error: ${esc(u.lastError)}</span>` : ""}`
+    : "Last Roame run: none this month"
+  el.innerHTML = [sessionLineText(s.roameSession), locLine, evLine, runLine].join(" · ")
+}
+document.getElementById("d-location").addEventListener("input", renderHaStatus)
+
+// ── Explicit exact-window re-check — two clicks, preview first ──────────────
+// Step 1 previews the EXACT windows and the maximum HTTP calls (zero provider
+// calls). Step 2 is a separate explicit click that spends calls. Windows come
+// from the plan itself — never from the date fields, never invented.
+function setRecheckBusy(busy) {
+  for (const id of ["p-recheck", "p-fill", "p-recheck-go"]) {
+    const b = document.getElementById(id)
+    if (b) b.disabled = busy
+  }
+}
+// A plan's identity for "did the re-check change anything": the exact
+// observation rows behind it. The ranking signature deliberately ignores
+// observation ids and points, so it cannot tell a refreshed quote apart.
+const planFingerprint = plan => plan ? plan.segments.map(s => s.observationId).join(",") : null
+
+async function runExplicitWindows(windows, label) {
+  const box = document.getElementById("p-recheck-box")
+  if (!windows.length) { box.innerHTML = '<div class="meta">nothing to re-check</div>'; return }
+  // Everything the run will use is captured NOW and echoed in the preview —
+  // the executed request is exactly the previewed one.
+  const ctx = {
+    windows, label,
+    location: document.getElementById("d-location").value.trim(),
+    adults: Number(document.getElementById("d-adults").value.trim()),
+    planSignature: LAST_PLAN_DATA && LAST_PLAN_DATA.plans[0] ? LAST_PLAN_DATA.plans[0].signature : null,
+  }
+  box.innerHTML = '<div class="meta">previewing exact windows… (zero provider calls)</div>'
+  try {
+    const res = await fetch("/api/hotel-awards/recheck-windows", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: ctx.location, adults: ctx.adults, preview: true, windows: ctx.windows }),
+    })
+    const data = await res.json()
+    if (!res.ok) { box.innerHTML = `<div class="err">${esc(data.error || "preview failed")}</div>`; return }
+    const p = data.plan
+    box.innerHTML = `<div class="plan">
+      <div class="meta" style="color:#c6d0da"><b>${esc(label)}</b> — ${p.windows.length} exact window${p.windows.length === 1 ? "" : "s"} in ${esc(ctx.location)} for ${ctx.adults} guest${ctx.adults === 1 ? "" : "s"} · at most ${data.maxHttpCalls} Roame HTTP calls (${data.maxPagesPerWindow} page(s)/window) · this preview spent zero provider calls</div>
+      <div>${p.windows.map(w => `<span class="tag">${esc(w.checkIn)} → ${esc(w.checkOut)} · ${w.nights}n</span>`).join(" ")}</div>
+      ${p.dropped.length ? `<div class="meta">dropped over budget (deterministic, never hidden): ${p.dropped.map(w => `${esc(w.checkIn)} ${w.nights}n`).join(", ")}</div>` : ""}
+      <div class="meta" style="margin-top:6px">${sessionLineText(data.roameSession)}</div>
+      <div class="meta">${esc(data.disclaimer)}</div>
+      <button class="r-btn amber" id="p-recheck-go" type="button" style="margin-top:8px">Run now — spends provider calls (${data.maxHttpCalls} max)</button>
+    </div>`
+    document.getElementById("p-recheck-go").addEventListener("click", () => executeExplicitWindows(ctx))
+  } catch (err) {
+    box.innerHTML = `<div class="err">preview failed: ${esc(err.message)}</div>`
+  }
+}
+async function executeExplicitWindows(ctx) {
+  const box = document.getElementById("p-recheck-box")
+  const current = LAST_PLAN_DATA && LAST_PLAN_DATA.plans[0]
+  if (!current || current.signature !== ctx.planSignature) {
+    box.innerHTML = '<div class="err">The plan changed since this preview — preview again before spending provider calls.</div>'
+    return
+  }
+  const before = planFingerprint(current)
+  setRecheckBusy(true)
+  box.innerHTML = `<div class="meta">running ${esc(ctx.label)} — executing exact Roame windows…</div>`
+  try {
+    const res = await fetch("/api/hotel-awards/recheck-windows", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ location: ctx.location, adults: ctx.adults, windows: ctx.windows }),
+    })
+    const data = await res.json()
+    if (!res.ok) { box.innerHTML = `<div class="err">${esc(data.error || "re-check failed")}</div>`; return }
+    const s = data.summary
+    const odd = s.results.filter(r => r.searchState !== "complete")
+    const empties = s.results.filter(r => r.searchState === "empty")
+    let html = `<div class="plan">
+      <div class="meta" style="color:#c6d0da"><b>${esc(ctx.label)}</b> — windows ${s.windowsCompleted}/${s.windowsPlanned} · provider calls ${s.providerCalls} ·
+        observations stored ${s.observationsStored} · distinct hotels ${s.distinctHotels} · programs: ${s.programs.map(p => esc(prog(p))).join(", ") || "—"}</div>
+      ${s.stoppedOnBlock ? '<div class="err">BLOCKED — the run stopped early; no retries were attempted.</div>' : ""}
+      ${odd.length ? `<div class="meta">non-complete windows: ${odd.map(r =>
+        `${esc(r.window.checkIn)} ${r.window.nights}n — ${r.searchState === "empty" ? "searched — no award availability quoted for these exact nights" : esc(r.searchState)}${r.error ? " (" + esc(r.error) + ")" : ""}`).join("; ")}</div>` : ""}
+      ${empties.length ? `<div class="meta amber">An empty result stores no observation — for ${empties.map(r => `${esc(r.window.checkIn)} ${r.window.nights}n`).join(", ")} the plan still rests on the OLDER observation; nothing here was re-confirmed.</div>` : ""}
+      <div class="meta">Re-observed, not confirmed — Roame states availability as unknown; a fresh quote is still not a live hold.</div>`
+    await load()                              // the stored observations render through the existing cards
+    const rebuilt = await findStayPlan()      // and the plan re-projects from the NEWEST observations
+    const nowBest = LAST_PLAN_DATA && LAST_PLAN_DATA.plans[0]
+    if (!rebuilt) {
+      html += `<div class="err">plan could not be rebuilt after the run — see the message above the plan.</div>`
+    } else if (planFingerprint(nowBest) === before) {
+      html += `<div class="meta">plan unchanged — the same observation rows still drive it</div>`
+    } else if (nowBest.signature === current.signature) {
+      html += `<div class="meta">same hotels and dates; ${nowBest.segments.filter((sg, i) => sg.observationId !== current.segments[i]?.observationId).length} segment(s) now rest on newer observations — prices shown are the newer quotes</div>`
+    } else {
+      html += `<div class="meta">plan changed — hotels or dates differ; newest observations now drive it</div>`
+    }
+    if (rebuilt && nowBest.uncoveredDates.length) {
+      const gaps = StayPlanUI.gapWindows(nowBest, LAST_PLAN_DATA.rangeStart, LAST_PLAN_DATA.requestedNights)
+      html += gaps.map(g => `<div class="meta">Gap ${esc(g.checkIn)} × ${g.nights}n stays uncovered after this run — shown on the calendar, never filled in.</div>`).join("")
+    }
+    box.innerHTML = html + "</div>"
+  } catch (err) {
+    box.innerHTML = `<div class="err">re-check failed: ${esc(err.message)}</div>`
+  } finally {
+    setRecheckBusy(false)
+  }
+}
+function recheckPlanWindows() {
+  const best = LAST_PLAN_DATA && LAST_PLAN_DATA.plans[0]
+  if (!best) return
+  runExplicitWindows(StayPlanUI.segmentWindows(best), "Re-check this plan's exact windows")
+}
+function searchGapWindows() {
+  const best = LAST_PLAN_DATA && LAST_PLAN_DATA.plans[0]
+  if (!best) return
+  runExplicitWindows(StayPlanUI.gapWindows(best, LAST_PLAN_DATA.rangeStart, LAST_PLAN_DATA.requestedNights), "Search the uncovered nights")
+}
+
+/** Re-projects the plan from stored data. Returns true only when a plan was
+ *  rendered — callers that compare before/after must know a rebuild failed. */
 async function findStayPlan() {
   const box = document.getElementById("plan-out")
-  if (checkOutMissing(box)) return
+  if (checkOutMissing(box)) return false
+  const programs = currentPrograms()
+  if (programs === null) {
+    // An explicit empty allow-list is refused, never turned into "all programs".
+    box.innerHTML = '<div class="err">No programs selected — tick at least one program under Hotels &amp; programs. (Filters only remove evidence; an empty selection is not a request for everything.)</div>'
+    return false
+  }
   box.innerHTML = '<div class="meta">planning from stored observations… (read-only, zero provider calls)</div>'
   try {
     const cin = document.getElementById("d-in").value.trim()
     const cout = document.getElementById("d-out").value.trim()
-    const res = await fetch(`/api/hotel-awards/stayplan?checkIn=${encodeURIComponent(cin)}&checkOut=${encodeURIComponent(cout)}`)
+    const params = new URLSearchParams({ checkIn: cin, checkOut: cout, goal: currentGoal(), include: currentInclude().join(",") })
+    if (programs.length) params.set("programs", programs.join(","))
+    if (EXCLUDED.size) params.set("exclude", [...EXCLUDED.keys()].join(","))
+    const [res] = await Promise.all([fetch(`/api/hotel-awards/stayplan?${params}`), loadBalances()])
     const data = await res.json()
-    if (!res.ok) { box.innerHTML = `<div class="err">${esc(data.error || "plan failed")}</div>`; return }
-    if (!data.plans.length) {
-      box.innerHTML = '<div class="err">No stored observations fall inside this range — run a discovery search first.</div>'
-      return
+    if (!res.ok) { box.innerHTML = `<div class="err">${esc(data.error || "plan failed")}</div>`; return false }
+    // The optimizer always emits at least one (all-gap) plan — the honest
+    // empty state is a plan with NO segments, not an empty array.
+    const best = data.plans[0]
+    if (!best || best.segments.length === 0) {
+      document.getElementById("plan-area").hidden = true
+      document.getElementById("p-recheck-box").innerHTML = ""
+      const filtered = EXCLUDED.size > 0 || programs.length > 0
+      box.innerHTML = `<div class="err">No stored observation covers any night of ${esc(cin)} → ${esc(cout)}${filtered ? " with the current hotel/program filters — restore a hotel or program, or" : " —"} run “Search stays” (an explicit, metered discovery search) to add evidence. Nothing was invented to fill the range.</div>`
+      return false
     }
-    const [best, ...alts] = data.plans
-    const bestLabel = best.coveredNights === data.requestedNights ? "Best complete plan" : "Best PARTIAL plan (full coverage impossible with stored observations)"
-    box.innerHTML = `<div class="meta" style="margin-top:8px">${esc(data.disclaimer)}</div>`
-      + renderPlan(best, data.requestedNights, bestLabel)
-      + (alts.length ? `<details class="adv"><summary>Alternative plans (${alts.length})</summary>${alts.map((p, i) => renderPlan(p, data.requestedNights, `Alternative ${i + 1}`)).join("")}</details>` : "")
+    box.innerHTML = ""
+    if (!ENTITLEMENTS) await loadEntitlementsPanel()
+    renderStayPlan(data)
+    return true
   } catch (err) {
     box.innerHTML = `<div class="err">plan failed: ${esc(err.message)}</div>`
+    return false
   }
 }
 
 document.getElementById("p-run").addEventListener("click", findStayPlan)
+document.getElementById("pf-rebuild").addEventListener("click", () => {
+  findStayPlan()
+  document.querySelector(".plan-side").scrollIntoView({ behavior: "smooth", block: "start" })
+  const pp = document.getElementById("pp-panel")
+  pp.classList.remove("pulse"); void pp.offsetWidth; pp.classList.add("pulse")
+})
+// Goal / include changes re-project the SAME stored data (read-only, zero
+// provider calls) — they never trigger a provider search.
+for (const r of document.querySelectorAll('input[name="goal"]')) {
+  r.addEventListener("change", () => { if (!document.getElementById("plan-area").hidden) findStayPlan() })
+}
+for (const id of ["pk-cert", "pk-nth", "pk-card", "pk-promos"]) {
+  document.getElementById(id).addEventListener("change", () => { if (!document.getElementById("plan-area").hidden) findStayPlan() })
+}
+// Display toggles are pure presentation — they hide/show what is already
+// rendered and never re-rank or refetch anything.
+document.getElementById("dsp-cal-perks").addEventListener("change", e => {
+  document.getElementById("plan-area").classList.toggle("no-cal-perks", !e.target.checked)
+})
+document.getElementById("dsp-alts").addEventListener("change", e => {
+  const alts = document.getElementById("plan-alts")
+  alts.hidden = !e.target.checked || Number(document.getElementById("plan-alts-n").textContent || 0) === 0
+})
+// The declared-entitlements sidebar, the local balances line and the data-
+// status pre-flight are part of the persistent shell — all three are READS
+// (zero provider calls); declaring anything still takes the explicit editor.
+loadEntitlementsPanel()
+loadBalances()
+loadHaStatus()
 
 // ── Points cost calculator ───────────────────────────────────────────────────
 // Answers exactly one question: what would it cost to BUY this many points at

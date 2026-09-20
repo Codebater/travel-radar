@@ -19,7 +19,7 @@ import { fileURLToPath } from "url"
 import { runSearch, resolveTripSearch, planSearchLegs, type SearchConfig, type DashboardResults } from "./search.ts"
 import { providerHealth } from "./providers/cash-flights/index.js"
 import { awardProviderHealth } from "./providers/award-flights/index.js"
-import { balancesHealth } from "./providers/balances/index.js"
+import { balancesHealth, balancesSnapshotPayload } from "./providers/balances/index.js"
 import { getDb } from "./db/index.js"
 import { allUsage, priceHistory, awardPriceHistory, latestSearchResult, saveSearchResult } from "./db/repositories.js"
 import { listJobs, listRuns, readLease } from "./observer/store.js"
@@ -41,12 +41,16 @@ import { isQuiet, localDay } from "./notifications/quiet-hours.js"
 import { credentialWarnings } from "./notifications/credentials.js"
 import { listStayCandidates, stayCandidateTotals } from "./stays/candidates.js"
 import { listHotelAwards } from "./providers/hotel-awards/store.js"
-import { applicablePerks, loadEntitlements, loadHotelPerkRules, type PerkBadge } from "./providers/hotel-awards/perks.js"
+import { applicablePerks, entitlementKeyCatalog, loadEntitlements, loadHotelPerkRules, saveEntitlements, type EntitlementsConfig, type PerkBadge } from "./providers/hotel-awards/perks.js"
+import { filterRulesByInclude, PERK_INCLUDE_CATEGORIES, type PerkIncludeCategory } from "./providers/hotel-awards/planperks.js"
 import { planStayWindows } from "./providers/hotel-awards/planner.js"
-import { buildStayPlan } from "./providers/hotel-awards/stayplan.js"
+import { buildStayPlan, STAY_PLAN_GOALS, type StayPlanGoal, type StayPlanPerkContext } from "./providers/hotel-awards/stayplan.js"
+import { attachSegmentNavigation } from "./providers/hotel-awards/stayplan-navigation.js"
+import { hotelAwardsStatus, redactCredentialPaths, roameHotelSessionHealth } from "./providers/hotel-awards/status.js"
+import { buildExplicitWindowPlan } from "./providers/hotel-awards/explicit-windows.js"
 import { executeWindowPlan } from "./providers/hotel-awards/discover.js"
 import { loadHotelAwardsConfig } from "./providers/hotel-awards/gondola.js"
-import { RoameHotelAwardsProvider } from "./providers/hotel-awards/roame.js"
+import { resolveBbox, RoameHotelAwardsProvider } from "./providers/hotel-awards/roame.js"
 import { loadStayUniverse } from "./stays/registry.js"
 import { loadStaysConfig } from "./stays/config.js"
 import { listStayWindows } from "./stays/windows.js"
@@ -481,26 +485,225 @@ const server = http.createServer(async (req, res) => {
     return
   }
 
-  // Route: GET /api/hotel-awards/stayplan — consecutive-night stay optimizer
-  // V1: a READ-ONLY projection over STORED award observations (no searches,
-  // no writes, no observations created). Edges are exact observation ranges
-  // only; per-night averages never become totals; program totals stay
-  // separate. Ranking: coverage, then switches, then valid stated-points
-  // dominance, then a deterministic signature.
+  // Route: GET /api/balances — the LOCAL AwardWallet snapshot, or an explicit
+  // "none" state carrying the vendor's own reason. Never a network call,
+  // never the upstream demo/fallback values; one row per account, nothing
+  // summed. Balances are sensitive: served only on this machine (same gate as
+  // the entitlements write), never cached by the browser.
+  if (url.pathname === "/api/balances") {
+    if (req.method !== "GET") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "GET" })
+      res.end(JSON.stringify({ error: "GET only" }))
+      return
+    }
+    const remote = req.socket.remoteAddress || ""
+    const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1"
+    const trusted = TRUSTED_ORIGINS.length > 0 && TRUSTED_ORIGINS.includes(req.headers.origin || "")
+    if (!isLoopback && !trusted) {
+      res.writeHead(403, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "balances are served only on this machine" }))
+      return
+    }
+    try {
+      res.writeHead(200, { "Content-Type": "application/json", "Cache-Control": "no-store" })
+      res.end(JSON.stringify(balancesSnapshotPayload(getDb()), null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json", "Cache-Control": "no-store" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: GET /api/hotel-awards/stayplan — consecutive-night stay optimizer,
+  // perk-aware V2: a READ-ONLY projection over STORED award observations (no
+  // searches, no writes, no observations created). Edges are exact
+  // observation ranges only; per-night averages never become totals; program
+  // totals stay separate. Ranking by ?goal (life_perks default): only
+  // APPLIED, VERIFIED arithmetic perks affect it, and only through their
+  // rule-supported free-night COUNT — never a points value. ?include filters
+  // which arithmetic perk mechanics participate (excluded = not ranked, not
+  // shown). A perk-config problem degrades to the perk-free V1 plan plus a
+  // stated perksError — never a broken read-out.
   if (url.pathname === "/api/hotel-awards/stayplan") {
     try {
       const checkIn = url.searchParams.get("checkIn")
       const checkOut = url.searchParams.get("checkOut")
       if (!checkIn || !checkOut) throw new BadRequest("checkIn and checkOut are required")
-      const observations = listHotelAwards(getDb(), { limit: 2000 })
-      const result = buildStayPlan(observations, checkIn, checkOut)
+      const goalParam = url.searchParams.get("goal") ?? "life_perks"
+      if (!STAY_PLAN_GOALS.includes(goalParam as StayPlanGoal)) {
+        throw new BadRequest(`goal must be one of ${STAY_PLAN_GOALS.join(", ")}`)
+      }
+      const goal = goalParam as StayPlanGoal
+      const includeParam = url.searchParams.get("include")
+      const include = new Set<PerkIncludeCategory>()
+      if (includeParam === null) { for (const c of PERK_INCLUDE_CATEGORIES) include.add(c) }
+      else if (includeParam.trim() !== "") {
+        for (const tok of includeParam.split(",").map(s => s.trim())) {
+          if (!PERK_INCLUDE_CATEGORIES.includes(tok as PerkIncludeCategory)) {
+            throw new BadRequest(`unknown include category "${tok}" — valid: ${PERK_INCLUDE_CATEGORIES.join(", ")}`)
+          }
+          include.add(tok as PerkIncludeCategory)
+        }
+      }
+      let perkContext: StayPlanPerkContext | undefined
+      let perksError: string | null = null
+      let entitlements: EntitlementsConfig | null = null
+      try {
+        const rules = loadHotelPerkRules()
+        entitlements = loadEntitlements()
+        perkContext = { rules: filterRulesByInclude(rules, include), entitlements }
+      } catch (err) {
+        perksError = (err as Error).message
+      }
+      // Read-only edge filters: ?programs=A,B keeps only those programs and
+      // ?exclude=provider|ref,… drops hotels ("swap this hotel"). They only
+      // REMOVE evidence — never a search, never a guess.
+      const filters: { programs: string[]; excludeProperties: string[] } = { programs: [], excludeProperties: [] }
+      const programsParam = url.searchParams.get("programs")
+      if (programsParam !== null && programsParam.trim() !== "") {
+        for (const tok of programsParam.split(",").map(s => s.trim())) {
+          if (!/^[A-Z0-9_]+$/.test(tok)) throw new BadRequest(`unknown program token "${tok}"`)
+          filters.programs.push(tok)
+        }
+      }
+      const excludeParam = url.searchParams.get("exclude")
+      if (excludeParam !== null && excludeParam.trim() !== "") {
+        const toks = excludeParam.split(",").map(s => s.trim())
+        if (toks.length > 50) throw new BadRequest("invalid exclude token list — at most 50 hotels")
+        for (const tok of toks) {
+          if (!/^[a-z0-9_]+\|[^,|]{1,64}$/.test(tok)) throw new BadRequest(`invalid exclude token "${tok}"`)
+          filters.excludeProperties.push(tok)
+        }
+      }
+      const db = getDb()
+      // Every stored observation whose exact window lies inside the range —
+      // selected in SQL, so no row cap can silently hide in-range evidence
+      // behind an "impossible with stored observations" claim.
+      const observations = listHotelAwards(db, { limit: 100000, range: { from: checkIn, to: checkOut } })
+      const result = buildStayPlan(observations, checkIn, checkOut, { goal, perkContext, filters })
+      // Booking navigation from the STORED locators (plain SELECTs, same
+      // honesty ladder as /api/hotel-awards) — attached after ranking.
+      attachSegmentNavigation(db, result, observations)
       res.writeHead(200, { "Content-Type": "application/json" })
       res.end(JSON.stringify({
-        disclaimer: "Read-only plan over stored observations. Segments are valid ONLY for their exact observed dates. Per-night figures stay per-night — no stay total is ever synthesized from them; program totals sum SOURCE-STATED full-stay totals of one program only, and no cross-program total exists.",
+        disclaimer: "Read-only plan over stored observations. Segments are valid ONLY for their exact observed dates. Per-night figures stay per-night — no stay total is ever synthesized from them; program totals sum SOURCE-STATED full-stay totals of one program only, and no cross-program total exists. Perk states rest on DECLARED entitlements (never inferred); an applied perk contributes a rule-supported free-night COUNT only — its points value is never invented and no discounted total is shown.",
+        generatedAt: new Date().toISOString(),
+        include: [...include].sort(),
+        perksError,
+        heldEntitlements: entitlements ? { held: entitlements.held, certificates: entitlements.certificates } : null,
         ...result,
       }, null, 2))
     } catch (err) {
       res.writeHead(400, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: (err as Error).message }))
+    }
+    return
+  }
+
+  // Route: /api/hotel-awards/entitlements — DECLARED entitlements read/write.
+  // GET returns the declaration plus the closed key catalog the rules can
+  // consume. POST replaces held.* and certificates[] (declaration is the ONE
+  // legitimate user write here — nothing is ever inferred) behind the same
+  // three gates as the anomaly-feedback write: loopback/trusted-origin only,
+  // JSON only, POST never advertised cross-origin. Validation refuses loudly.
+  if (url.pathname === "/api/hotel-awards/entitlements") {
+    if (req.method === "GET") {
+      try {
+        const rules = loadHotelPerkRules()
+        const ents = loadEntitlements()
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({
+          disclaimer: "Entitlements are DECLARED by you and never inferred. A perk is eligible only when its exact key is declared held here.",
+          held: ents.held,
+          certificates: ents.certificates,
+          purchasable: ents.purchasable,
+          catalog: entitlementKeyCatalog(rules),
+        }, null, 2))
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: (err as Error).message }))
+      }
+      return
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "GET, POST" })
+      res.end(JSON.stringify({ error: "GET or POST only" }))
+      return
+    }
+    const remote = req.socket.remoteAddress || ""
+    const isLoopback = remote === "127.0.0.1" || remote === "::1" || remote === "::ffff:127.0.0.1"
+    const trustedWrite = TRUSTED_ORIGINS.length > 0 && TRUSTED_ORIGINS.includes(req.headers.origin || "")
+    if (!isLoopback && !trustedWrite) {
+      console.warn(`⚠️ Blocked non-loopback entitlements write from ${remote}`)
+      res.writeHead(403, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "entitlements may only be declared from this machine" }))
+      return
+    }
+    if (!(req.headers["content-type"] || "").includes("application/json")) {
+      res.writeHead(415, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "Content-Type must be application/json" }))
+      return
+    }
+    let entBody = ""
+    let entTooLarge = false
+    req.on("data", chunk => {
+      entBody += chunk
+      if (entBody.length > 16384) { entTooLarge = true; req.destroy() }
+    })
+    req.on("end", () => {
+      if (entTooLarge) return
+      try {
+        const payload = JSON.parse(entBody || "{}")
+        const current = loadEntitlements(true)
+        // The declaration must be COMPLETE and explicit: a body missing held.*
+        // is refused, never coerced to an empty declaration (which would wipe
+        // what the user declared).
+        const held = payload.held
+        if (!held || typeof held !== "object" || !Array.isArray(held.memberships) || !Array.isArray(held.statuses) || !Array.isArray(held.cards)) {
+          throw new BadRequest("held must be an object with memberships, statuses and cards arrays — a missing declaration is refused, not emptied")
+        }
+        if (payload.certificates !== undefined && !Array.isArray(payload.certificates)) {
+          throw new BadRequest("certificates must be an array when present")
+        }
+        const asKeys = (v: unknown[]): string[] => v.slice(0, 50).map(String)
+        const next: EntitlementsConfig = {
+          ...current,
+          updated: new Date().toISOString().slice(0, 10),
+          held: {
+            memberships: asKeys(held.memberships),
+            statuses: asKeys(held.statuses),
+            cards: asKeys(held.cards),
+          },
+          certificates: Array.isArray(payload.certificates)
+            ? payload.certificates.slice(0, 50).map((c: any) => ({
+                key: String(c?.key ?? ""), program: String(c?.program ?? ""),
+                quantity: Number(c?.quantity), ...(c?.note ? { note: String(c.note).slice(0, 200) } : {}),
+              }))
+            : current.certificates,
+        }
+        const saved = saveEntitlements(next)                 // refuses loudly on invalid keys
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ ok: true, held: saved.held, certificates: saved.certificates }))
+      } catch (err) {
+        res.writeHead(400, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: (err as Error).message }))
+      }
+    })
+    return
+  }
+
+  // Route: GET /api/hotel-awards/status — data-status pre-flight for the
+  // planner: Roame session validity PER THE SAVED FILE (only its expiry is
+  // read — the server's 401 stays the authority), configured destinations,
+  // stored-evidence age and the last Roame run outcome. Zero provider calls,
+  // zero writes, no credential values or paths in the payload. It warns,
+  // never gates — the provider's structured states remain the truth.
+  if (url.pathname === "/api/hotel-awards/status") {
+    try {
+      res.writeHead(200, { "Content-Type": "application/json" })
+      res.end(JSON.stringify(hotelAwardsStatus(getDb(), loadHotelAwardsConfig()), null, 2))
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
     return
@@ -584,6 +787,87 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(status, { "Content-Type": "application/json" })
       res.end(JSON.stringify({ error: (err as Error).message }))
     }
+    return
+  }
+
+  // Route: POST /api/hotel-awards/recheck-windows — EXPLICIT re-observation
+  // of arbitrary exact (checkIn, nights) windows: a winning plan's own
+  // segments ("re-check this plan") or its uncovered gap runs ("search the
+  // uncovered nights"). Same executor and Roame provider as discovery, no
+  // provider behavior changed; each window is an independent exact-window
+  // observation appended under its dedupe key — never extrapolated, never a
+  // confirmation of an earlier quote. Two-step by design: body.preview=true
+  // answers with the exact windows + the maximum HTTP calls and constructs NO
+  // provider; only the second, explicit POST spends calls. POST-only, JSON
+  // only, body-capped; an unconfigured destination is refused up front
+  // (never geocoded); blocked stops the run with no retries.
+  if (url.pathname === "/api/hotel-awards/recheck-windows") {
+    if (req.method !== "POST") {
+      res.writeHead(405, { "Content-Type": "application/json", Allow: "POST" })
+      res.end(JSON.stringify({ error: "POST only — re-check spends provider calls and requires explicit action" }))
+      return
+    }
+    if (!(req.headers["content-type"] || "").includes("application/json")) {
+      res.writeHead(415, { "Content-Type": "application/json" })
+      res.end(JSON.stringify({ error: "Content-Type must be application/json" }))
+      return
+    }
+    let rcBody = ""
+    let rcTooLarge = false
+    req.on("data", chunk => {
+      rcBody += chunk
+      if (rcBody.length > 16384) { rcTooLarge = true; req.destroy() }
+    })
+    req.on("end", async () => {
+      if (rcTooLarge) return
+      try {
+        const payload = JSON.parse(rcBody || "{}")
+        const location = String(payload.location ?? "").trim()
+        const haCfg = loadHotelAwardsConfig()
+        if (!location || !haCfg.roame || !resolveBbox(haCfg.roame, location)) {
+          throw new BadRequest(`no configured map bbox for location "${location}" — add it to config roame.locations; refusing to geocode or guess a bounding box`)
+        }
+        let plan
+        try {
+          plan = buildExplicitWindowPlan(Array.isArray(payload.windows) ? payload.windows : [], {
+            maxWindows: haCfg.roame.discovery?.maxWindowsPerRun ?? 8,
+          })
+        } catch (err) {
+          throw new BadRequest((err as Error).message)
+        }
+        const maxPages = haCfg.roame.search.maxPages ?? 1
+        const roameSession = roameHotelSessionHealth(haCfg)
+        if (payload.preview === true) {
+          res.writeHead(200, { "Content-Type": "application/json" })
+          res.end(JSON.stringify({
+            preview: true,
+            disclaimer: "Preview only — zero provider calls were made. Each window is an independent exact-window Roame query; results never extend to neighbouring nights and per-night averages never become stay totals.",
+            location, plan,
+            maxHttpCalls: plan.windows.length * maxPages,
+            maxPagesPerWindow: maxPages,
+            roameSession,
+          }, null, 2))
+          return
+        }
+        const adults = Number(payload.adults)
+        const summary = await executeWindowPlan(getDb(), new RoameHotelAwardsProvider(haCfg), plan, {
+          location,
+          adults: Number.isInteger(adults) && adults >= 1 ? adults : 2,
+          politenessMs: haCfg.budget.politenessMs,
+        })
+        // Provider error strings may name the credentials file — redacted
+        // before they leave the server.
+        for (const r of summary.results) {
+          if (typeof r.error === "string") r.error = redactCredentialPaths(r.error, haCfg) ?? undefined
+        }
+        res.writeHead(200, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ location, plan, summary, roameSession }, null, 2))
+      } catch (err) {
+        const status = err instanceof BadRequest ? 400 : 500
+        res.writeHead(status, { "Content-Type": "application/json" })
+        res.end(JSON.stringify({ error: (err as Error).message }))
+      }
+    })
     return
   }
 
